@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Orion"
+version = "0.1.0"
+description = "A local multi-user Personal Knowledge RAG using Ollama"
+authors = [
+    { name="Ralf Wadee L. Hernandez", email="ralf.hernandez090102@gmail.com" }
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "ollama",
+    "langchain",
+    "langchain-community",
+    "faiss-cpu",
+    "pandas",
+    "python-docx",
+    "python-pptx",
+    "openpyxl",
+    "pypdf",
+    "tqdm",
+    "rich"
+]
+
+[tool.setuptools]
+packages = ["app"]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "ruff",
+    "pytest",
+    "pre-commit"
+]
+
+
+[tool.black]
+line-length = 88
+target-version = ['py310']
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

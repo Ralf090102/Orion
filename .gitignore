@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# VSCode
+.vscode/
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Logs & temp files
+*.log
+*.tmp
+*.temp
+*.swp
+.DS_Store
+
+# FAISS vector store
+data/vectors/
+*.faiss
+*.fvecs
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+
+# Test artifacts
+coverage.xml
+htmlcov/
+.pytest_cache/
+test-results/
+
+# Local data
+data/raw/
+data/processed/
+
+# OS-specific
+Thumbs.db
+
+# Ollama model cache
+~/.ollama/
+
+# Temporary scratch or dump files
+*.dump

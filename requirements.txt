@@ -1,0 +1,23 @@
+# Core
+ollama
+langchain
+langchain-community
+langchain-text-splitters
+
+# Document loaders
+pypdf
+python-docx
+openpyxl
+
+# Embeddings & vectorstore
+faiss-cpu
+
+# CLI & utilities
+typer
+rich
+
+# Dev tools
+black
+ruff
+pytest
+pre-commit
