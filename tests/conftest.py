@@ -4,6 +4,13 @@ Pytest configuration and shared fixtures for Orion tests.
 
 import pytest
 from unittest.mock import patch
+from langchain.schema import Document
+
+
+class Doc:
+    def __init__(self, content, meta):
+        self.page_content = content
+        self.metadata = meta
 
 
 @pytest.fixture
@@ -39,6 +46,12 @@ def fake_docs():
     with a 'page_content' attribute.
     """
     return [
-        type("Doc", (), {"page_content": "Content A"}),
-        type("Doc", (), {"page_content": "Content B"}),
+        Document(
+            page_content="Document 1 content",
+            metadata={"source": "file1.txt", "page": 1},
+        ),
+        Document(
+            page_content="Document 2 content",
+            metadata={"source": "file2.txt", "page": 2},
+        ),
     ]

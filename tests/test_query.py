@@ -14,9 +14,9 @@ class TestFormatContext:
 
     def test_formats_multiple_documents(self, fake_docs):
         """Should concatenate document contents."""
-        result = format_context(fake_docs)
-        assert "Content A" in result
-        assert "Content B" in result
+        result, sources = format_context(fake_docs)
+        assert "Document 1 content" in result
+        assert "Document 2 content" in result
 
 
 class TestCreatePrompt:
