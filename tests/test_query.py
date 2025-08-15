@@ -10,7 +10,7 @@ class TestFormatContext:
 
     def test_empty_documents_returns_empty_string(self):
         """Should return empty string when no documents are passed."""
-        assert format_context([]) == ""
+        assert format_context([])[0] == ""
 
     def test_formats_multiple_documents(self, fake_docs):
         """Should concatenate document contents."""
