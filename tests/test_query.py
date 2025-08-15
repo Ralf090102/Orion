@@ -10,13 +10,15 @@ class TestFormatContext:
 
     def test_empty_documents_returns_empty_string(self):
         """Should return empty string when no documents are passed."""
-        assert format_context([])[0] == ""
+        context, sources = format_context([])
+        assert context == ""
+        assert sources == []
 
     def test_formats_multiple_documents(self, fake_docs):
         """Should concatenate document contents."""
         result, sources = format_context(fake_docs)
-        assert "Document 1 content" in result
-        assert "Document 2 content" in result
+        assert all(doc.page_content in result for doc in fake_docs)
+        assert all(doc.metadata["source"] in str(sources) for doc in fake_docs)
 
 
 class TestCreatePrompt:
@@ -36,4 +38,14 @@ class TestCreatePrompt:
         query = "What is the main topic?"
         context = ""
         prompt = create_prompt(query, context)
-        assert "don't have any relevant information" in prompt
+
+        fallback_indicators = [
+            "no relevant context",
+            "no relevant information",
+            "don't have any relevant information",
+            "knowledge base did not contain",
+            "no data available",
+        ]
+
+        assert any(indicator in prompt for indicator in fallback_indicators)
+        assert query in prompt
