@@ -1,8 +1,8 @@
-# 🌟 Orion - Local RAG Pipeline
+# Orion - Local RAG Pipeline
 
 A powerful, local Retrieval-Augmented Generation (RAG) system that allows you to query your documents using Large Language Models (LLMs) through Ollama.
 
-## ✨ Features
+## Features
 
 - 📁 **Multi-format Document Support**: PDF, DOCX, Excel (.xlsx, .xls), and TXT files
 - 🔍 **Intelligent Document Retrieval**: FAISS-powered similarity search with scoring
@@ -228,14 +228,6 @@ Orion/
 - **Chunk Size**: Larger chunks (1500-2000) for detailed answers, smaller chunks (500-1000) for specific facts
 - **Overlap**: 10-20% of chunk size for good continuity
 - **Retrieval K**: Start with 3-5, increase for more comprehensive answers
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 🙏 Acknowledgments
 
