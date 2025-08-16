@@ -19,7 +19,7 @@ from app.utils import (
     create_progress_bar,
 )
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain_ollama import OllamaEmbeddings
 from langchain_community.document_loaders import (
     PyPDFLoader,
     Docx2txtLoader,
@@ -67,13 +67,13 @@ def load_excel_with_pandas(file_path: Path) -> list[Document]:
 
 def get_loader_for_file(file_path: Path):
     """
-    Returns appropriate document loader for file type.
+    Returns the appropriate document loader for a given file type.
 
     Args:
-        file_path: Path to the file
+        file_path (Path): Path to the file.
 
     Returns:
-        Document loader instance or None if unsupported
+        Document loader instance or None if unsupported.
     """
     suffix = file_path.suffix.lower()
 
@@ -120,10 +120,10 @@ def load_documents(folder_path: str) -> List[Document]:
         log_error(str(e))
         return []
 
-    # Get list of supported files
+    # Recursively get list of supported files in all subfolders
     supported_files = [
         f
-        for f in folder.glob("*")
+        for f in folder.rglob("*")
         if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
     ]
 
@@ -180,118 +180,254 @@ def build_vectorstore(
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
     embedding_model: str = EMBEDDING_MODEL,
-    mode: str = "rebuild",  # or "append"
-) -> Optional[FAISS]:
+    mode: str = "rebuild",  # or "increment"
+):
     """
-    Splits documents, creates embeddings, and saves FAISS index locally.
+    Builds or updates a FAISS vectorstore from documents in a folder.
 
     Args:
-        folder_path: Path to folder containing documents
-        persist_path: Path to save vectorstore
-        chunk_size: Size of text chunks for splitting
-        chunk_overlap: Overlap between chunks
-        embedding_model: Ollama embedding model to use
-        mode: Mode for building the vectorstore ("rebuild" or "append")
+        folder_path (str): Path to folder containing documents.
+        persist_path (str): Path to save vectorstore.
+        chunk_size (int): Size of text chunks for splitting.
+        chunk_overlap (int): Overlap between chunks.
+        embedding_model (str): Ollama embedding model to use.
+        mode (str): 'rebuild' to wipe and rebuild, 'increment' to update existing index.
 
     Returns:
-        FAISS vectorstore or None if failed
+        FAISS vectorstore or None if failed.
+    """
+    if mode == "rebuild":
+        return rebuild_vectorstore(
+            folder_path, persist_path, chunk_size, chunk_overlap, embedding_model
+        )
+    elif mode == "increment":
+        return incremental_vectorstore(
+            folder_path, persist_path, chunk_size, chunk_overlap, embedding_model
+        )
+    else:
+        log_error(f"Invalid mode '{mode}'. Use 'rebuild' or 'increment'.")
+        return None
+
+
+@timer
+def rebuild_vectorstore(
+    folder_path: str,
+    persist_path: str = "vectorstore",
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+    embedding_model: str = EMBEDDING_MODEL,
+) -> Optional[FAISS]:
+    """
+    Wipes and rebuilds the FAISS vectorstore from all documents in the folder.
+
+    Args:
+        folder_path (str): Path to folder containing documents.
+        persist_path (str): Path to save vectorstore.
+        chunk_size (int): Size of text chunks for splitting.
+        chunk_overlap (int): Overlap between chunks.
+        embedding_model (str): Ollama embedding model to use.
+
+    Returns:
+        Optional[FAISS]: The rebuilt FAISS vectorstore, or None if failed.
     """
     try:
-        # Validate inputs
         ensure_directory(persist_path)
 
-        # Load documents
         docs = load_documents(folder_path)
         if not docs:
             log_warning("No documents loaded. Aborting ingestion.")
             return None
 
-        # Normalize document content and metadata
         docs = normalize_documents(docs)
 
-        log_info(
-            f"Splitting {len(docs)} documents into chunks (size={chunk_size}, overlap={chunk_overlap})..."
-        )
+        log_info(f"Splitting {len(docs)} documents into chunks...")
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""],
         )
         split_docs = splitter.split_documents(docs)
-        log_info(f"Created {len(split_docs)} text chunks")
-
-        if not split_docs:
-            log_error("No text chunks created after splitting")
-            return None
-
-        # Deduplicate documents
         split_docs = dedupe_documents_by_content(split_docs)
-        log_info(f"After dedupe: {len(split_docs)} unique chunks")
+        log_info(f"Final chunk count: {len(split_docs)}")
 
-        log_info(f"Generating embeddings with '{embedding_model}'...")
-        try:
-            embeddings = OllamaEmbeddings(model=embedding_model)
+        embeddings = OllamaEmbeddings(model=embedding_model)
 
-            if mode == "append" and Path(persist_path).exists():
-                from langchain_community.vectorstores import FAISS
+        with create_progress_bar("Generating embeddings") as progress:
+            task = progress.add_task("Embedding...", total=len(split_docs))
+            orig_embed_documents = embeddings.embed_documents
 
-                existing_meta = read_index_meta(persist_path)
-                if (
-                    existing_meta
-                    and existing_meta.get("embedding_model") != embedding_model
-                ):
-                    log_warning(
-                        f"Embedding model mismatch (existing={existing_meta.get('embedding_model')} "
-                        f"vs new={embedding_model}); falling back to rebuild."
-                    )
-                    mode = "rebuild"
+            def embed_documents_with_progress(texts):
+                results = []
+                for t in texts:
+                    results.append(orig_embed_documents([t])[0])
+                    progress.advance(task)
+                return results
 
-            if mode == "append" and Path(persist_path).exists():
-                try:
-                    vectorstore = FAISS.load_local(
-                        persist_path,
-                        embeddings=embeddings,
-                        allow_dangerous_deserialization=True,
-                    )
-                    vectorstore.add_documents(split_docs)
-                    log_info("Appended new chunks to existing index")
-                except Exception as e:
-                    log_warning(f"Append failed ({e}); rebuilding index")
-                    vectorstore = FAISS.from_documents(split_docs, embeddings)
-            else:
-                vectorstore = FAISS.from_documents(split_docs, embeddings)
+            embeddings.embed_documents = embed_documents_with_progress
+            vectorstore = FAISS.from_documents(split_docs, embeddings)
+        vectorstore.save_local(persist_path)
 
-            vectorstore.save_local(persist_path)
-            write_index_meta(
-                persist_path,
-                embedding_model=embedding_model,
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-            )
-            log_success(
-                f"Vectorstore with {len(split_docs)} chunks saved to '{persist_path}'"
-            )
-            return vectorstore
-
-        except Exception as e:
-            log_error(f"Failed to initialize embeddings: {e}")
-            log_info("Make sure Ollama is running and the model is available")
-            return None
+        write_index_meta(
+            persist_path,
+            embedding_model=embedding_model,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        log_success(f"Rebuilt vectorstore with {len(split_docs)} chunks")
+        return vectorstore
 
     except Exception as e:
-        log_error(f"Vectorstore creation failed: {e}")
+        log_error(f"Rebuild failed: {e}")
+        return None
+
+
+@timer
+def incremental_vectorstore(
+    folder_path: str,
+    persist_path: str = "vectorstore",
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+    embedding_model: str = EMBEDDING_MODEL,
+) -> Optional[FAISS]:
+    """
+    Incrementally updates an existing FAISS index:
+    - Adds new/changed documents
+    - Removes deleted documents
+
+    Args:
+        folder_path (str): Path to folder containing documents.
+        persist_path (str): Path to save vectorstore.
+        chunk_size (int): Size of text chunks for splitting.
+        chunk_overlap (int): Overlap between chunks.
+        embedding_model (str): Ollama embedding model to use.
+
+    Returns:
+        Optional[FAISS]: The updated FAISS vectorstore, or None if failed.
+    """
+    try:
+        ensure_directory(persist_path)
+
+        docs = load_documents(folder_path)
+        if not docs:
+            log_warning("No documents loaded. Aborting ingestion.")
+            return None
+        docs = normalize_documents(docs)
+
+        log_info(f"Splitting {len(docs)} documents into chunks...")
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""],
+        )
+        split_docs = splitter.split_documents(docs)
+        split_docs = dedupe_documents_by_content(split_docs)
+
+        embeddings = OllamaEmbeddings(model=embedding_model)
+
+        if Path(persist_path).exists():
+            try:
+                vectorstore = FAISS.load_local(
+                    persist_path,
+                    embeddings=embeddings,
+                    allow_dangerous_deserialization=True,
+                )
+                log_info("Loaded existing FAISS index")
+
+                # Detect existing doc IDs
+                # existing_meta = read_index_meta(persist_path)
+                existing_docs = {
+                    d.metadata.get("source", "")
+                    for d in vectorstore.docstore._dict.values()
+                }
+
+                current_docs = {d.metadata.get("source", "") for d in split_docs}
+
+                # Handle deletions
+                deleted_docs = existing_docs - current_docs
+                if deleted_docs:
+                    log_info(f"Pruning {len(deleted_docs)} deleted files from index")
+                    keys_to_delete = [
+                        k
+                        for k, v in vectorstore.docstore._dict.items()
+                        if v.metadata.get("source", "") in deleted_docs
+                    ]
+                    for k in keys_to_delete:
+                        del vectorstore.docstore._dict[k]
+                        if k in vectorstore.index_to_docstore_id:
+                            del vectorstore.index_to_docstore_id[k]
+
+                # Add/update docs
+                new_docs = [
+                    d
+                    for d in split_docs
+                    if d.metadata.get("source", "") not in existing_docs
+                ]
+                if new_docs:
+                    with create_progress_bar("Adding new chunks") as progress:
+                        task = progress.add_task("Embedding...", total=len(new_docs))
+                        orig_embed_documents = embeddings.embed_documents
+
+                        def embed_documents_with_progress(texts):
+                            results = []
+                            for t in texts:
+                                results.append(orig_embed_documents([t])[0])
+                                progress.advance(task)
+                            return results
+
+                        embeddings.embed_documents = embed_documents_with_progress
+                        vectorstore.add_documents(new_docs)
+                    log_info(f"Added {len(new_docs)} new chunks")
+
+            except Exception as e:
+                log_warning(f"Incremental load failed ({e}); rebuilding index")
+                return rebuild_vectorstore(
+                    folder_path,
+                    persist_path,
+                    chunk_size,
+                    chunk_overlap,
+                    embedding_model,
+                )
+        else:
+            log_info("No existing index found, creating new one")
+
+            with create_progress_bar("Generating embeddings") as progress:
+                task = progress.add_task("Embedding...", total=len(split_docs))
+                orig_embed_documents = embeddings.embed_documents
+
+                def embed_documents_with_progress(texts):
+                    results = []
+                    for t in texts:
+                        results.append(orig_embed_documents([t])[0])
+                        progress.advance(task)
+                    return results
+
+                embeddings.embed_documents = embed_documents_with_progress
+                vectorstore = FAISS.from_documents(split_docs, embeddings)
+
+        vectorstore.save_local(persist_path)
+        write_index_meta(
+            persist_path,
+            embedding_model=embedding_model,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        log_success("Incremental update complete")
+        return vectorstore
+
+    except Exception as e:
+        log_error(f"Incremental update failed: {e}")
         return None
 
 
 def normalize_documents(docs: list[Document]) -> list[Document]:
     """
-    Normalize document content and metadata.
+    Normalizes document content and metadata for consistency.
 
     Args:
-        docs: List of documents to normalize.
+        docs (list[Document]): List of documents to normalize.
 
     Returns:
-        List of normalized documents.
+        list[Document]: List of normalized documents.
     """
     norm = []
     for d in docs:
@@ -311,13 +447,13 @@ def normalize_documents(docs: list[Document]) -> list[Document]:
 
 def dedupe_documents_by_content(docs: list[Document]) -> list[Document]:
     """
-    Remove duplicate documents based on their content.
+    Removes duplicate documents based on their content hash.
 
     Args:
-        docs: List of documents to deduplicate.
+        docs (list[Document]): List of documents to deduplicate.
 
     Returns:
-        List of deduplicated documents.
+        list[Document]: List of deduplicated documents.
     """
     seen = set()
     out = []
@@ -334,13 +470,16 @@ def write_index_meta(
     persist_path: str, *, embedding_model: str, chunk_size: int, chunk_overlap: int
 ):
     """
-    Write metadata for the index.
+    Writes metadata for the FAISS index to disk.
 
     Args:
-        persist_path: Path to the directory where metadata will be saved.
-        embedding_model: Name of the embedding model used.
-        chunk_size: Size of the document chunks.
-        chunk_overlap: Overlap between document chunks.
+        persist_path (str): Path to the directory where metadata will be saved.
+        embedding_model (str): Name of the embedding model used.
+        chunk_size (int): Size of the document chunks.
+        chunk_overlap (int): Overlap between document chunks.
+
+    Returns:
+        None
     """
     meta = {
         "created_at": time.time(),
@@ -354,13 +493,13 @@ def write_index_meta(
 
 def read_index_meta(persist_path: str) -> Optional[dict]:
     """
-    Read metadata for the index.
+    Reads metadata for the FAISS index from disk.
 
     Args:
-        persist_path: Path to the directory where metadata is stored.
+        persist_path (str): Path to the directory where metadata is stored.
 
     Returns:
-        Dictionary containing the metadata, or None if not found.
+        dict or None: Dictionary containing the metadata, or None if not found.
     """
     p = Path(persist_path) / "metadata.json"
     if not p.exists():

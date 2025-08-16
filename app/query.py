@@ -6,7 +6,7 @@ import os
 from typing import List, Optional, Tuple
 from app.utils import log_info, log_warning, log_error, log_success
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain_ollama import OllamaEmbeddings
 from langchain.schema import Document
 from app.llm import generate_response
 

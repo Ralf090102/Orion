@@ -2,12 +2,14 @@
 ollama
 langchain
 langchain-community
+langchain-ollama
 langchain-text-splitters
 
 # Document loaders
 pypdf
 python-docx
 openpyxl
+docx2txt
 
 # Embeddings & vectorstore
 faiss-cpu
