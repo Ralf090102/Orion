@@ -18,19 +18,68 @@ DEFAULT_SIMILARITY_THRESHOLD = 0.7
 
 SUPPORTED_EXTENSIONS = {
     # Documents
-    ".pdf", ".docx", ".xlsx", ".xls", ".txt", ".csv", ".md", ".rtf",
+    ".pdf",
+    ".docx",
+    ".xlsx",
+    ".xls",
+    ".txt",
+    ".csv",
+    ".md",
+    ".rtf",
     # Images (for future OCR/vision)
-    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".bmp",
+    ".tiff",
     # Code files
-    ".py", ".js", ".ts", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".go", ".rs", ".php",
-    ".html", ".css", ".xml", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",
-    ".sql", ".sh", ".bat", ".ps1", ".r", ".m", ".swift", ".kt", ".dart",
+    ".py",
+    ".js",
+    ".ts",
+    ".java",
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".cs",
+    ".go",
+    ".rs",
+    ".php",
+    ".html",
+    ".css",
+    ".xml",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".sql",
+    ".sh",
+    ".bat",
+    ".ps1",
+    ".r",
+    ".m",
+    ".swift",
+    ".kt",
+    ".dart",
     # Text/Documentation
-    ".org", ".rst", ".tex", ".log", ".conf", ".properties",
+    ".org",
+    ".rst",
+    ".tex",
+    ".log",
+    ".conf",
+    ".properties",
     # Email (common formats)
-    ".eml", ".msg", ".mbox",
+    ".eml",
+    ".msg",
+    ".mbox",
     # Archives (we can extract and process contents)
-    ".zip", ".tar", ".gz",
+    ".zip",
+    ".tar",
+    ".gz",
 }
 
 DEFAULT_VECTORSTORE_PATH = "vectorstore"
@@ -50,6 +99,7 @@ DEFAULT_MAX_TOKENS = None
 DEFAULT_ENABLE_DEDUPLICATION = True
 DEFAULT_ENABLE_NORMALIZATION = True
 DEFAULT_DEDUPLICATION_THRESHOLD = 0.9
+DEFAULT_VERBOSE = False  # Default to clean, non-verbose output
 
 
 @dataclass
@@ -68,7 +118,8 @@ class Config:
     user_id: str = DEFAULT_USER_ID
     ollama_base_url: str = OLLAMA_BASE_URL
     ollama_timeout: int = OLLAMA_TIMEOUT
-    
+    verbose: bool = DEFAULT_VERBOSE  # Control logging verbosity
+
     enable_deduplication: bool = DEFAULT_ENABLE_DEDUPLICATION
     enable_normalization: bool = DEFAULT_ENABLE_NORMALIZATION
     deduplication_threshold: float = DEFAULT_DEDUPLICATION_THRESHOLD
@@ -95,7 +146,16 @@ class Config:
             user_id=os.getenv("ORION_USER_ID", DEFAULT_USER_ID),
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", OLLAMA_BASE_URL),
             ollama_timeout=int(os.getenv("OLLAMA_TIMEOUT", OLLAMA_TIMEOUT)),
-            enable_deduplication=bool(os.getenv("ORION_ENABLE_DEDUPLICATION", DEFAULT_ENABLE_DEDUPLICATION)),
-            enable_normalization=bool(os.getenv("ORION_ENABLE_NORMALIZATION", DEFAULT_ENABLE_NORMALIZATION)),
-            deduplication_threshold=float(os.getenv("ORION_DEDUPLICATION_THRESHOLD", DEFAULT_DEDUPLICATION_THRESHOLD)),
+            verbose=bool(os.getenv("ORION_VERBOSE", DEFAULT_VERBOSE)),
+            enable_deduplication=bool(
+                os.getenv("ORION_ENABLE_DEDUPLICATION", DEFAULT_ENABLE_DEDUPLICATION)
+            ),
+            enable_normalization=bool(
+                os.getenv("ORION_ENABLE_NORMALIZATION", DEFAULT_ENABLE_NORMALIZATION)
+            ),
+            deduplication_threshold=float(
+                os.getenv(
+                    "ORION_DEDUPLICATION_THRESHOLD", DEFAULT_DEDUPLICATION_THRESHOLD
+                )
+            ),
         )

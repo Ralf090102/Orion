@@ -59,7 +59,7 @@ def handle_ingest(args: argparse.Namespace, cfg: Config) -> bool:
     try:
         # Use user-specific persist path
         user_persist_path = args.persist or cfg.user_persist_path
-        
+
         vectorstore = build_vectorstore(
             folder_path=args.path,
             persist_path=user_persist_path,
@@ -68,7 +68,9 @@ def handle_ingest(args: argparse.Namespace, cfg: Config) -> bool:
         )
 
         if vectorstore:
-            log_success(f"Document ingestion completed successfully for user '{cfg.user_id}'!")
+            log_success(
+                f"Document ingestion completed successfully for user '{cfg.user_id}'!"
+            )
             log_info(f"Vectorstore saved to: {user_persist_path}")
             return True
         else:
@@ -91,24 +93,26 @@ def handle_query(args: argparse.Namespace, cfg: Config) -> bool:
     Returns:
         True if query was successful, False otherwise
     """
-    log_info(f"Querying knowledgebase for user '{cfg.user_id}' with question: {args.question}")
+    log_info(
+        f"Querying knowledgebase for user '{cfg.user_id}' with question: {args.question}"
+    )
 
     try:
         # Use user-specific persist path
         user_persist_path = args.persist or cfg.user_persist_path
-        
+
         result = query_knowledgebase(
             query=args.question,
             persist_path=user_persist_path,
             model=args.model or cfg.llm_model,
             k=args.k or cfg.retrieval_k,
-            use_query_enhancement=not getattr(args, 'no_enhance', False),
+            use_query_enhancement=not getattr(args, "no_enhance", False),
         )
-        
+
         # Handle both old string format and new dict format
         if isinstance(result, dict):
-            answer = result.get('answer', '')
-            sources = result.get('sources', [])
+            answer = result.get("answer", "")
+            sources = result.get("sources", [])
         else:
             answer = result
             sources = []
@@ -122,14 +126,14 @@ def handle_query(args: argparse.Namespace, cfg: Config) -> bool:
             print(f"QUESTION: {args.question}")
             print(f"{'='*60}")
             print(f"ANSWER:\n{answer}")
-            
+
             # Show sources if available
             if sources:
                 print(f"{'='*60}")
                 print("SOURCES:")
                 for i, src in enumerate(sources, 1):
-                    source_path = src.get('source', 'Unknown')
-                    page = src.get('page')
+                    source_path = src.get("source", "Unknown")
+                    page = src.get("page")
                     page_info = f" (page {page})" if page else ""
                     print(f"{i}. {source_path}{page_info}")
             print(f"{'='*60}\n")
@@ -165,11 +169,12 @@ def main() -> None:
         "  %(prog)s models",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    
+
     # Global arguments
     parser.add_argument(
-        "--user", type=str, 
-        help="User ID for workspace isolation (default: from config/env)"
+        "--user",
+        type=str,
+        help="User ID for workspace isolation (default: from config/env)",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -200,8 +205,9 @@ def main() -> None:
         "-k", type=int, help="Number of relevant documents to retrieve"
     )
     query_parser.add_argument(
-        "--no-enhance", action="store_true",
-        help="Disable query enhancement (use basic retrieval only)"
+        "--no-enhance",
+        action="store_true",
+        help="Disable query enhancement (use basic retrieval only)",
     )
 
     # Models command
@@ -209,9 +215,9 @@ def main() -> None:
 
     # Parse arguments
     args = parser.parse_args()
-    
+
     # Update config with user argument if provided
-    if hasattr(args, 'user') and args.user:
+    if hasattr(args, "user") and args.user:
         cfg.user_id = args.user
         log_info(f"Using user workspace: {cfg.user_id}")
 

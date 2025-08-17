@@ -14,21 +14,50 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 console = Console()
 
-
-def log_info(message: str):
-    console.print(f"[bold cyan]ℹ️  {message}[/bold cyan]")
-
-
-def log_success(message: str):
-    console.print(f"[bold green]✅ {message}[/bold green]")
+# Global verbose flag - can be set by config
+_verbose_mode = False
 
 
-def log_warning(message: str):
-    console.print(f"[bold yellow]⚠️  {message}[/bold yellow]")
+def set_verbose_mode(verbose: bool):
+    """Set global verbose mode for logging"""
+    global _verbose_mode
+    _verbose_mode = verbose
 
 
-def log_error(message: str):
-    console.print(f"[bold red]❌ {message}[/bold red]")
+def log_info(message: str, verbose_only: bool = False):
+    """Log info message. If verbose_only=True, only shows in verbose mode."""
+    if not verbose_only or _verbose_mode:
+        console.print(f"[bold cyan]ℹ️  {message}[/bold cyan]")
+
+
+def log_success(message: str, verbose_only: bool = False):
+    """Log success message. If verbose_only=True, only shows in verbose mode."""
+    if not verbose_only or _verbose_mode:
+        console.print(f"[bold green]✅ {message}[/bold green]")
+
+
+def log_warning(message: str, verbose_only: bool = False):
+    """Log warning message. If verbose_only=True, only shows in verbose mode."""
+    if not verbose_only or _verbose_mode:
+        console.print(f"[bold yellow]⚠️  {message}[/bold yellow]")
+
+
+def log_error(message: str, verbose_only: bool = False):
+    """Log error message. If verbose_only=True, only shows in verbose mode."""
+    if not verbose_only or _verbose_mode:
+        console.print(f"[bold red]❌ {message}[/bold red]")
+
+
+def log_debug(message: str):
+    """Log debug message - only shows in verbose mode."""
+    if _verbose_mode:
+        console.print(f"[dim]🔍 {message}[/dim]")
+
+
+def log_progress(message: str, verbose_only: bool = False):
+    """Log progress message with special formatting."""
+    if not verbose_only or _verbose_mode:
+        console.print(f"[bold blue]🔄 {message}[/bold blue]")
 
 
 def timer(func):
@@ -41,7 +70,9 @@ def timer(func):
             return func(*args, **kwargs)
         finally:
             end = time.time()
-            log_info(f"{func.__name__} completed in {end - start:.2f}s")
+            log_info(
+                f"{func.__name__} completed in {end - start:.2f}s", verbose_only=True
+            )
 
     return wrapper
 

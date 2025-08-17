@@ -4,21 +4,26 @@ Supports user workspaces, query enhancement, and better error handling.
 """
 
 import sys
-import os
 from pathlib import Path
 from app.ingest import rebuild_vectorstore, incremental_vectorstore
 from app.query import query_knowledgebase
 from app.config import Config
-from app.utils import log_info, log_success, log_error, log_warning, validate_path
+from app.utils import (
+    log_info,
+    log_success,
+    log_error,
+    log_warning,
+    set_verbose_mode,
+)
 from app.llm import get_available_models, check_ollama_connection
 
 
 def print_banner():
     """Print a nice banner for the application"""
-    print("\n" + "="*60)
-    print("🌟 ORION - Enhanced Personal Knowledge RAG")
+    print("\n" + "=" * 60)
+    print(" ORION - Enhanced Personal Knowledge RAG")
     print("   Multi-User | Query Enhancement | Semantic Chunking")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
 
 def get_user_input(prompt: str, default: str = None, valid_options: list = None) -> str:
@@ -27,64 +32,83 @@ def get_user_input(prompt: str, default: str = None, valid_options: list = None)
         display_prompt = f"{prompt} [{default}]: "
     else:
         display_prompt = f"{prompt}: "
-    
+
     if valid_options:
         display_prompt += f" ({'/'.join(valid_options)}) "
-    
+
     while True:
         response = input(display_prompt).strip()
-        
+
         if not response and default:
             return default
-        
+
         if valid_options:
             if response.lower() in [opt.lower() for opt in valid_options]:
                 return response.lower()
             else:
-                print(f"❌ Invalid choice. Please enter one of: {', '.join(valid_options)}")
+                print(
+                    f"❌ Invalid choice. Please enter one of: {', '.join(valid_options)}"
+                )
                 continue
-        
+
         if response or not default:
             return response
-        
+
         print("❌ This field is required.")
 
 
 def check_system_health(config: Config) -> bool:
     """Comprehensive system health check"""
     print("🔍 Running system health checks...")
-    
+
     # Check Ollama connection
     if not check_ollama_connection():
         log_error(f"Cannot connect to Ollama at {config.ollama_base_url}")
         log_info("💡 Make sure Ollama is running: 'ollama serve'")
         return False
     log_success("✅ Ollama connection OK")
-    
+
     # Check available models
     models = get_available_models()
     if not models:
         log_warning("⚠️ No models found in Ollama")
         return False
-    
-    # Check if required models exist
+
+    # Check if required models exist (with fuzzy matching for tags)
     required_models = [config.embedding_model, config.llm_model]
-    missing_models = [model for model in required_models if model not in models]
-    
+    missing_models = []
+
+    for required_model in required_models:
+        # Check for exact match first
+        if required_model in models:
+            continue
+
+        # Check for partial match (e.g., "mistral" matches "mistral:latest")
+        found = any(
+            required_model in available_model
+            or available_model.startswith(required_model + ":")
+            for available_model in models
+        )
+
+        if not found:
+            missing_models.append(required_model)
+
     if missing_models:
         log_warning(f"⚠️ Missing models: {', '.join(missing_models)}")
         print("\n💡 To install missing models:")
         for model in missing_models:
             print(f"   ollama pull {model}")
-        
-        install_missing = get_user_input("\nInstall missing models now?", "y", ["y", "n"])
+
+        install_missing = get_user_input(
+            "\nInstall missing models now?", "y", ["y", "n"]
+        )
         if install_missing == "y":
             return install_models(missing_models)
         else:
             log_warning("Proceeding without missing models - may cause errors")
     else:
         log_success("✅ All required models available")
-    
+
     return True
 
 
@@ -92,10 +116,20 @@ def install_models(models: list) -> bool:
     """Install missing models using ollama"""
     try:
         import subprocess
+
         for model in models:
             log_info(f"📥 Installing {model}...")
-            result = subprocess.run(['ollama', 'pull', model], 
-                                  capture_output=True, text=True, timeout=300)
+
+            # Use proper encoding and error handling for Windows
+            result = subprocess.run(
+                ["ollama", "pull", model],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                encoding="utf-8",
+                errors="replace",  # Replace problematic characters instead of failing
+            )
+
             if result.returncode == 0:
                 log_success(f"✅ {model} installed successfully")
             else:
@@ -114,48 +148,57 @@ def setup_user_workspace(config: Config) -> Config:
     """Setup or select user workspace"""
     print("\n👤 User Workspace Setup")
     print("-" * 30)
-    
+
     # Check for existing workspaces
     base_vectorstore = Path(config.persist_path)
     existing_users = []
-    
+
     if base_vectorstore.exists():
-        existing_users = [d.name for d in base_vectorstore.iterdir() 
-                         if d.is_dir() and not d.name.startswith('.')]
-    
+        existing_users = [
+            d.name
+            for d in base_vectorstore.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+        ]
+
     if existing_users:
         print(f"📁 Found existing workspaces: {', '.join(existing_users)}")
         user_choice = get_user_input("Enter username (new or existing)", config.user_id)
     else:
         print("🆕 No existing workspaces found")
         user_choice = get_user_input("Enter your username", config.user_id)
-    
+
     config.user_id = user_choice
-    
+
     # Show workspace info
     workspace_path = config.user_persist_path
     if Path(workspace_path).exists():
         log_info(f"📂 Using existing workspace: {workspace_path}")
-        
+
         # Count documents in workspace
         try:
             from app.query import load_vectorstore
+
             vs = load_vectorstore(workspace_path, config.embedding_model)
             if vs:
-                doc_count = len(vs.docstore._dict) if hasattr(vs.docstore, '_dict') else "unknown"
+                doc_count = (
+                    len(vs.docstore._dict)
+                    if hasattr(vs.docstore, "_dict")
+                    else "unknown"
+                )
                 log_info(f"📊 Workspace contains ~{doc_count} document chunks")
-        except:
+        except Exception:
             log_info("📊 Workspace exists but couldn't count documents")
     else:
         log_info(f"🆕 Will create new workspace: {workspace_path}")
-    
+
     return config
+
 
 def handle_ingestion(config: Config) -> bool:
     """Enhanced document ingestion with better UX"""
     print("\n📥 Document Ingestion")
     print("-" * 25)
-    
+
     # Get document folder
     while True:
         folder = get_user_input("Enter path to documents folder")
@@ -170,21 +213,25 @@ def handle_ingestion(config: Config) -> bool:
             break
         except Exception as e:
             print(f"❌ Invalid path: {e}")
-    
+
     # Show supported file types
     from app.ingest import SUPPORTED_EXTENSIONS
+
     print(f"\n📋 Supported file types: {', '.join(sorted(SUPPORTED_EXTENSIONS))}")
-    
+
     # Count files in folder
-    supported_files = [f for f in folder_path.rglob("*") 
-                      if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS]
-    
+    supported_files = [
+        f
+        for f in folder_path.rglob("*")
+        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+    ]
+
     if not supported_files:
         log_warning("❌ No supported files found in the specified folder")
         return False
-    
+
     print(f"📊 Found {len(supported_files)} supported files")
-    
+
     # Show sample files
     if len(supported_files) > 5:
         print("📄 Sample files:")
@@ -195,12 +242,14 @@ def handle_ingestion(config: Config) -> bool:
         print("📄 Files to process:")
         for f in supported_files:
             print(f"   {f.name}")
-    
+
     # Choose ingestion mode
-    ingest_mode = get_user_input("Ingestion mode", "increment", ["rebuild", "increment"])
-    
+    ingest_mode = get_user_input(
+        "Ingestion mode", "increment", ["rebuild", "increment"]
+    )
+
     print(f"\n🚀 Starting {ingest_mode} ingestion...")
-    
+
     try:
         if ingest_mode == "rebuild":
             result = rebuild_vectorstore(
@@ -236,14 +285,14 @@ def handle_interactive_query(config: Config):
     """Enhanced interactive query mode with better UX"""
     print("\n💬 Interactive Query Mode")
     print("-" * 30)
-    
+
     # Check if vectorstore exists
     workspace_path = Path(config.user_persist_path)
     if not workspace_path.exists():
         log_error("❌ No vectorstore found for this user")
         log_info("💡 Run ingestion first to create a knowledge base")
         return
-    
+
     # Model selection
     available_models = get_available_models()
     if config.llm_model not in available_models:
@@ -252,10 +301,14 @@ def handle_interactive_query(config: Config):
             print("Available models:")
             for i, model in enumerate(available_models, 1):
                 print(f"  {i}. {model}")
-            model_choice = get_user_input("Select model number or enter model name", 
-                                        str(1) if available_models else config.llm_model)
-            
-            if model_choice.isdigit() and 1 <= int(model_choice) <= len(available_models):
+            model_choice = get_user_input(
+                "Select model number or enter model name",
+                str(1) if available_models else config.llm_model,
+            )
+
+            if model_choice.isdigit() and 1 <= int(model_choice) <= len(
+                available_models
+            ):
                 selected_model = available_models[int(model_choice) - 1]
             else:
                 selected_model = model_choice
@@ -263,15 +316,15 @@ def handle_interactive_query(config: Config):
             selected_model = config.llm_model
     else:
         selected_model = config.llm_model
-    
+
     # Query enhancement options
     print("\n⚙️ Query Enhancement Options:")
     print("  1. Enhanced (recommended) - Uses query expansion, HyDE, multi-retrieval")
     print("  2. Basic - Simple similarity search only")
-    
+
     enhancement_choice = get_user_input("Enhancement mode", "1", ["1", "2"])
-    use_enhancement = (enhancement_choice == "1")
-    
+    use_enhancement = enhancement_choice == "1"
+
     if use_enhancement:
         log_info("🧠 Using enhanced query processing with:")
         print("   • Query expansion for better recall")
@@ -280,7 +333,7 @@ def handle_interactive_query(config: Config):
         print("   • Cross-encoder re-ranking")
     else:
         log_info("🔍 Using basic query processing")
-    
+
     print(f"\n🤖 Using model: {selected_model}")
     print("💡 Tips:")
     print("   • Ask specific questions for better results")
@@ -288,30 +341,30 @@ def handle_interactive_query(config: Config):
     print("   • Type 'stats' to see knowledge base statistics")
     print("   • Type 'exit' to quit")
     print("\n" + "-" * 50)
-    
+
     query_count = 0
     while True:
         question = input("\n❓ Your question: ").strip()
-        
+
         if question.lower() == "exit":
             print("👋 Goodbye!")
             break
-        
+
         if question.lower() == "help":
             show_query_examples()
             continue
-            
+
         if question.lower() == "stats":
             show_knowledge_base_stats(config)
             continue
-        
+
         if not question:
             print("❌ Please enter a question")
             continue
-        
+
         query_count += 1
         print(f"\n🔍 Processing query #{query_count}...")
-        
+
         try:
             result = query_knowledgebase(
                 query=question,
@@ -320,39 +373,41 @@ def handle_interactive_query(config: Config):
                 k=config.retrieval_k,
                 use_query_enhancement=use_enhancement,
             )
-            
+
             # Handle both dict and string results
             if isinstance(result, dict):
-                answer = result.get('answer', 'No answer provided')
-                sources = result.get('sources', [])
+                answer = result.get("answer", "No answer provided")
+                sources = result.get("sources", [])
             else:
                 answer = result
                 sources = []
-            
+
             # Display results
-            print("\n" + "="*60)
+            print("\n" + "=" * 60)
             print("📝 ANSWER:")
-            print("="*60)
+            print("=" * 60)
             print(answer)
-            
+
             # Show sources
             if sources:
-                print("\n" + "="*60)
+                print("\n" + "=" * 60)
                 print("📚 SOURCES:")
-                print("="*60)
+                print("=" * 60)
                 for i, src in enumerate(sources, 1):
-                    source_path = src.get('source', 'Unknown')
-                    page = src.get('page')
+                    source_path = src.get("source", "Unknown")
+                    page = src.get("page")
                     page_info = f" (page {page})" if page else ""
                     print(f"{i}. {Path(source_path).name}{page_info}")
-                    if 'hyperlink' in src and src['hyperlink']:
+                    if "hyperlink" in src and src["hyperlink"]:
                         print(f"   📁 {src['hyperlink']}")
-            
-            print("="*60)
-            
+
+            print("=" * 60)
+
         except Exception as e:
             log_error(f"❌ Query failed: {e}")
-            print("💡 Try rephrasing your question or check if the knowledge base exists")
+            print(
+                "💡 Try rephrasing your question or check if the knowledge base exists"
+            )
 
 
 def show_query_examples():
@@ -363,9 +418,9 @@ def show_query_examples():
         "Compare Python and JavaScript for web development",
         "What are the main findings in the research paper?",
         "Summarize the project requirements",
-        "What security best practices should I follow?"
+        "What security best practices should I follow?",
     ]
-    
+
     print("\n💡 Example questions:")
     for i, example in enumerate(examples, 1):
         print(f"   {i}. {example}")
@@ -376,11 +431,14 @@ def show_knowledge_base_stats(config: Config):
     """Show statistics about the knowledge base"""
     try:
         from app.query import load_vectorstore
+
         vs = load_vectorstore(config.user_persist_path, config.embedding_model)
-        
+
         if vs:
-            doc_count = len(vs.docstore._dict) if hasattr(vs.docstore, '_dict') else "unknown"
-            print(f"\n📊 Knowledge Base Statistics:")
+            doc_count = (
+                len(vs.docstore._dict) if hasattr(vs.docstore, "_dict") else "unknown"
+            )
+            print("\n📊 Knowledge Base Statistics:")
             print(f"   📂 Workspace: {config.user_persist_path}")
             print(f"   📄 Document chunks: {doc_count}")
             print(f"   🧠 Embedding model: {config.embedding_model}")
@@ -394,17 +452,20 @@ def show_knowledge_base_stats(config: Config):
 def main():
     """Enhanced main function with better UX"""
     print_banner()
-    
+
     # Load configuration
     config = Config.from_env()
-    
+
+    # Initialize verbose mode from config
+    set_verbose_mode(config.verbose)
+
     # System health check
     if not check_system_health(config):
         sys.exit(1)
-    
+
     # User workspace setup
     config = setup_user_workspace(config)
-    
+
     # Main menu loop
     while True:
         print("\n🎯 What would you like to do?")
@@ -412,11 +473,11 @@ def main():
         print("1. 📥 Ingest documents")
         print("2. 💬 Query knowledge base")
         print("3. ⚙️  Change settings")
-        print("4. 📊 View statistics")  
+        print("4. 📊 View statistics")
         print("5. 👋 Exit")
-        
+
         choice = get_user_input("Select option", "2", ["1", "2", "3", "4", "5"])
-        
+
         if choice == "1":
             handle_ingestion(config)
         elif choice == "2":
@@ -434,8 +495,8 @@ def change_settings(config: Config) -> Config:
     """Allow users to change configuration settings"""
     print("\n⚙️ Settings")
     print("-" * 15)
-    
-    print(f"Current settings:")
+
+    print("Current settings:")
     print(f"  👤 User ID: {config.user_id}")
     print(f"  📂 Workspace: {config.user_persist_path}")
     print(f"  🧠 Embedding Model: {config.embedding_model}")
@@ -443,47 +504,59 @@ def change_settings(config: Config) -> Config:
     print(f"  📄 Chunk Size: {config.chunk_size}")
     print(f"  🔄 Chunk Overlap: {config.chunk_overlap}")
     print(f"  📊 Retrieval K: {config.retrieval_k}")
-    
+    print(f"  🔍 Verbose Mode: {'ON' if config.verbose else 'OFF'}")
+
     print("\nWhat would you like to change?")
     print("1. Switch user")
     print("2. Change models")
     print("3. Adjust chunking parameters")
-    print("4. Return to main menu")
-    
-    setting_choice = get_user_input("Select option", "4", ["1", "2", "3", "4"])
-    
+    print("4. Toggle verbose mode")
+    print("5. Return to main menu")
+
+    setting_choice = get_user_input("Select option", "5", ["1", "2", "3", "4", "5"])
+
     if setting_choice == "1":
         config = setup_user_workspace(config)
     elif setting_choice == "2":
         change_models(config)
     elif setting_choice == "3":
         change_chunking_params(config)
-    
+    elif setting_choice == "4":
+        toggle_verbose_mode(config)
+
     return config
 
 
 def change_models(config: Config):
     """Change model configurations"""
     available_models = get_available_models()
-    
+
     if available_models:
         print("\nAvailable models:")
         for i, model in enumerate(available_models, 1):
-            indicator = "🤖" if model == config.llm_model else "🧠" if model == config.embedding_model else "  "
+            indicator = (
+                "🤖"
+                if model == config.llm_model
+                else "🧠" if model == config.embedding_model else "  "
+            )
             print(f"  {i}. {model} {indicator}")
-        
-        llm_choice = get_user_input(f"Select LLM model number or name", config.llm_model)
+
+        llm_choice = get_user_input(
+            "Select LLM model number or name", config.llm_model
+        )
         if llm_choice.isdigit() and 1 <= int(llm_choice) <= len(available_models):
             config.llm_model = available_models[int(llm_choice) - 1]
         else:
             config.llm_model = llm_choice
-            
-        embed_choice = get_user_input(f"Select embedding model number or name", config.embedding_model)
+
+        embed_choice = get_user_input(
+            "Select embedding model number or name", config.embedding_model
+        )
         if embed_choice.isdigit() and 1 <= int(embed_choice) <= len(available_models):
             config.embedding_model = available_models[int(embed_choice) - 1]
         else:
             config.embedding_model = embed_choice
-            
+
         log_success("✅ Model settings updated")
     else:
         log_warning("⚠️ No models available")
@@ -495,26 +568,50 @@ def change_chunking_params(config: Config):
     print(f"  📄 Chunk Size: {config.chunk_size}")
     print(f"  🔄 Chunk Overlap: {config.chunk_overlap}")
     print(f"  📊 Retrieval K: {config.retrieval_k}")
-    
+
     print("\nRecommended values:")
     print("  📄 Chunk Size: 500-2000 (1000 is good default)")
     print("  🔄 Chunk Overlap: 10-20% of chunk size (200 for 1000)")
     print("  📊 Retrieval K: 3-10 documents")
-    
+
     try:
         new_chunk_size = int(get_user_input("New chunk size", str(config.chunk_size)))
-        new_chunk_overlap = int(get_user_input("New chunk overlap", str(config.chunk_overlap)))
-        new_retrieval_k = int(get_user_input("New retrieval K", str(config.retrieval_k)))
-        
+        new_chunk_overlap = int(
+            get_user_input("New chunk overlap", str(config.chunk_overlap))
+        )
+        new_retrieval_k = int(
+            get_user_input("New retrieval K", str(config.retrieval_k))
+        )
+
         config.chunk_size = new_chunk_size
         config.chunk_overlap = new_chunk_overlap
         config.retrieval_k = new_retrieval_k
-        
+
         log_success("✅ Chunking settings updated")
-        log_warning("⚠️ You may need to rebuild your vectorstore for changes to take effect")
-        
+        log_warning(
+            "⚠️ You may need to rebuild your vectorstore for changes to take effect"
+        )
+
     except ValueError:
         log_error("❌ Invalid numeric input")
+
+
+def toggle_verbose_mode(config: Config):
+    """Toggle verbose mode on/off"""
+    current_state = "ON" if config.verbose else "OFF"
+    print(f"\nCurrent verbose mode: {current_state}")
+    print("Verbose mode controls the amount of logging detail shown:")
+    print("  • ON: Shows detailed progress, debug info, timing")
+    print("  • OFF: Shows only essential messages")
+
+    new_state = get_user_input("Enable verbose mode?", "n", ["y", "n"])
+    config.verbose = new_state == "y"
+
+    # Update the global verbose mode immediately
+    set_verbose_mode(config.verbose)
+
+    state_text = "ON" if config.verbose else "OFF"
+    log_success(f"✅ Verbose mode set to {state_text}")
 
 
 if __name__ == "__main__":

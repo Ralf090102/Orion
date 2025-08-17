@@ -3,9 +3,8 @@ Tests for Orion's enhanced document ingestion functions.
 """
 
 from pathlib import Path
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 from app.ingest import get_loader_for_file, load_documents, chunk_documents
-from app.chunking import SemanticChunker
 
 
 class TestGetLoaderForFile:
@@ -30,7 +29,7 @@ class TestGetLoaderForFile:
     def test_text_files_get_text_loader(self):
         """Should return TextLoader for various text file formats."""
         text_extensions = [".txt", ".md", ".py", ".js", ".json", ".yaml", ".html"]
-        
+
         for ext in text_extensions:
             path = Path(f"test{ext}")
             with patch("app.ingest.TextLoader") as mock_loader:
@@ -41,7 +40,7 @@ class TestGetLoaderForFile:
     def test_image_files_return_metadata_only(self):
         """Should return 'metadata_only' for image files."""
         image_extensions = [".png", ".jpg", ".jpeg", ".gif", ".webp"]
-        
+
         for ext in image_extensions:
             path = Path(f"test{ext}")
             loader = get_loader_for_file(path)
@@ -50,7 +49,7 @@ class TestGetLoaderForFile:
     def test_email_files_return_email_loader(self):
         """Should return 'email_loader' for email formats."""
         email_extensions = [".eml", ".msg", ".mbox"]
-        
+
         for ext in email_extensions:
             path = Path(f"test{ext}")
             loader = get_loader_for_file(path)
@@ -59,7 +58,7 @@ class TestGetLoaderForFile:
     def test_excel_files_return_none(self):
         """Should return None for Excel files (handled separately)."""
         excel_extensions = [".xlsx", ".xls"]
-        
+
         for ext in excel_extensions:
             path = Path(f"test{ext}")
             loader = get_loader_for_file(path)
@@ -76,11 +75,15 @@ class TestEnhancedChunking:
 
     def test_chunk_documents_uses_semantic_chunker(self):
         """Should use SemanticChunker for document chunking."""
-        docs = [{"text": "# Header 1\nContent here\n## Header 2\nMore content", 
-                 "metadata": {"source": "test.md"}}]
-        
+        docs = [
+            {
+                "text": "# Header 1\nContent here\n## Header 2\nMore content",
+                "metadata": {"source": "test.md"},
+            }
+        ]
+
         chunks = chunk_documents(docs, chunk_size=1000, chunk_overlap=200)
-        
+
         # Should return chunks with metadata
         assert len(chunks) > 0
         assert all("text" in chunk for chunk in chunks)
@@ -89,19 +92,27 @@ class TestEnhancedChunking:
 
     def test_chunk_documents_fallback_on_error(self):
         """Should fallback to basic chunking if semantic chunking fails."""
-        docs = [{"text": "Simple text without structure", 
-                 "metadata": {"source": "test.txt"}}]
-        
+        docs = [
+            {
+                "text": "Simple text without structure",
+                "metadata": {"source": "test.txt"},
+            }
+        ]
+
         # Mock SemanticChunker to raise exception
-        with patch('app.chunking.SemanticChunker') as mock_chunker:
-            mock_chunker.return_value.chunk_document.side_effect = Exception("Chunking failed")
-            
+        with patch("app.chunking.SemanticChunker") as mock_chunker:
+            mock_chunker.return_value.chunk_document.side_effect = Exception(
+                "Chunking failed"
+            )
+
             chunks = chunk_documents(docs, chunk_size=100, chunk_overlap=20)
-            
+
             # Should still return chunks with fallback
             assert len(chunks) > 0
             # Should have fallback chunk type
-            assert any(chunk["metadata"].get("chunk_type") == "fallback" for chunk in chunks)
+            assert any(
+                chunk["metadata"].get("chunk_type") == "fallback" for chunk in chunks
+            )
 
 
 class TestLoadDocuments:
