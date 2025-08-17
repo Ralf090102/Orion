@@ -4,10 +4,14 @@ Loads and embeds documents into a FAISS vectorstore for retrieval.
 
 import json
 import time
+import fitz
+import hashlib
+import docx2txt
 import pandas as pd
+from datetime import datetime
 from hashlib import md5
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Dict, Optional
 from app.utils import (
     log_info,
     log_success,
@@ -27,10 +31,172 @@ from langchain_community.document_loaders import (
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.schema import Document
+from app.chunking import SemanticChunker
 
+MANIFEST_NAME = "manifest.json"
 EMBEDDING_MODEL = "nomic-embed-text"
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".xls", ".txt"}
+SUPPORTED_EXTENSIONS = {
+    # Documents
+    ".pdf", ".docx", ".xlsx", ".xls", ".txt", ".csv", ".md", ".rtf",
+    # Images (for future OCR/vision)
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff",
+    # Code files
+    ".py", ".js", ".ts", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".go", ".rs", ".php",
+    ".html", ".css", ".xml", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+    ".sql", ".sh", ".bat", ".ps1", ".r", ".m", ".swift", ".kt", ".dart",
+    # Text/Documentation
+    ".org", ".rst", ".tex", ".log", ".conf", ".properties",
+    # Email (common formats)
+    ".eml", ".msg", ".mbox",
+    # Archives (we can extract and process contents)
+    ".zip", ".tar", ".gz",
+    # Bookmarks
+    ".html"  # Browser bookmarks export as HTML
+}
 
+def file_checksum(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(8192):
+            h.update(chunk)
+    return h.hexdigest()
+
+def file_md5(path: Path, buf_size: int = 8 * 1024 * 1024) -> str:
+    h = md5()
+    with path.open("rb") as f:
+        while True:
+            chunk = f.read(buf_size)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+def load_manifest(persist_path: str) -> Dict[str, str]:
+    p = Path(persist_path) / MANIFEST_NAME
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+def save_manifest(persist_path: str, mapping: Dict[str, str]):
+    p = Path(persist_path) / MANIFEST_NAME
+    p.write_text(json.dumps(mapping, ensure_ascii=False, indent=2), encoding="utf-8")
+    
+def chunk_documents(texts: List[Dict], chunk_size: int, chunk_overlap: int):
+    """Enhanced document chunking with semantic awareness."""
+    chunker = SemanticChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    all_chunks = []
+    
+    for doc in texts:
+        try:
+            # Use semantic chunking
+            chunks = chunker.chunk_document(doc["text"], doc["metadata"])
+            all_chunks.extend(chunks)
+        except Exception as e:
+            log_warning(f"Semantic chunking failed for {doc['metadata'].get('source', 'unknown')}: {e}")
+            # Fallback to basic chunking
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+            )
+            basic_chunks = splitter.split_text(doc["text"])
+            for i, chunk in enumerate(basic_chunks):
+                all_chunks.append({
+                    "text": chunk,
+                    "metadata": {
+                        **doc["metadata"],
+                        "chunk_id": f"{doc['metadata']['source']}#{i}",
+                        "chunk_type": "fallback"
+                    },
+                })
+    
+    return all_chunks
+    
+def normalize_documents(docs: list[Document]) -> list[Document]:
+    """
+    Normalizes document content and metadata for consistency.
+
+    Args:
+        docs (list[Document]): List of documents to normalize.
+
+    Returns:
+        list[Document]: List of normalized documents.
+    """
+    norm = []
+    for d in docs:
+        content = (d.page_content or "").strip()
+        if not content:
+            continue
+        meta = dict(d.metadata or {})
+        meta.setdefault("source", meta.get("file_path", "unknown"))
+        norm.append(Document(page_content=content, metadata=meta))
+    return norm
+
+
+def dedupe_documents_by_content(docs: list[Document]) -> list[Document]:
+    """
+    Removes duplicate documents based on their content hash.
+
+    Args:
+        docs (list[Document]): List of documents to deduplicate.
+
+    Returns:
+        list[Document]: List of deduplicated documents.
+    """
+    seen = set()
+    out = []
+    for d in docs:
+        h = md5(d.page_content.encode("utf-8")).hexdigest()
+        if h in seen:
+            continue
+        seen.add(h)
+        out.append(d)
+    return out
+
+
+def write_index_meta(
+    persist_path: str, *, embedding_model: str, chunk_size: int, chunk_overlap: int
+):
+    """
+    Writes metadata for the FAISS index to disk.
+
+    Args:
+        persist_path (str): Path to the directory where metadata will be saved.
+        embedding_model (str): Name of the embedding model used.
+        chunk_size (int): Size of the document chunks.
+        chunk_overlap (int): Overlap between document chunks.
+
+    Returns:
+        None
+    """
+    meta = {
+        "created_at": time.time(),
+        "embedding_model": embedding_model,
+        "chunk_size": chunk_size,
+        "chunk_overlap": chunk_overlap,
+    }
+    with open(Path(persist_path) / "metadata.json", "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+def read_index_meta(persist_path: str) -> Optional[dict]:
+    """
+    Reads metadata for the FAISS index from disk.
+
+    Args:
+        persist_path (str): Path to the directory where metadata is stored.
+
+    Returns:
+        dict or None: Dictionary containing the metadata, or None if not found.
+    """
+    p = Path(persist_path) / "metadata.json"
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
 def load_excel_with_pandas(file_path: Path) -> list[Document]:
     """
@@ -44,11 +210,10 @@ def load_excel_with_pandas(file_path: Path) -> list[Document]:
     """
     docs = []
     try:
-        sheets = pd.read_excel(file_path, sheet_name=None, dtype=str)  # all sheets
+        sheets = pd.read_excel(file_path, sheet_name=None, dtype=str)
         for sheet_name, df in sheets.items():
             if df.empty:
                 continue
-            # compact textual table (headers + first N rows)
             text = df.to_csv(index=False)
             docs.append(
                 Document(
@@ -57,6 +222,8 @@ def load_excel_with_pandas(file_path: Path) -> list[Document]:
                         "source": str(file_path),
                         "sheet": sheet_name,
                         "type": "excel",
+                        "filename": file_path.name,
+                        "ext": file_path.suffix.lower(),
                     },
                 )
             )
@@ -64,6 +231,47 @@ def load_excel_with_pandas(file_path: Path) -> list[Document]:
         log_error(f"Excel load failed for {file_path.name}: {e}")
     return docs
 
+def extract_metadata(file_path: Path, file_type: str, extra=None):
+    meta = {
+        "source": str(file_path),
+        "type": file_type,
+        "filename": file_path.name,
+        "ext": file_path.suffix.lower(),
+        "hash": md5(file_path.read_bytes()).hexdigest() if file_path.is_file() else None,
+    }
+    try:
+        if file_type == ".pdf":
+            from pypdf import PdfReader
+            reader = PdfReader(str(file_path))
+            meta["title"] = getattr(reader.metadata, "title", None)
+            meta["author"] = getattr(reader.metadata, "author", None)
+        elif file_type == ".docx":
+            from docx import Document as DocxDocument
+            doc = DocxDocument(str(file_path))
+            props = doc.core_properties
+            meta["author"] = props.author
+            meta["title"] = props.title
+        elif file_type in {".xlsx", ".xls"}:
+            import openpyxl
+            wb = openpyxl.load_workbook(str(file_path), read_only=True)
+            meta["sheets"] = wb.sheetnames
+            meta["creator"] = wb.properties.creator
+        elif file_type == ".txt":
+            with open(file_path, encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+                meta["title"] = lines[0].strip() if lines else None
+        elif file_type in {".png", ".jpg", ".jpeg", ".webp"}:
+            from PIL import Image
+            with Image.open(str(file_path)) as img:
+                meta["image_size"] = img.size
+                meta["image_mode"] = img.mode
+        elif file_type in {".py", ".c", ".cpp", ".html"}:
+            meta["lines"] = sum(1 for _ in open(file_path, encoding="utf-8", errors="ignore"))
+    except Exception as e:
+        meta["meta_error"] = str(e)
+    if extra:
+        meta.update(extra)
+    return meta
 
 def get_loader_for_file(file_path: Path):
     """
@@ -76,32 +284,39 @@ def get_loader_for_file(file_path: Path):
         Document loader instance or None if unsupported.
     """
     suffix = file_path.suffix.lower()
-
-    suffix = file_path.suffix.lower()
+    
+    # Document formats
     if suffix == ".pdf":
-        loader = PyPDFLoader(str(file_path))
-        try:
-            return loader
-        except Exception as e:
-            log_warning(f"Standard PDF load failed for {file_path.name}: {e}")
-            log_info(
-                "TODO: OCR fallback (e.g., pytesseract + pdf2image) not yet implemented."
-            )
-            # Example placeholder:
-            # from pdf2image import convert_from_path
-            # import pytesseract
-            # pages = convert_from_path(str(file_path))
-            # text = "\n".join(pytesseract.image_to_string(p) for p in pages)
-            # return [Document(page_content=text, metadata={"source": str(file_path), "type": "pdf-ocr"})]
-            return None
+        return PyPDFLoader(str(file_path))
     if suffix == ".docx":
         return Docx2txtLoader(str(file_path))
-    if suffix in {".xlsx", ".xls"}:
-        return None  # special-case Excel
-    if suffix == ".txt":
+    if suffix in {".txt", ".md", ".rst", ".org", ".log", ".conf", ".properties"}:
         return TextLoader(str(file_path), autodetect_encoding=True)
+    
+    # Code files - treat as text
+    if suffix in {".py", ".js", ".ts", ".java", ".c", ".cpp", ".h", ".hpp", 
+                  ".cs", ".go", ".rs", ".php", ".html", ".css", ".xml", ".json", 
+                  ".yaml", ".yml", ".toml", ".ini", ".cfg", ".sql", ".sh", 
+                  ".bat", ".ps1", ".r", ".m", ".swift", ".kt", ".dart"}:
+        return TextLoader(str(file_path), autodetect_encoding=True)
+    
+    # Excel files - handled separately
+    if suffix in {".xlsx", ".xls"}:
+        return None  # Special handling in load_documents
+    
+    # Images - metadata only for now (future: OCR/vision)
+    if suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff"}:
+        return "metadata_only"
+    
+    # Email formats - need special handling
+    if suffix in {".eml", ".msg", ".mbox"}:
+        return "email_loader"  # Will implement this
+    
+    # Archives - need extraction
+    if suffix in {".zip", ".tar", ".gz"}:
+        return "archive_loader"  # Will implement this
+        
     return None
-
 
 def load_documents(folder_path: str) -> List[Document]:
     """
@@ -120,58 +335,57 @@ def load_documents(folder_path: str) -> List[Document]:
         log_error(str(e))
         return []
 
-    # Recursively get list of supported files in all subfolders
     supported_files = [
-        f
-        for f in folder.rglob("*")
+        f for f in folder.rglob("*")
         if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
     ]
-
     if not supported_files:
         log_warning(f"No supported files found in '{folder_path}'")
         return []
 
-    log_info(f"Found {len(supported_files)} supported files")
-
-    docs = []
-    failed_files = []
+    docs, failed_files, ingest_events = [], [], []
 
     with create_progress_bar("Loading documents") as progress:
         task = progress.add_task("Loading...", total=len(supported_files))
-
         for file_path in supported_files:
+            suffix = file_path.suffix.lower()
             try:
-                if file_path.suffix.lower() in {".xlsx", ".xls"}:
+                meta = extract_metadata(file_path, suffix)
+                if suffix in {".xlsx", ".xls"}:
                     file_docs = load_excel_with_pandas(file_path)
+                    for doc in file_docs:
+                        doc.metadata.update(meta)
                     docs.extend(file_docs)
-                    log_info(f"✅ Loaded {file_path.name} ({len(file_docs)} sheets)")
+                    ingest_events.append({"file": file_path.name, "status": "success", "meta": meta})
                 else:
                     loader = get_loader_for_file(file_path)
-                    if loader:
+                    if loader == "metadata_only":
+                        docs.append(Document(page_content="", metadata=meta))
+                        ingest_events.append({"file": file_path.name, "status": "metadata_only", "meta": meta})
+                    elif loader:
                         file_docs = loader.load()
+                        for doc in file_docs:
+                            doc.metadata.update(meta)
                         docs.extend(file_docs)
-                        log_info(
-                            f"✅ Loaded {file_path.name} ({len(file_docs)} chunks)"
-                        )
+                        ingest_events.append({"file": file_path.name, "status": "success", "meta": meta})
                     else:
-                        log_warning(f"No loader available for {file_path.name}")
-
+                        ingest_events.append({"file": file_path.name, "status": "no_loader", "meta": meta})
             except Exception as e:
-                log_error(f"Failed to load {file_path.name}: {e}")
                 failed_files.append(file_path.name)
-
+                ingest_events.append({"file": file_path.name, "status": "failed", "error": str(e)})
             progress.advance(task)
 
+    log_dir = Path("data/ingest")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"{datetime.now().strftime('%m-%d-%Y_%H-%M-%S')}.log"
+    with open(log_file, "w", encoding="utf-8") as f:
+        for event in ingest_events:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
     if failed_files:
-        log_warning(
-            f"Failed to load {len(failed_files)} files: {', '.join(failed_files)}"
-        )
-
-    log_success(
-        f"Successfully loaded {len(docs)} document chunks from {len(supported_files) - len(failed_files)} files"
-    )
+        log_warning(f"Failed to load {len(failed_files)} files: {', '.join(failed_files)}")
+    log_success(f"Loaded {len(docs)} document chunks from {len(supported_files) - len(failed_files)} files")
     return docs
-
 
 @timer
 def build_vectorstore(
@@ -230,55 +444,35 @@ def rebuild_vectorstore(
     Returns:
         Optional[FAISS]: The rebuilt FAISS vectorstore, or None if failed.
     """
-    try:
-        ensure_directory(persist_path)
+    folder = Path(folder_path)
+    manifest = {"files": {}}
+    docs = []
 
-        docs = load_documents(folder_path)
-        if not docs:
-            log_warning("No documents loaded. Aborting ingestion.")
-            return None
+    for path in folder.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            continue
+        loader = get_loader_for_file(path)
+        if loader == "metadata_only":
+            text = ""
+        elif loader:
+            text = "\n".join([d.page_content for d in loader.load()])
+        else:
+            continue
+        if text.strip() or loader == "metadata_only":
+            docs.append({"text": text, "metadata": {"source": str(path)}})
+            manifest["files"][str(path)] = file_checksum(path)
 
-        docs = normalize_documents(docs)
+    chunks = chunk_documents(docs, chunk_size, chunk_overlap)
+    texts = [c["text"] for c in chunks]
+    metadatas = [c["metadata"] for c in chunks]
 
-        log_info(f"Splitting {len(docs)} documents into chunks...")
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""],
-        )
-        split_docs = splitter.split_documents(docs)
-        split_docs = dedupe_documents_by_content(split_docs)
-        log_info(f"Final chunk count: {len(split_docs)}")
+    embeddings = OllamaEmbeddings(model=embedding_model)
+    vectorstore = FAISS.from_texts(texts, embedding=embeddings, metadatas=metadatas)
+    vectorstore.save_local(persist_path)
+    save_manifest(persist_path, manifest)
 
-        embeddings = OllamaEmbeddings(model=embedding_model)
-
-        with create_progress_bar("Generating embeddings") as progress:
-            task = progress.add_task("Embedding...", total=len(split_docs))
-            orig_embed_documents = embeddings.embed_documents
-
-            def embed_documents_with_progress(texts):
-                results = []
-                for t in texts:
-                    results.append(orig_embed_documents([t])[0])
-                    progress.advance(task)
-                return results
-
-            embeddings.embed_documents = embed_documents_with_progress
-            vectorstore = FAISS.from_documents(split_docs, embeddings)
-        vectorstore.save_local(persist_path)
-
-        write_index_meta(
-            persist_path,
-            embedding_model=embedding_model,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-        )
-        log_success(f"Rebuilt vectorstore with {len(split_docs)} chunks")
-        return vectorstore
-
-    except Exception as e:
-        log_error(f"Rebuild failed: {e}")
-        return None
+    log_success(f"Rebuilt vectorstore with {len(chunks)} chunks from {len(docs)} documents.")
+    return True
 
 
 @timer
@@ -304,207 +498,34 @@ def incremental_vectorstore(
     Returns:
         Optional[FAISS]: The updated FAISS vectorstore, or None if failed.
     """
-    try:
-        ensure_directory(persist_path)
+    folder = Path(folder_path)
+    old_manifest = load_manifest(persist_path)
+    new_manifest = {"files": {}}
+    changed_docs = []
 
-        docs = load_documents(folder_path)
-        if not docs:
-            log_warning("No documents loaded. Aborting ingestion.")
-            return None
-        docs = normalize_documents(docs)
-
-        log_info(f"Splitting {len(docs)} documents into chunks...")
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""],
-        )
-        split_docs = splitter.split_documents(docs)
-        split_docs = dedupe_documents_by_content(split_docs)
-
-        embeddings = OllamaEmbeddings(model=embedding_model)
-
-        if Path(persist_path).exists():
-            try:
-                vectorstore = FAISS.load_local(
-                    persist_path,
-                    embeddings=embeddings,
-                    allow_dangerous_deserialization=True,
-                )
-                log_info("Loaded existing FAISS index")
-
-                # Detect existing doc IDs
-                # existing_meta = read_index_meta(persist_path)
-                existing_docs = {
-                    d.metadata.get("source", "")
-                    for d in vectorstore.docstore._dict.values()
-                }
-
-                current_docs = {d.metadata.get("source", "") for d in split_docs}
-
-                # Handle deletions
-                deleted_docs = existing_docs - current_docs
-                if deleted_docs:
-                    log_info(f"Pruning {len(deleted_docs)} deleted files from index")
-                    keys_to_delete = [
-                        k
-                        for k, v in vectorstore.docstore._dict.items()
-                        if v.metadata.get("source", "") in deleted_docs
-                    ]
-                    for k in keys_to_delete:
-                        del vectorstore.docstore._dict[k]
-                        if k in vectorstore.index_to_docstore_id:
-                            del vectorstore.index_to_docstore_id[k]
-
-                # Add/update docs
-                new_docs = [
-                    d
-                    for d in split_docs
-                    if d.metadata.get("source", "") not in existing_docs
-                ]
-                if new_docs:
-                    with create_progress_bar("Adding new chunks") as progress:
-                        task = progress.add_task("Embedding...", total=len(new_docs))
-                        orig_embed_documents = embeddings.embed_documents
-
-                        def embed_documents_with_progress(texts):
-                            results = []
-                            for t in texts:
-                                results.append(orig_embed_documents([t])[0])
-                                progress.advance(task)
-                            return results
-
-                        embeddings.embed_documents = embed_documents_with_progress
-                        vectorstore.add_documents(new_docs)
-                    log_info(f"Added {len(new_docs)} new chunks")
-
-            except Exception as e:
-                log_warning(f"Incremental load failed ({e}); rebuilding index")
-                return rebuild_vectorstore(
-                    folder_path,
-                    persist_path,
-                    chunk_size,
-                    chunk_overlap,
-                    embedding_model,
-                )
-        else:
-            log_info("No existing index found, creating new one")
-
-            with create_progress_bar("Generating embeddings") as progress:
-                task = progress.add_task("Embedding...", total=len(split_docs))
-                orig_embed_documents = embeddings.embed_documents
-
-                def embed_documents_with_progress(texts):
-                    results = []
-                    for t in texts:
-                        results.append(orig_embed_documents([t])[0])
-                        progress.advance(task)
-                    return results
-
-                embeddings.embed_documents = embed_documents_with_progress
-                vectorstore = FAISS.from_documents(split_docs, embeddings)
-
-        vectorstore.save_local(persist_path)
-        write_index_meta(
-            persist_path,
-            embedding_model=embedding_model,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-        )
-        log_success("Incremental update complete")
-        return vectorstore
-
-    except Exception as e:
-        log_error(f"Incremental update failed: {e}")
-        return None
-
-
-def normalize_documents(docs: list[Document]) -> list[Document]:
-    """
-    Normalizes document content and metadata for consistency.
-
-    Args:
-        docs (list[Document]): List of documents to normalize.
-
-    Returns:
-        list[Document]: List of normalized documents.
-    """
-    norm = []
-    for d in docs:
-        content = (d.page_content or "").strip()
-        if not content:
+    for path in folder.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SUPPORTED_EXTENSIONS:
             continue
-        meta = dict(d.metadata or {})
-        meta.setdefault("source", meta.get("file_path", "unknown"))
-        # Carry through page/sheet if present
-        if "page" in meta:
-            meta["page"] = meta["page"]
-        if "sheet" in meta:
-            meta["sheet"] = meta["sheet"]
-        norm.append(Document(page_content=content, metadata=meta))
-    return norm
+        checksum = file_checksum(path)
+        new_manifest["files"][str(path)] = checksum
+        if old_manifest["files"].get(str(path)) != checksum:
+            loader = get_loader_for_file(path)
+            if loader == "metadata_only":
+                text = ""
+            elif loader:
+                text = "\n".join([d.page_content for d in loader.load()])
+            else:
+                continue
+            if text.strip() or loader == "metadata_only":
+                changed_docs.append({"text": text, "metadata": {"source": str(path)}})
 
+    removed = set(old_manifest["files"]) - set(new_manifest["files"])
+    if removed:
+        log_info(f"Detected {len(removed)} deleted files: {removed}")
 
-def dedupe_documents_by_content(docs: list[Document]) -> list[Document]:
-    """
-    Removes duplicate documents based on their content hash.
+    if changed_docs or removed:
+        return rebuild_vectorstore(folder_path, persist_path, chunk_size, chunk_overlap, embedding_model)
 
-    Args:
-        docs (list[Document]): List of documents to deduplicate.
+    log_info("No document changes detected. Vectorstore is up-to-date.")
+    return True
 
-    Returns:
-        list[Document]: List of deduplicated documents.
-    """
-    seen = set()
-    out = []
-    for d in docs:
-        h = md5(d.page_content.encode("utf-8")).hexdigest()
-        if h in seen:
-            continue
-        seen.add(h)
-        out.append(d)
-    return out
-
-
-def write_index_meta(
-    persist_path: str, *, embedding_model: str, chunk_size: int, chunk_overlap: int
-):
-    """
-    Writes metadata for the FAISS index to disk.
-
-    Args:
-        persist_path (str): Path to the directory where metadata will be saved.
-        embedding_model (str): Name of the embedding model used.
-        chunk_size (int): Size of the document chunks.
-        chunk_overlap (int): Overlap between document chunks.
-
-    Returns:
-        None
-    """
-    meta = {
-        "created_at": time.time(),
-        "embedding_model": embedding_model,
-        "chunk_size": chunk_size,
-        "chunk_overlap": chunk_overlap,
-    }
-    with open(Path(persist_path) / "metadata.json", "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-
-
-def read_index_meta(persist_path: str) -> Optional[dict]:
-    """
-    Reads metadata for the FAISS index from disk.
-
-    Args:
-        persist_path (str): Path to the directory where metadata is stored.
-
-    Returns:
-        dict or None: Dictionary containing the metadata, or None if not found.
-    """
-    p = Path(persist_path) / "metadata.json"
-    if not p.exists():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return None

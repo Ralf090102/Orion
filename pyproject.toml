@@ -13,16 +13,25 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "ollama",
+    "chardet",
+    "rank_bm25",
     "langchain",
-    "langchain-community",
+    "langchain-community", 
+    "langchain-ollama",
+    "langchain-text-splitters",
+    "sentence_transformers",
     "faiss-cpu",
     "pandas",
     "python-docx",
     "python-pptx",
     "openpyxl",
     "pypdf",
+    "PyMuPDF",
+    "docx2txt",
     "tqdm",
-    "rich"
+    "typer",
+    "rich",
+    "requests"
 ]
 
 [tool.setuptools]
