@@ -49,7 +49,7 @@ class TestCreatePrompt:
             "no data available",
         ]
 
-        assert any(indicator in prompt for indicator in fallback_indicators)
+        assert any(indicator in prompt.lower() for indicator in fallback_indicators)
 
 
 class TestQueryEnhancement:

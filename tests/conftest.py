@@ -25,17 +25,22 @@ def mock_ollama_list_success():
                 {"name": "llama2:latest"},
             ]
         }
+        # Clear the LRU cache for model_exists to prevent cached results
+        from app.llm import model_exists
+        model_exists.cache_clear()
         yield mock_list
 
 
 @pytest.fixture
 def mock_ollama_list_failure():
     """
-    Fixture: Mocks ollama.list() to raise an exception.
+    Fixture: Mocks ollama.list() and ollama.show() to raise exceptions.
     """
-    with patch(
-        "app.llm.ollama.list", side_effect=Exception("Ollama down")
-    ) as mock_list:
+    with patch("app.llm.ollama.list", side_effect=Exception("Ollama down")) as mock_list, \
+         patch("app.llm.ollama.show", side_effect=Exception("Ollama down")) as mock_show:
+        # Clear the LRU cache for model_exists to prevent cached results
+        from app.llm import model_exists
+        model_exists.cache_clear()
         yield mock_list
 
 

@@ -100,7 +100,7 @@ class TestEnhancedChunking:
         ]
 
         # Mock SemanticChunker to raise exception
-        with patch("app.chunking.SemanticChunker") as mock_chunker:
+        with patch("app.ingest.SemanticChunker") as mock_chunker:
             mock_chunker.return_value.chunk_document.side_effect = Exception(
                 "Chunking failed"
             )
