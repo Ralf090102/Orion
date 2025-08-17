@@ -541,9 +541,7 @@ def change_models(config: Config):
             )
             print(f"  {i}. {model} {indicator}")
 
-        llm_choice = get_user_input(
-            "Select LLM model number or name", config.llm_model
-        )
+        llm_choice = get_user_input("Select LLM model number or name", config.llm_model)
         if llm_choice.isdigit() and 1 <= int(llm_choice) <= len(available_models):
             config.llm_model = available_models[int(llm_choice) - 1]
         else:
