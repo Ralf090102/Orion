@@ -41,6 +41,7 @@ htmlcov/
 test-results/
 
 # Local data
+data/cache/
 data/ingest/
 data/processed/
 data/conversations/
