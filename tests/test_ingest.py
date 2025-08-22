@@ -99,9 +99,13 @@ class TestEnhancedChunking:
             }
         ]
 
-        # Mock SemanticChunker to raise exception
-        with patch("app.ingest.SemanticChunker") as mock_chunker:
-            mock_chunker.return_value.chunk_document.side_effect = Exception(
+        # Mock both SmartChunker and SemanticChunker to raise exceptions
+        with patch("app.ingest.SmartChunker") as mock_smart_chunker, \
+             patch("app.ingest.SemanticChunker") as mock_semantic_chunker:
+            mock_smart_chunker.return_value.chunk_document.side_effect = Exception(
+                "Smart chunking failed"
+            )
+            mock_semantic_chunker.return_value.chunk_document.side_effect = Exception(
                 "Chunking failed"
             )
 
