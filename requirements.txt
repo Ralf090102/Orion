@@ -17,6 +17,13 @@ openpyxl
 docx2txt
 pandas
 
+# Media processing
+pillow
+easyocr
+pytesseract
+camelot-py[cv]
+tabula-py
+
 # Embeddings & vectorstore
 faiss-cpu
 

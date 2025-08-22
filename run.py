@@ -1,7 +1,8 @@
 """
 Enhanced interactive runner for Orion RAG with improved UX.
 Supports user workspaces, query enhancement, and better error handling.
-🚀 Now with Performance Optimizations: Async processing, smart caching, and incremental updates!
+Performance Optimizations: Async processing, smart caching, and incremental updates!
+New Features: OCR for images, PDF table extraction, and advanced code analysis!
 """
 
 import sys
@@ -32,7 +33,8 @@ def print_banner():
     print("\n" + "=" * 60)
     print(" ORION - Enhanced Personal Knowledge RAG")
     print("   Multi-User | Query Enhancement | Semantic Chunking")
-    print("   🚀 PERFORMANCE OPTIMIZED: Async • Caching • Incremental")
+    print("   🚀 PERFORMANCE: Async • Caching • Incremental")
+    print("   📸 PHASE 1&2: OCR • Tables • Code Analysis")
     print("=" * 60 + "\n")
 
 
@@ -118,6 +120,49 @@ def check_system_health(config: Config) -> bool:
             log_warning("Proceeding without missing models - may cause errors")
     else:
         log_success("✅ All required models available")
+
+    # Phase 1 & 2: Check media processing capabilities
+    try:
+        from app.media_config import check_dependencies
+
+        dependencies = check_dependencies()
+        available_features = []
+        missing_features = []
+
+        if dependencies.get("pillow"):
+            available_features.append("Image processing")
+        else:
+            missing_features.append("Pillow (required for images)")
+
+        if dependencies.get("easyocr"):
+            available_features.append("OCR (EasyOCR)")
+        elif dependencies.get("pytesseract"):
+            available_features.append("OCR (Tesseract)")
+        else:
+            missing_features.append("OCR libraries")
+
+        if dependencies.get("camelot"):
+            available_features.append("PDF table extraction (Camelot)")
+        elif dependencies.get("tabula"):
+            available_features.append("PDF table extraction (Tabula)")
+        else:
+            missing_features.append("Table extraction libraries")
+
+        if available_features:
+            log_success(f"✅ Enhanced processing: {', '.join(available_features)}")
+
+        if missing_features:
+            log_warning(
+                f"⚠️ Optional features not available: {', '.join(missing_features)}"
+            )
+            help_command = (
+                'python -c "from app.media_config import get_installation_help; '
+                'print(get_installation_help())"'
+            )
+            log_info(f"💡 Run '{help_command}' for installation help")
+
+    except Exception as e:
+        log_warning(f"⚠️ Could not check media processing capabilities: {e}")
 
     return True
 
@@ -637,6 +682,64 @@ def show_cache_stats():
     print()
 
 
+def show_media_processing_stats():
+    """Show enhanced media processing statistics (Phase 1 & 2)"""
+    try:
+        from app.media_processing import media_processor
+        from app.media_config import check_dependencies
+
+        print("\n🖼️ Media Processing Statistics:")
+        print("-" * 35)
+
+        # Media processor stats
+        media_stats = media_processor.get_processing_stats()
+        print(f"   Images processed:     {media_stats.get('images_processed', 0)}")
+        print(f"   Text extracted:       {media_stats.get('text_extracted', 0)}")
+        print(f"   Tables found:         {media_stats.get('tables_found', 0)}")
+        print(
+            f"   Avg processing time:  {media_stats.get('avg_processing_time', 0):.2f}s"
+        )
+
+        if media_stats.get("images_processed", 0) > 0:
+            extraction_rate = media_stats.get("text_extraction_rate", 0)
+            if extraction_rate > 0.8:
+                print("   OCR Success Rate:     🟢 Excellent")
+            elif extraction_rate > 0.5:
+                print("   OCR Success Rate:     🟡 Good")
+            else:
+                print("   OCR Success Rate:     🔴 Needs improvement")
+
+        print("\n🔧 Available Features:")
+        print("-" * 35)
+
+        # Feature availability
+        deps = check_dependencies()
+        features = []
+        if deps.get("pillow"):
+            features.append("Image processing")
+        if deps.get("easyocr"):
+            features.append("OCR (EasyOCR)")
+        if deps.get("pytesseract"):
+            features.append("OCR (Tesseract)")
+        if deps.get("camelot"):
+            features.append("Table extraction (Camelot)")
+        if deps.get("tabula"):
+            features.append("Table extraction (Tabula)")
+
+        if features:
+            for feature in features:
+                print(f"   ✅ {feature}")
+        else:
+            print("   ⚠️ No enhanced features available")
+            print("   💡 Install optional dependencies for more features")
+
+    except Exception as e:
+        log_warning(f"Could not load media processing stats: {e}")
+        print("   📊 Install enhanced processing dependencies to see stats")
+
+    print()
+
+
 def show_query_examples():
     """Show example queries to help users"""
     examples = [
@@ -702,9 +805,12 @@ def main():
         print("3. Change settings")
         print("4. View statistics")
         print("5. Performance dashboard")
-        print("6. Exit")
+        print("6. Media processing stats")
+        print("7. Exit")
 
-        choice = get_user_input("Select option", "2", ["1", "2", "3", "4", "5", "6"])
+        choice = get_user_input(
+            "Select option", "2", ["1", "2", "3", "4", "5", "6", "7"]
+        )
 
         if choice == "1":
             handle_ingestion(config)
@@ -717,6 +823,8 @@ def main():
         elif choice == "5":
             show_performance_dashboard()
         elif choice == "6":
+            show_media_processing_stats()
+        elif choice == "7":
             print("\n👋 Thank you for using Orion!")
             break
 

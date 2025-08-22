@@ -31,7 +31,8 @@ dependencies = [
     "tqdm",
     "typer",
     "rich",
-    "requests"
+    "requests",
+    "pillow"
 ]
 
 [tool.setuptools]
@@ -43,6 +44,12 @@ dev = [
     "ruff",
     "pytest",
     "pre-commit"
+]
+media = [
+    "easyocr",
+    "pytesseract", 
+    "camelot-py[cv]",
+    "tabula-py"
 ]
 
 

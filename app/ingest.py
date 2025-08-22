@@ -351,7 +351,7 @@ def load_excel_with_pandas(file_path: Path) -> list[Document]:
 
 
 def extract_metadata(file_path: Path, file_type: str, extra=None):
-    """Enhanced metadata extraction using document intelligence"""
+    """Enhanced metadata extraction using document intelligence, media processing, and code analysis"""
     # Basic metadata (original functionality preserved)
     meta = {
         "source": str(file_path),
@@ -408,10 +408,70 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
                     f"({doc_metadata.word_count} words, {len(doc_metadata.topics)} topics)"
                 )
 
-        # Legacy metadata extraction for specific formats (as fallback/enhancement)
+                # Phase 1 & 2: Enhanced processing for specific file types
+                try:
+                    # Image processing for OCR and analysis
+                    image_extensions = {
+                        ".png",
+                        ".jpg",
+                        ".jpeg",
+                        ".webp",
+                        ".gif",
+                        ".bmp",
+                        ".tiff",
+                    }
+
+                    if file_type in image_extensions:
+                        from app.media_processing import media_processor
+
+                        image_analysis = media_processor.process_image(file_path)
+
+                        if image_analysis.get("success"):
+                            ocr_result = image_analysis.get("ocr", {})
+                            meta.update(
+                                {
+                                    "image_analysis": {
+                                        "dimensions": (
+                                            f"{image_analysis['metadata']['width']}"
+                                            f"x{image_analysis['metadata']['height']}"
+                                        ),
+                                        "format": image_analysis["metadata"]["format"],
+                                        "mode": image_analysis["metadata"]["mode"],
+                                        "ocr_text_length": len(
+                                            ocr_result.get("text", "")
+                                        ),
+                                        "ocr_confidence": ocr_result.get(
+                                            "confidence", 0
+                                        ),
+                                        "ocr_method": ocr_result.get("method", "none"),
+                                        "tables_found": len(
+                                            image_analysis.get("tables", [])
+                                        ),
+                                        "processing_time": image_analysis.get(
+                                            "processing_time", 0
+                                        ),
+                                    }
+                                }
+                            )
+
+                            # If OCR found text, add it to the document content
+                            ocr_text = ocr_result.get("text", "").strip()
+                            if (
+                                ocr_text and len(ocr_text) > 10
+                            ):  # Only if substantial text found
+                                meta["ocr_text"] = ocr_text
+                                log_info(
+                                    f"OCR extracted {len(ocr_text)} characters from image"
+                                )
+
+                except Exception as e:
+                    log_warning(f"Enhanced processing failed for {file_path}: {e}")
+
+        # Enhanced PDF processing (Phase 2: Table detection)
         if file_type == ".pdf":
             try:
                 from pypdf import PdfReader
+                from app.media_processing import media_processor
 
                 reader = PdfReader(str(file_path))
                 # Only override if document intelligence didn't find a title
@@ -419,8 +479,43 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
                     meta["title"] = getattr(reader.metadata, "title", None)
                 if not meta.get("author"):
                     meta["author"] = getattr(reader.metadata, "author", None)
-            except Exception:
-                pass
+
+                # Phase 2: Enhanced PDF processing with table detection
+                pdf_analysis = media_processor.process_pdf_enhanced(file_path)
+                if pdf_analysis.get("success"):
+                    tables = pdf_analysis.get("tables", [])
+                    if tables:
+                        meta.update(
+                            {
+                                "pdf_tables": {
+                                    "table_count": len(tables),
+                                    "total_rows": sum(
+                                        t.get("shape", [0, 0])[0] for t in tables
+                                    ),
+                                    "total_columns": sum(
+                                        t.get("shape", [0, 0])[1] for t in tables
+                                    ),
+                                    "extraction_methods": list(
+                                        set(t.get("method", "unknown") for t in tables)
+                                    ),
+                                }
+                            }
+                        )
+                        log_info(f"PDF table extraction found {len(tables)} tables")
+
+            except Exception as e:
+                log_warning(f"Enhanced PDF processing failed: {e}")
+                # Fallback to basic PDF processing
+                try:
+                    from pypdf import PdfReader
+
+                    reader = PdfReader(str(file_path))
+                    if not meta.get("title"):
+                        meta["title"] = getattr(reader.metadata, "title", None)
+                    if not meta.get("author"):
+                        meta["author"] = getattr(reader.metadata, "author", None)
+                except Exception:
+                    pass
 
         elif file_type == ".docx":
             try:
@@ -445,15 +540,9 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
             except Exception:
                 pass
 
-        elif file_type in {".png", ".jpg", ".jpeg", ".webp"}:
-            try:
-                from PIL import Image
-
-                with Image.open(str(file_path)) as img:
-                    meta["image_size"] = img.size
-                    meta["image_mode"] = img.mode
-            except Exception:
-                pass
+        elif file_type in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff"}:
+            # Enhanced image metadata already handled above
+            pass
 
     except Exception as e:
         meta["meta_error"] = str(e)
@@ -583,14 +672,29 @@ def load_documents(folder_path: str) -> List[Document]:
                 else:
                     loader = get_loader_for_file(file_path)
                     if loader == "metadata_only":
-                        docs.append(Document(page_content="", metadata=meta))
-                        ingest_events.append(
-                            {
-                                "file": file_path.name,
-                                "status": "metadata_only",
-                                "meta": meta,
-                            }
-                        )
+                        # For images, check if we have OCR text
+                        ocr_text = meta.get("ocr_text", "")
+                        if ocr_text and len(ocr_text.strip()) > 10:
+                            # Create document with OCR text as content
+                            docs.append(Document(page_content=ocr_text, metadata=meta))
+                            ingest_events.append(
+                                {
+                                    "file": file_path.name,
+                                    "status": "success_with_ocr",
+                                    "meta": meta,
+                                    "ocr_length": len(ocr_text),
+                                }
+                            )
+                        else:
+                            # No useful text, just metadata
+                            docs.append(Document(page_content="", metadata=meta))
+                            ingest_events.append(
+                                {
+                                    "file": file_path.name,
+                                    "status": "metadata_only",
+                                    "meta": meta,
+                                }
+                            )
                     elif loader == "email_loader":
                         # Skip email files for now - not implemented
                         ingest_events.append(
