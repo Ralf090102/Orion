@@ -137,7 +137,7 @@ class ChatSession:
         """Detect if the query is a follow-up or new topic"""
         if self.enable_memory:
             context = self.get_conversation_context()
-            return memory_manager.follow_up_detector.detect_query_type(query, context)
+            return memory_manager.query_classifier.detect_query_type(query, context)
         else:
             # Simple fallback detection
             follow_up_indicators = [

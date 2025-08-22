@@ -15,7 +15,8 @@ from typing import List, Dict, Optional, Set
 from dataclasses import dataclass
 from enum import Enum
 
-from app.utils import log_info, log_warning, log_error
+from app.utils import log_info, log_warning, log_error, log_debug
+from app.llm import generate_response, check_ollama_connection
 
 
 class QueryType(Enum):
@@ -67,7 +68,7 @@ class ConversationMemoryConfig:
     def __init__(self):
         self.db_path = Path("data/conversations/chat_history.db")
         self.max_db_size_gb = 20
-        self.context_window_size = 7  # Number of message pairs to keep in context
+        self.context_window_size = 7
         self.topic_retention_days = 30
         self.enable_memory = True
         self.compression_threshold = 1000  # Messages before compression
@@ -76,116 +77,253 @@ class ConversationMemoryConfig:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
 
-class FollowUpDetector:
-    """Detects follow-up questions and references using keyword matching"""
+class LLMQueryClassifier:
+    """LLM-based query classification using Ollama Mistral"""
 
-    def __init__(self):
-        # Follow-up question patterns
-        self.follow_up_patterns = [
-            # Direct follow-ups
-            r"\b(tell me more|more about|what else|anything else|continue|elaborate)\b",
-            r"\b(more details|more information|additional|further|deeper)\b",
-            r"\b(explain further|go deeper|expand on)\b",
-            # Clarification requests
-            r"\b(clarify|explain|what do you mean|can you elaborate)\b",
-            r"\b(how so|why is that|what does that mean|in what way)\b",
-            # Reference patterns
-            r"\b(that|this|it|the above|previously|mentioned|discussed)\b",
-            r"\b(the document|the file|the source|the information)\b",
-            r"\b(from before|earlier|last time|previous)\b",
-        ]
+    def __init__(self, model: str = "mistral", fallback_to_patterns: bool = True):
+        self.model = model
+        self.fallback_to_patterns = fallback_to_patterns
+        self.pattern_fallback = PatternBasedFallback() if fallback_to_patterns else None
+        self._llm_available = None
 
-        # Question starters that often indicate follow-ups
-        self.contextual_starters = [
-            r"^(and|also|besides|additionally|furthermore)\b",
-            r"^(what about|how about|speaking of)\b",
-            r"^(regarding|concerning|about)\b",
-        ]
-
-        # Compile patterns for efficiency
-        self.compiled_patterns = [
-            re.compile(pattern, re.IGNORECASE)
-            for pattern in self.follow_up_patterns + self.contextual_starters
-        ]
+    def _check_llm_availability(self) -> bool:
+        """Check if LLM is available (cached for performance)"""
+        if self._llm_available is None:
+            self._llm_available = check_ollama_connection()
+            if not self._llm_available:
+                log_warning("Ollama not available, will use pattern-based fallback")
+        return self._llm_available
 
     def detect_query_type(self, query: str, context: ConversationContext) -> QueryType:
-        """Detect the type of query based on content and context"""
-        query_lower = query.lower().strip()
+        """Detect query type using LLM with fallback to patterns"""
 
-        # Check for explicit follow-up patterns FIRST (highest priority)
-        follow_up_patterns = [
-            "tell me more",
-            "more about",
-            "what else",
-            "anything else",
-            "continue",
-            "elaborate",
-            "further",
-            "additional",
-            "more details",
-            "some examples",
-            "for example",
-            "what are some",
-        ]
-        if any(pattern in query_lower for pattern in follow_up_patterns):
-            return QueryType.FOLLOW_UP
-
-        # Check for clarification patterns (most specific) - but only with context words
-        clarification_patterns = [
-            "what do you mean",
-            "clarify that",
-            "explain that",
-            "what does that mean",
-        ]
-        if any(pattern in query_lower for pattern in clarification_patterns):
-            return QueryType.CLARIFICATION
-
-        # More specific clarification check - needs context reference
-        if ("clarify" in query_lower or "explain" in query_lower) and any(
-            ref in query_lower
-            for ref in ["that", "this", "it", "what you said", "your answer"]
+        # Quick pre-filter: if no context at all, likely NEW_TOPIC unless clearly referential
+        if (
+            not context.recent_topics
+            and not context.last_user_query
+            and not context.recent_sources
         ):
-            return QueryType.CLARIFICATION
+            # Check for obvious reference words
+            if any(
+                ref_word in query.lower()
+                for ref_word in [
+                    "you said",
+                    "you mentioned",
+                    "mentioned earlier",
+                    "discussed before",
+                    "that document",
+                    "our conversation",
+                    "before",
+                    "earlier",
+                    "previous",
+                ]
+            ):
+                # Even without context, this is clearly referential
+                pass  # Continue with LLM classification
+            else:
+                # No context + no clear reference = likely new topic
+                return QueryType.NEW_TOPIC
 
-        # Check for reference patterns (pronouns and references)
-        reference_patterns = [
-            "that document",
-            "this source",
-            "mentioned earlier",
-            "discussed before",
-            "the above",
-            "from before",
-            "from our conversation",
-        ]
-        if any(pattern in query_lower for pattern in reference_patterns):
-            return QueryType.REFERENCE
-
-        # Simple pronouns only count as reference if we have recent context
-        if context.recent_topics and any(
-            ref in query_lower for ref in ["that", "this", "it"]
-        ):
-            return QueryType.REFERENCE
-
-        # Check for contextual starters
-        if query_lower.startswith(
-            ("and ", "also ", "besides ", "furthermore ", "what about ", "how about ")
-        ):
-            return QueryType.FOLLOW_UP
-
-        # Check if query contains topics from recent conversation (but be more selective)
+        # Additional pre-filter: Check if query is asking about a completely different topic
+        # Even with context present
         if context.recent_topics:
-            # Only consider it a follow-up if multiple topic words match
-            matching_topics = [
-                topic for topic in context.recent_topics if topic.lower() in query_lower
-            ]
-            if len(matching_topics) >= 2:  # More selective - need 2+ topic matches
-                return QueryType.FOLLOW_UP
+            query_lower = query.lower()
 
-        # Default to new topic for everything else
+            # First check if it's clearly a follow-up question regardless of subject
+            clear_follow_up_patterns = [
+                "what are some examples",
+                "give me examples",
+                "show me examples",
+                "what are the",
+                "tell me more",
+                "more about",
+                "more details",
+                "what else",
+                "anything else",
+                "can you elaborate",
+            ]
+
+            if any(pattern in query_lower for pattern in clear_follow_up_patterns):
+                # This is clearly a follow-up, don't pre-filter as NEW_TOPIC
+                pass  # Continue to LLM classification
+            else:
+                # Look for patterns that indicate a completely new topic
+                new_topic_indicators = [
+                    "what is",
+                    "how do i",
+                    "explain",
+                    "show me",
+                    "tell me about",
+                    "how does",
+                    "define",
+                    "describe",
+                ]
+
+                # If it's a "what is X" or similar pattern and X is not in recent topics
+                if any(indicator in query_lower for indicator in new_topic_indicators):
+                    # Extract the main subject from the query
+                    import re
+
+                    # Look for the main subject after common question starters
+                    subject_match = re.search(
+                        r"(?:what is|how do i|explain|show me|tell me about|how does|define|describe)"
+                        r"\s+([a-zA-Z][a-zA-Z\s]*?)(?:\?|$)",
+                        query_lower,
+                    )
+                    if subject_match:
+                        subject = subject_match.group(1).strip()
+                        # Check if any word in the subject matches recent topics closely
+                        subject_words = subject.split()
+                        topic_overlap = any(
+                            any(
+                                topic_word in recent_topic.lower()
+                                or recent_topic.lower() in topic_word
+                                for recent_topic in context.recent_topics
+                            )
+                            for topic_word in subject_words
+                        )
+
+                        # If no significant overlap with recent topics, it's likely a new topic
+                        if not topic_overlap:
+                            return QueryType.NEW_TOPIC
+
+        # Try LLM first if available
+        if self._check_llm_availability():
+            try:
+                return self._classify_with_llm(query, context)
+            except Exception as e:
+                log_error(f"LLM classification failed: {e}")
+                # Fall through to pattern fallback
+
+        # Use pattern-based fallback
+        if self.pattern_fallback:
+            return self.pattern_fallback.detect_query_type(query, context)
+
+        # Last resort - simple heuristic
+        return self._simple_heuristic(query)
+
+    def _classify_with_llm(self, query: str, context: ConversationContext) -> QueryType:
+        """Classify query using LLM"""
+
+        # Build context information
+        context_info = self._build_context_string(context)
+
+        # Create classification prompt
+        prompt = self._create_classification_prompt(query, context_info)
+
+        # Get LLM response
+        try:
+            response = generate_response(
+                prompt, model=self.model, max_tokens=10, temperature=0.1
+            )
+            classification = self._parse_llm_response(response)
+
+            log_debug(f"LLM classified '{query[:50]}...' as {classification.value}")
+            return classification
+
+        except Exception as e:
+            log_error(f"Error in LLM classification: {e}")
+            raise
+
+    def _build_context_string(self, context: ConversationContext) -> str:
+        """Build context information for the prompt"""
+        context_parts = []
+
+        if context.last_user_query:
+            context_parts.append(f"Previous query: {context.last_user_query}")
+
+        if context.recent_topics:
+            topics = ", ".join(context.recent_topics[:5])  # Limit for token efficiency
+            context_parts.append(f"Recent topics: {topics}")
+
+        if context.recent_sources:
+            sources = [s.get("source", "unknown") for s in context.recent_sources[:3]]
+            context_parts.append(f"Recent sources: {', '.join(sources)}")
+
+        return " | ".join(context_parts) if context_parts else "No previous context"
+
+    def _create_classification_prompt(self, query: str, context_info: str) -> str:
+        """Create the classification prompt for the LLM"""
+        return f"""Classify this user query into exactly one category:
+
+CATEGORIES:
+- FOLLOW_UP: User wants more details/examples about the SAME topic we're currently discussing
+- REFERENCE: User refers to previous conversation/documents explicitly ("you said", "mentioned earlier")  
+- CLARIFICATION: User didn't understand something and needs explanation ("what do you mean", "clarify")
+- NEW_TOPIC: User starts a completely different topic OR asks "What is X" where X is unrelated to current discussion
+
+IMPORTANT RULES:
+- If query asks "What is [something]" and [something] is NOT closely related to recent topics → NEW_TOPIC
+- If query asks about a different technology/concept than what's being discussed → NEW_TOPIC  
+- Only use FOLLOW_UP if asking for more info about the SAME topic currently being discussed
+- Examples: "What is JavaScript?" when discussing Python = NEW_TOPIC, 
+  "Tell me more about functions" when discussing Python = FOLLOW_UP
+
+CONTEXT: {context_info}
+
+USER QUERY: "{query}"
+
+Respond with only one word: FOLLOW_UP, REFERENCE, CLARIFICATION, or NEW_TOPIC"""
+
+    def _parse_llm_response(self, response: str) -> QueryType:
+        """Parse LLM response into QueryType enum"""
+        response_clean = response.strip().upper()
+
+        # Direct mapping
+        mapping = {
+            "FOLLOW_UP": QueryType.FOLLOW_UP,
+            "REFERENCE": QueryType.REFERENCE,
+            "CLARIFICATION": QueryType.CLARIFICATION,
+            "NEW_TOPIC": QueryType.NEW_TOPIC,
+            "FOLLOW-UP": QueryType.FOLLOW_UP,  # Handle hyphenated version
+            "NEW-TOPIC": QueryType.NEW_TOPIC,
+        }
+
+        if response_clean in mapping:
+            return mapping[response_clean]
+
+        # Try partial matching
+        if "FOLLOW" in response_clean:
+            return QueryType.FOLLOW_UP
+        elif "REFERENCE" in response_clean:
+            return QueryType.REFERENCE
+        elif "CLARIF" in response_clean:
+            return QueryType.CLARIFICATION
+        elif "NEW" in response_clean:
+            return QueryType.NEW_TOPIC
+
+        # Default fallback
+        log_warning(
+            f"Could not parse LLM response: '{response}', defaulting to NEW_TOPIC"
+        )
         return QueryType.NEW_TOPIC
 
+    def _simple_heuristic(self, query: str) -> QueryType:
+        """Simple heuristic when no LLM or patterns available"""
+        query_lower = query.lower()
+
+        if any(
+            word in query_lower for word in ["more", "tell me", "what else", "continue"]
+        ):
+            return QueryType.FOLLOW_UP
+        elif any(
+            word in query_lower
+            for word in ["clarify", "explain", "what mean", "understand"]
+        ):
+            return QueryType.CLARIFICATION
+        elif any(
+            word in query_lower
+            for word in ["mentioned", "said", "discussed", "before", "earlier"]
+        ):
+            return QueryType.REFERENCE
+        else:
+            return QueryType.NEW_TOPIC
+
     def extract_topics(self, text: str) -> List[str]:
-        """Extract key topics from text using simple keyword extraction"""
+        """Extract key topics from text - can also be LLM-enhanced in future"""
+        # For now, keep the existing pattern-based approach as it's efficient
+        # Could be enhanced with LLM later for better topic extraction
+
         # Remove common words and extract meaningful terms
         stop_words = {
             "the",
@@ -260,8 +398,81 @@ class FollowUpDetector:
                 seen.add(topic)
                 unique_topics.append(topic)
 
-        # Return top topics (limit to prevent noise)
         return unique_topics[:10]
+
+
+class PatternBasedFallback:
+    """Lightweight pattern-based fallback for when LLM is unavailable"""
+
+    def detect_query_type(self, query: str, context: ConversationContext) -> QueryType:
+        """Simplified pattern-based detection"""
+        query_lower = query.lower().strip()
+
+        # High-confidence follow-up patterns
+        if any(
+            pattern in query_lower
+            for pattern in [
+                "tell me more",
+                "more about",
+                "what else",
+                "continue",
+                "elaborate",
+                "more details",
+                "give me more",
+                "expand on",
+                "go deeper",
+            ]
+        ):
+            return QueryType.FOLLOW_UP
+
+        # High-confidence clarification patterns
+        if any(
+            pattern in query_lower
+            for pattern in [
+                "what do you mean",
+                "clarify",
+                "don't understand",
+                "explain that",
+                "be more specific",
+                "break that down",
+                "simplify",
+            ]
+        ):
+            return QueryType.CLARIFICATION
+
+        # High-confidence reference patterns
+        if any(
+            pattern in query_lower
+            for pattern in [
+                "you mentioned",
+                "you said",
+                "discussed before",
+                "from our conversation",
+                "remember when",
+                "earlier",
+                "previous",
+                "that document",
+            ]
+        ):
+            return QueryType.REFERENCE
+
+        # Context-based decisions
+        if context.recent_topics:
+            # Simple pronoun + context check
+            if (
+                any(ref in query_lower for ref in ["that", "this", "it"])
+                and len(context.recent_topics) > 0
+            ):
+                return QueryType.REFERENCE
+
+            # Topic overlap check
+            matching_topics = [
+                topic for topic in context.recent_topics if topic.lower() in query_lower
+            ]
+            if len(matching_topics) >= 1:
+                return QueryType.FOLLOW_UP
+
+        return QueryType.NEW_TOPIC
 
 
 class ConversationMemoryManager:
@@ -269,7 +480,7 @@ class ConversationMemoryManager:
 
     def __init__(self, config: Optional[ConversationMemoryConfig] = None):
         self.config = config or ConversationMemoryConfig()
-        self.follow_up_detector = FollowUpDetector()
+        self.query_classifier = LLMQueryClassifier()
         self._db_path = str(self.config.db_path)
         self._init_database()
 
@@ -370,12 +581,12 @@ class ConversationMemoryManager:
 
         try:
             # Extract topics and detect query type
-            topics = self.follow_up_detector.extract_topics(content)
+            topics = self.query_classifier.extract_topics(content)
             query_type = None
 
             if role == "user":
                 context = self.get_conversation_context(session_id, user_id)
-                query_type = self.follow_up_detector.detect_query_type(
+                query_type = self.query_classifier.detect_query_type(
                     content, context
                 ).value
 

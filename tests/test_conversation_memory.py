@@ -10,7 +10,7 @@ from pathlib import Path
 from app.conversation_memory import (
     ConversationMemoryManager,
     ConversationMemoryConfig,
-    FollowUpDetector,
+    LLMQueryClassifier,
     QueryType,
     ConversationContext,
 )
@@ -18,11 +18,11 @@ from app.context_resolver import ContextAwareQueryResolver
 from app.chat import ChatSession, ChatSessionManager
 
 
-class TestFollowUpDetector:
-    """Tests for follow-up question detection"""
+class TestLLMQueryClassifier:
+    """Tests for LLM-based query classification"""
 
     def setup_method(self):
-        self.detector = FollowUpDetector()
+        self.classifier = LLMQueryClassifier()
 
     def test_detects_follow_up_questions(self):
         """Should detect follow-up question patterns"""
@@ -43,7 +43,7 @@ class TestFollowUpDetector:
         )
 
         for query in follow_up_queries:
-            query_type = self.detector.detect_query_type(query, context)
+            query_type = self.classifier.detect_query_type(query, context)
             assert query_type in [
                 QueryType.FOLLOW_UP,
                 QueryType.REFERENCE,
@@ -68,7 +68,7 @@ class TestFollowUpDetector:
         )
 
         for query in reference_queries:
-            query_type = self.detector.detect_query_type(query, context)
+            query_type = self.classifier.detect_query_type(query, context)
             assert query_type in [QueryType.REFERENCE, QueryType.CLARIFICATION]
 
     def test_detects_new_topic_questions(self):
@@ -89,13 +89,13 @@ class TestFollowUpDetector:
         )
 
         for query in new_topic_queries:
-            query_type = self.detector.detect_query_type(query, context)
+            query_type = self.classifier.detect_query_type(query, context)
             assert query_type == QueryType.NEW_TOPIC
 
     def test_extracts_topics_from_text(self):
         """Should extract meaningful topics from text"""
         text = "Python is a programming language used for machine learning and web development"
-        topics = self.detector.extract_topics(text)
+        topics = self.classifier.extract_topics(text)
 
         assert "python" in topics
         assert "programming" in topics

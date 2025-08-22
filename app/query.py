@@ -28,7 +28,13 @@ EMBEDDING_MODEL = "nomic-embed-text"
 
 def stable_doc_key(d: Document) -> tuple:
     m = d.metadata or {}
-    src = m.get("source") or m.get("file_path") or "unknown"
+    src = (
+        m.get("source")
+        or m.get("file_path")
+        or m.get("original_source")
+        or m.get("filepath")
+        or "unknown"
+    )
     page = m.get("page")
 
     import hashlib
@@ -239,7 +245,11 @@ def format_context(
         m = d.metadata or {}
         sources.append(
             {
-                "source": m.get("source") or m.get("file_path") or "unknown",
+                "source": m.get("source")
+                or m.get("file_path")
+                or m.get("original_source")
+                or m.get("filepath")
+                or "unknown",
                 "page": m.get("page"),
                 "idx": i,
             }

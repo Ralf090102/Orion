@@ -283,7 +283,7 @@ class MetadataEnricher:
         self, content: str, metadata: DocumentMetadata, doc_type: str
     ):
         """Analyze code-specific content"""
-        
+
         # Language-specific analysis
         if doc_type == DocumentType.CODE_PYTHON:
             metadata.programming_language = "Python"

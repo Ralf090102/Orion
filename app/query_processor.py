@@ -263,8 +263,44 @@ class QueryProcessor:
         # Simple validation rules
 
         # Weather, news, real-time data - we can't answer
-        time_sensitive = ["weather", "news", "today", "current", "latest", "now"]
-        if any(word in query.lower() for word in time_sensitive):
+        # Be more specific about what constitutes "real-time" vs conversation context
+        query_lower = query.lower()
+
+        # Real-time data patterns (specific and contextual)
+        real_time_patterns = [
+            "weather",
+            "news",
+            "stock price",
+            "current events",
+            "today's news",
+            "latest news",
+            "breaking news",
+            "current weather",
+            "temperature today",
+            "forecast",
+            "stock market today",
+            "crypto price",
+            "exchange rate",
+        ]
+
+        # Conversation context patterns that should NOT be rejected
+        conversation_patterns = [
+            "right now",
+            "what we're",
+            "we are talking",
+            "our conversation",
+            "this conversation",
+            "what we discussed",
+            "our discussion",
+            "current topic",
+            "currently discussing",
+        ]
+
+        # Check for conversation context first (higher priority)
+        if any(pattern in query_lower for pattern in conversation_patterns):
+            # This is asking about conversation context, not real-time data
+            pass  # Continue with validation
+        elif any(pattern in query_lower for pattern in real_time_patterns):
             return False, "Query requires real-time data that we don't have access to"
 
         # Personal information - we can't answer (but be more specific)

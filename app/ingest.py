@@ -7,7 +7,6 @@ import time
 import hashlib
 import pandas as pd
 from datetime import datetime
-from hashlib import md5
 from pathlib import Path
 from typing import List, Dict, Optional
 from app.utils import (
@@ -116,7 +115,7 @@ def file_checksum(path: Path) -> str:
 
 
 def file_md5(path: Path, buf_size: int = 8 * 1024 * 1024) -> str:
-    h = md5()
+    h = hashlib.md5()
     with path.open("rb") as f:
         while True:
             chunk = f.read(buf_size)
@@ -263,7 +262,7 @@ def dedupe_documents_by_content(docs: list[Document]) -> list[Document]:
     seen = set()
     out = []
     for d in docs:
-        h = md5(d.page_content.encode("utf-8")).hexdigest()
+        h = hashlib.md5(d.page_content.encode("utf-8")).hexdigest()
         if h in seen:
             continue
         seen.add(h)
@@ -358,7 +357,9 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
         "filename": file_path.name,
         "ext": file_path.suffix.lower(),
         "hash": (
-            md5(file_path.read_bytes()).hexdigest() if file_path.is_file() else None
+            hashlib.md5(file_path.read_bytes()).hexdigest()
+            if file_path.is_file()
+            else None
         ),
     }
 
@@ -588,6 +589,24 @@ def load_documents(folder_path: str) -> List[Document]:
                                 "meta": meta,
                             }
                         )
+                    elif loader == "email_loader":
+                        # Skip email files for now - not implemented
+                        ingest_events.append(
+                            {
+                                "file": file_path.name,
+                                "status": "skipped_email",
+                                "meta": meta,
+                            }
+                        )
+                    elif loader == "archive_loader":
+                        # Skip archive files for now - not implemented
+                        ingest_events.append(
+                            {
+                                "file": file_path.name,
+                                "status": "skipped_archive",
+                                "meta": meta,
+                            }
+                        )
                     elif loader:
                         file_docs = loader.load()
                         for doc in file_docs:
@@ -695,6 +714,8 @@ def rebuild_vectorstore(
         loader = get_loader_for_file(path)
         if loader == "metadata_only":
             text = ""
+        elif loader == "email_loader" or loader == "archive_loader":
+            continue  # Skip unimplemented loaders
         elif loader:
             text = "\n".join([d.page_content for d in loader.load()])
         else:
@@ -755,6 +776,8 @@ def incremental_vectorstore(
             loader = get_loader_for_file(path)
             if loader == "metadata_only":
                 text = ""
+            elif loader == "email_loader" or loader == "archive_loader":
+                continue  # Skip unimplemented loaders
             elif loader:
                 text = "\n".join([d.page_content for d in loader.load()])
             else:

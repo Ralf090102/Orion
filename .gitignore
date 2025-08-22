@@ -41,7 +41,7 @@ htmlcov/
 test-results/
 
 # Local data
-data/raw/
+data/ingest/
 data/processed/
 data/conversations/
 *.db

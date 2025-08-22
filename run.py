@@ -4,6 +4,7 @@ Supports user workspaces, query enhancement, and better error handling.
 """
 
 import sys
+import subprocess
 from pathlib import Path
 from app.ingest import rebuild_vectorstore, incremental_vectorstore
 from app.query import query_knowledgebase
@@ -115,7 +116,6 @@ def check_system_health(config: Config) -> bool:
 def install_models(models: list) -> bool:
     """Install missing models using ollama"""
     try:
-        import subprocess
 
         for model in models:
             log_info(f"📥 Installing {model}...")
@@ -317,6 +317,14 @@ def handle_interactive_query(config: Config):
     else:
         selected_model = config.llm_model
 
+    # Initialize conversation memory with chat session
+    from app.chat import ChatSessionManager
+
+    session_manager = ChatSessionManager()
+    chat_session = session_manager.get_or_create_session(
+        user_id=config.user_id, enable_memory=True
+    )
+
     # Query enhancement options
     print("\n⚙️ Query Enhancement Options:")
     print("  1. Enhanced (recommended) - Uses query expansion, HyDE, multi-retrieval")
@@ -366,21 +374,28 @@ def handle_interactive_query(config: Config):
         print(f"\n🔍 Processing query #{query_count}...")
 
         try:
+            # Add user question to chat session
+            chat_session.add_message("user", question)
+
             result = query_knowledgebase(
                 query=question,
                 persist_path=config.user_persist_path,
                 model=selected_model,
                 k=config.retrieval_k,
                 use_query_enhancement=use_enhancement,
+                chat_session=chat_session,
             )
 
-            # Handle both dict and string results
+            # Add assistant response to chat session
             if isinstance(result, dict):
                 answer = result.get("answer", "No answer provided")
                 sources = result.get("sources", [])
+                # Add response with sources
+                chat_session.add_message("assistant", answer, sources=sources)
             else:
                 answer = result
                 sources = []
+                chat_session.add_message("assistant", answer)
 
             # Display results
             print("\n" + "=" * 60)

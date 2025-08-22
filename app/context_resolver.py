@@ -5,11 +5,13 @@ Integrates conversation memory with the RAG pipeline to provide context-aware
 query processing and follow-up handling.
 """
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
 from app.conversation_memory import QueryType, ConversationContext
-from app.chat import ChatSession
 from app.utils import log_debug
+
+if TYPE_CHECKING:
+    from app.chat import ChatSession
 
 
 @dataclass
@@ -47,7 +49,7 @@ class ContextAwareQueryResolver:
             ],
         }
 
-    def resolve_query(self, query: str, session: ChatSession) -> ResolvedQuery:
+    def resolve_query(self, query: str, session: "ChatSession") -> ResolvedQuery:
         """
         Resolve a query using conversation context
 
@@ -75,6 +77,19 @@ class ContextAwareQueryResolver:
 
         # Get conversation context for follow-ups/references
         context = session.get_conversation_context()
+
+        # Check if we actually have meaningful context
+        if not context.recent_topics and not context.recent_sources:
+            # No meaningful context available - treat as new topic
+            return ResolvedQuery(
+                original_query=query,
+                resolved_query=query,
+                query_type=QueryType.NEW_TOPIC,
+                context_used=False,
+                topics_referenced=[],
+                sources_referenced=[],
+                enhancement_explanation="No conversation context available - treating as new topic",
+            )
 
         # Enhance query with context
         enhanced_query, topics_used, sources_used, explanation = (
