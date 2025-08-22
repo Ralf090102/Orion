@@ -52,3 +52,6 @@ Thumbs.db
 
 # Temporary scratch or dump files
 *.dump
+
+# Demos
+demos/
