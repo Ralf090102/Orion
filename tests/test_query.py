@@ -189,9 +189,9 @@ class TestQueryProcessor:
             "What is machine learning?",
             "Define artificial intelligence",
             "Explain how neural networks work",
-            "Tell me about Python programming"
+            "Tell me about Python programming",
         ]
-        
+
         for query in test_cases:
             intent, confidence = self.processor.detect_intent(query)
             assert intent == QueryIntent.FACTUAL
@@ -203,9 +203,9 @@ class TestQueryProcessor:
             "Compare Python and Java",
             "What's the difference between REST and GraphQL?",
             "Analyze the pros and cons of React vs Vue",
-            "Evaluate Docker versus Kubernetes"
+            "Evaluate Docker versus Kubernetes",
         ]
-        
+
         for query in test_cases:
             intent, confidence = self.processor.detect_intent(query)
             assert intent == QueryIntent.ANALYTICAL
@@ -217,9 +217,9 @@ class TestQueryProcessor:
             "How to install Python?",
             "How do I create a REST API?",
             "Steps to deploy a web application",
-            "Guide to setting up a database"
+            "Guide to setting up a database",
         ]
-        
+
         for query in test_cases:
             intent, confidence = self.processor.detect_intent(query)
             assert intent == QueryIntent.PROCEDURAL
@@ -231,9 +231,9 @@ class TestQueryProcessor:
             "Why doesn't my code work?",
             "Fix this segmentation fault error",
             "Debug this Python problem",
-            "Solve this database connection issue"
+            "Solve this database connection issue",
         ]
-        
+
         for query in test_cases:
             intent, confidence = self.processor.detect_intent(query)
             assert intent == QueryIntent.TROUBLESHOOTING
@@ -245,9 +245,9 @@ class TestQueryProcessor:
             "Write a function to sort arrays",
             "Create a REST API endpoint",
             "Generate a SQL query",
-            "Build a simple web page"
+            "Build a simple web page",
         ]
-        
+
         for query in test_cases:
             intent, confidence = self.processor.detect_intent(query)
             assert intent == QueryIntent.CREATIVE
@@ -255,12 +255,8 @@ class TestQueryProcessor:
 
     def test_intent_detection_default_factual(self):
         """Should default to factual for ambiguous queries"""
-        ambiguous_queries = [
-            "Python",
-            "Database stuff",
-            "Something about APIs"
-        ]
-        
+        ambiguous_queries = ["Python", "Database stuff", "Something about APIs"]
+
         for query in ambiguous_queries:
             intent, confidence = self.processor.detect_intent(query)
             assert intent == QueryIntent.FACTUAL
@@ -270,12 +266,12 @@ class TestQueryProcessor:
         """Should extract meaningful keywords from queries"""
         query = "How to implement machine learning algorithms in Python?"
         keywords = self.processor.extract_keywords(query)
-        
+
         # Should include important technical terms
         expected_keywords = ["implement", "machine", "learning", "algorithms", "python"]
         for keyword in expected_keywords:
             assert keyword in keywords
-        
+
         # Should exclude stop words
         stop_words = ["how", "to", "in"]
         for stop_word in stop_words:
@@ -285,16 +281,16 @@ class TestQueryProcessor:
         """Should preserve order of keywords while removing duplicates"""
         query = "Python Python programming programming language"
         keywords = self.processor.extract_keywords(query)
-        
+
         assert keywords == ["python", "programming", "language"]
 
     def test_sub_query_generation_analytical(self):
         """Should break down analytical queries into sub-questions"""
         query = "Compare Python and Java for web development"
         intent = QueryIntent.ANALYTICAL
-        
+
         sub_queries = self.processor.break_into_sub_queries(query, intent)
-        
+
         # Should generate multiple sub-questions for comparison
         assert len(sub_queries) > 1
         # Should contain questions about each item
@@ -306,9 +302,9 @@ class TestQueryProcessor:
         """Should break down procedural queries into steps"""
         query = "How to deploy a web application"
         intent = QueryIntent.PROCEDURAL
-        
+
         sub_queries = self.processor.break_into_sub_queries(query, intent)
-        
+
         # Should generate multiple sub-questions
         assert len(sub_queries) > 1
         # Should include prerequisite and step-based questions
@@ -319,21 +315,23 @@ class TestQueryProcessor:
         """Should break down troubleshooting queries systematically"""
         query = "Fix this database connection error"
         intent = QueryIntent.TROUBLESHOOTING
-        
+
         sub_queries = self.processor.break_into_sub_queries(query, intent)
-        
+
         # Should generate diagnostic sub-questions
         assert len(sub_queries) > 1
         sub_queries_text = " ".join(sub_queries).lower()
-        assert any(word in sub_queries_text for word in ["causes", "solutions", "error"])
+        assert any(
+            word in sub_queries_text for word in ["causes", "solutions", "error"]
+        )
 
     def test_sub_query_generation_simple_query(self):
         """Should not break down simple queries unnecessarily"""
         query = "What is Python?"
         intent = QueryIntent.FACTUAL
-        
+
         sub_queries = self.processor.break_into_sub_queries(query, intent)
-        
+
         # Should return the original query for simple cases
         assert len(sub_queries) == 1
         assert sub_queries[0] == query
@@ -343,9 +341,9 @@ class TestQueryProcessor:
         time_queries = [
             "What's the weather today?",
             "Latest news about AI",
-            "Current stock prices"
+            "Current stock prices",
         ]
-        
+
         for query in time_queries:
             can_answer, reasoning = self.processor.validate_query(query, [])
             assert can_answer is False
@@ -356,46 +354,50 @@ class TestQueryProcessor:
         personal_queries = [
             "Tell me about my personal files",
             "Access my private data",
-            "Show me my account information"
+            "Show me my account information",
         ]
-        
+
         for query in personal_queries:
             can_answer, reasoning = self.processor.validate_query(query, [])
             assert can_answer is False
             assert "personal" in reasoning.lower()
-        
+
         # These should NOT be rejected (they're technical, not personal)
         technical_with_my = [
             "What is my code doing wrong?",
             "Fix my Python script",
-            "Debug my application"
+            "Debug my application",
         ]
-        
+
         for query in technical_with_my:
             can_answer, reasoning = self.processor.validate_query(query, [])
-            assert can_answer is True  # These are technical questions, not personal info
+            assert (
+                can_answer is True
+            )  # These are technical questions, not personal info
 
     def test_query_validation_technical_queries(self):
         """Should accept technical queries we can likely answer"""
         technical_queries = [
             "How does a database work?",
             "Explain API design patterns",
-            "Programming best practices"
+            "Programming best practices",
         ]
-        
+
         for query in technical_queries:
             can_answer, reasoning = self.processor.validate_query(query, [])
             assert can_answer is True
-            assert "technical" in reasoning.lower() or "documentation" in reasoning.lower()
+            assert (
+                "technical" in reasoning.lower() or "documentation" in reasoning.lower()
+            )
 
     def test_query_validation_default_acceptance(self):
         """Should default to accepting queries we might be able to answer"""
         generic_queries = [
             "Tell me about machine learning",
             "Explain data structures",
-            "Software architecture patterns"
+            "Software architecture patterns",
         ]
-        
+
         for query in generic_queries:
             can_answer, reasoning = self.processor.validate_query(query, [])
             assert can_answer is True
@@ -403,9 +405,9 @@ class TestQueryProcessor:
     def test_full_query_analysis(self):
         """Should perform complete query analysis"""
         query = "How to implement a RESTful API in Python?"
-        
+
         analysis = self.processor.analyze_query(query)
-        
+
         # Check all components of the analysis
         assert isinstance(analysis, QueryAnalysis)
         assert analysis.original_query == query
@@ -415,7 +417,7 @@ class TestQueryProcessor:
         assert len(analysis.sub_queries) >= 1
         assert isinstance(analysis.can_answer, bool)
         assert len(analysis.reasoning) > 0
-        
+
         # Should extract relevant keywords
         keywords_text = " ".join(analysis.keywords)
         assert "implement" in keywords_text
@@ -425,13 +427,13 @@ class TestQueryProcessor:
     def test_complex_comparison_query_analysis(self):
         """Should handle complex comparison queries well"""
         query = "Compare React and Vue.js for building single-page applications"
-        
+
         analysis = self.processor.analyze_query(query)
-        
+
         assert analysis.intent == QueryIntent.ANALYTICAL
         assert analysis.confidence > 0.0
         assert len(analysis.sub_queries) > 1  # Should break down the comparison
-        
+
         # Keywords should include the compared items
         keywords_text = " ".join(analysis.keywords)
         assert "react" in keywords_text
@@ -441,13 +443,13 @@ class TestQueryProcessor:
     def test_troubleshooting_query_analysis(self):
         """Should handle troubleshooting queries appropriately"""
         query = "Why am I getting a 'module not found' error in my Python script?"
-        
+
         analysis = self.processor.analyze_query(query)
-        
+
         assert analysis.intent == QueryIntent.TROUBLESHOOTING
         assert analysis.confidence > 0.0
         assert analysis.can_answer is True  # Technical issue we can help with
-        
+
         # Should have relevant keywords
         keywords_text = " ".join(analysis.keywords)
         assert "module" in keywords_text

@@ -43,6 +43,9 @@ test-results/
 # Local data
 data/raw/
 data/processed/
+data/conversations/
+*.db
+*.sqlite
 
 # OS-specific
 Thumbs.db

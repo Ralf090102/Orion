@@ -30,34 +30,78 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from app.chunking import SemanticChunker
 from app.document_intelligence import (
-    DocumentTypeDetector,
     MetadataEnricher,
     SmartChunker,
-    DocumentMetadata
+    DocumentMetadata,
 )
 
 MANIFEST_NAME = "manifest.json"
 EMBEDDING_MODEL = "nomic-embed-text"
 SUPPORTED_EXTENSIONS = {
     # Documents
-    ".pdf", ".docx", ".xlsx", ".xls", ".txt", ".csv",
-    ".md", ".rtf",
+    ".pdf",
+    ".docx",
+    ".xlsx",
+    ".xls",
+    ".txt",
+    ".csv",
+    ".md",
+    ".rtf",
     # Images (for future OCR/vision)
-    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".bmp",
     ".tiff",
     # Code files
-    ".py", ".js", ".ts", ".java", ".c", ".cpp", ".h",
-    ".hpp", ".cs", ".go", ".rs", ".php",  ".html",
-    ".css", ".xml", ".json", ".yaml", ".yml", ".toml",
-    ".ini", ".cfg", ".sql", ".sh", ".bat", ".ps1",
-    ".r", ".m", ".swift", ".kt", ".dart",
+    ".py",
+    ".js",
+    ".ts",
+    ".java",
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".cs",
+    ".go",
+    ".rs",
+    ".php",
+    ".html",
+    ".css",
+    ".xml",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".sql",
+    ".sh",
+    ".bat",
+    ".ps1",
+    ".r",
+    ".m",
+    ".swift",
+    ".kt",
+    ".dart",
     # Text/Documentation
-    ".org", ".rst", ".tex", ".log", ".conf",
+    ".org",
+    ".rst",
+    ".tex",
+    ".log",
+    ".conf",
     ".properties",
     # Email (common formats)
-    ".eml", ".msg", ".mbox",
+    ".eml",
+    ".msg",
+    ".mbox",
     # Archives (we can extract and process contents)
-    ".zip", ".tar", ".gz", ".7z",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".7z",
     # Bookmarks
     ".html",
 }
@@ -100,17 +144,13 @@ def save_manifest(persist_path: str, mapping: Dict[str, str]):
 def chunk_documents(texts: List[Dict], chunk_size: int, chunk_overlap: int):
     """Enhanced document chunking with document intelligence."""
     # Initialize our smart chunker
-    smart_chunker = SmartChunker(
-        chunk_size=chunk_size, 
-        overlap=chunk_overlap
-    )
-    
+    smart_chunker = SmartChunker(chunk_size=chunk_size, overlap=chunk_overlap)
+
     # Fallback semantic chunker for edge cases
     semantic_chunker = SemanticChunker(
-        chunk_size=chunk_size, 
-        chunk_overlap=chunk_overlap
+        chunk_size=chunk_size, chunk_overlap=chunk_overlap
     )
-    
+
     all_chunks = []
 
     for doc in texts:
@@ -121,31 +161,35 @@ def chunk_documents(texts: List[Dict], chunk_size: int, chunk_overlap: int):
                 doc_metadata = DocumentMetadata(
                     filename=doc["metadata"].get("filename", "unknown"),
                     filepath=doc["metadata"].get("source", "unknown"),
-                    file_size=len(doc["text"].encode('utf-8')),
+                    file_size=len(doc["text"].encode("utf-8")),
                     created_date=datetime.now(),  # Use current time as fallback
                     modified_date=datetime.now(),  # Use current time as fallback
                     document_type=doc["metadata"].get("document_type", "text_plain"),
                     word_count=len(doc["text"].split()),
-                    line_count=len(doc["text"].split('\n'))
+                    line_count=len(doc["text"].split("\n")),
                 )
             else:
                 doc_metadata = doc["metadata"]
-            
+
             # Use smart chunking with document intelligence
             chunks = smart_chunker.chunk_document(doc["text"], doc_metadata)
-            
+
             # Add intelligence metadata to chunks
             for chunk in chunks:
                 # Preserve existing metadata and add chunking info
-                chunk["metadata"].update({
-                    "chunking_method": "smart",
-                    "original_source": doc["metadata"].get("source"),
-                })
-            
+                chunk["metadata"].update(
+                    {
+                        "chunking_method": "smart",
+                        "original_source": doc["metadata"].get("source"),
+                    }
+                )
+
             all_chunks.extend(chunks)
-            log_info(f"Smart chunking created {len(chunks)} chunks for "
-                    f"{doc['metadata'].get('source', 'unknown')}")
-            
+            log_info(
+                f"Smart chunking created {len(chunks)} chunks for "
+                f"{doc['metadata'].get('source', 'unknown')}"
+            )
+
         except Exception as e:
             log_warning(
                 f"Smart chunking failed for {doc['metadata'].get('source', 'unknown')}: {e}"
@@ -317,7 +361,7 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
             md5(file_path.read_bytes()).hexdigest() if file_path.is_file() else None
         ),
     }
-    
+
     try:
         # Use document intelligence for enhanced metadata
         if file_path.is_file():
@@ -327,38 +371,45 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
                 with open(file_path, encoding="utf-8", errors="ignore") as f:
                     content = f.read()
             except Exception as e:
-                log_warning(f"Could not read file content for intelligence analysis: {e}")
-            
+                log_warning(
+                    f"Could not read file content for intelligence analysis: {e}"
+                )
+
             if content:
                 # Use our document intelligence system
                 enricher = MetadataEnricher()
                 doc_metadata = enricher.extract_metadata(str(file_path), content)
-                
+
                 # Merge enhanced metadata with basic metadata
-                meta.update({
-                    "document_type": doc_metadata.document_type,
-                    "title": doc_metadata.title or meta.get("title"),
-                    "author": doc_metadata.author,
-                    "word_count": doc_metadata.word_count,
-                    "line_count": doc_metadata.line_count,
-                    "paragraph_count": doc_metadata.paragraph_count,
-                    "topics": doc_metadata.topics,
-                    "keywords": doc_metadata.keywords,
-                    "programming_language": doc_metadata.programming_language,
-                    "functions_detected": doc_metadata.functions_detected,
-                    "classes_detected": doc_metadata.classes_detected,
-                    "imports_detected": doc_metadata.imports_detected,
-                    "content_hash": doc_metadata.content_hash,
-                    "intelligence_confidence": doc_metadata.confidence_score
-                })
-                
-                log_info(f"Enhanced metadata extracted: {doc_metadata.document_type} "
-                         f"({doc_metadata.word_count} words, {len(doc_metadata.topics)} topics)")
-        
+                meta.update(
+                    {
+                        "document_type": doc_metadata.document_type,
+                        "title": doc_metadata.title or meta.get("title"),
+                        "author": doc_metadata.author,
+                        "word_count": doc_metadata.word_count,
+                        "line_count": doc_metadata.line_count,
+                        "paragraph_count": doc_metadata.paragraph_count,
+                        "topics": doc_metadata.topics,
+                        "keywords": doc_metadata.keywords,
+                        "programming_language": doc_metadata.programming_language,
+                        "functions_detected": doc_metadata.functions_detected,
+                        "classes_detected": doc_metadata.classes_detected,
+                        "imports_detected": doc_metadata.imports_detected,
+                        "content_hash": doc_metadata.content_hash,
+                        "intelligence_confidence": doc_metadata.confidence_score,
+                    }
+                )
+
+                log_info(
+                    f"Enhanced metadata extracted: {doc_metadata.document_type} "
+                    f"({doc_metadata.word_count} words, {len(doc_metadata.topics)} topics)"
+                )
+
         # Legacy metadata extraction for specific formats (as fallback/enhancement)
         if file_type == ".pdf":
             try:
                 from pypdf import PdfReader
+
                 reader = PdfReader(str(file_path))
                 # Only override if document intelligence didn't find a title
                 if not meta.get("title"):
@@ -367,10 +418,11 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
                     meta["author"] = getattr(reader.metadata, "author", None)
             except Exception:
                 pass
-                
+
         elif file_type == ".docx":
             try:
                 from docx import Document as DocxDocument
+
                 doc = DocxDocument(str(file_path))
                 props = doc.core_properties
                 if not meta.get("author"):
@@ -379,29 +431,31 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
                     meta["title"] = props.title
             except Exception:
                 pass
-                
+
         elif file_type in {".xlsx", ".xls"}:
             try:
                 import openpyxl
+
                 wb = openpyxl.load_workbook(str(file_path), read_only=True)
                 meta["sheets"] = wb.sheetnames
                 meta["creator"] = wb.properties.creator
             except Exception:
                 pass
-                
+
         elif file_type in {".png", ".jpg", ".jpeg", ".webp"}:
             try:
                 from PIL import Image
+
                 with Image.open(str(file_path)) as img:
                     meta["image_size"] = img.size
                     meta["image_mode"] = img.mode
             except Exception:
                 pass
-                
+
     except Exception as e:
         meta["meta_error"] = str(e)
         log_warning(f"Metadata extraction failed for {file_path}: {e}")
-    
+
     if extra:
         meta.update(extra)
     return meta
@@ -429,11 +483,36 @@ def get_loader_for_file(file_path: Path):
 
     # Code files - treat as text
     if suffix in {
-        ".py", ".js", ".ts", ".java", ".c", ".cpp", ".h",
-        ".hpp", ".cs", ".go", ".rs", ".php", ".html",
-        ".css", ".xml", ".json", ".yaml", ".yml", ".toml",
-        ".ini", ".cfg", ".sql", ".sh", ".bat", ".ps1",
-        ".r", ".m", ".swift", ".kt", ".dart",
+        ".py",
+        ".js",
+        ".ts",
+        ".java",
+        ".c",
+        ".cpp",
+        ".h",
+        ".hpp",
+        ".cs",
+        ".go",
+        ".rs",
+        ".php",
+        ".html",
+        ".css",
+        ".xml",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".ini",
+        ".cfg",
+        ".sql",
+        ".sh",
+        ".bat",
+        ".ps1",
+        ".r",
+        ".m",
+        ".swift",
+        ".kt",
+        ".dart",
     }:
         return TextLoader(str(file_path), autodetect_encoding=True)
 
