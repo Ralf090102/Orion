@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch, MagicMock
 import tempfile
 
 from core.processing.media_processing import OCRProcessor, TableDetector, MediaProcessor
-from app.media_config import check_dependencies, get_processing_config
+from core.utils.media_config import check_dependencies, get_processing_config
 
 
 class TestOCRProcessor:
@@ -18,7 +18,7 @@ class TestOCRProcessor:
     def test_init_no_backends(self):
         """Test OCR processor initialization with no backends available."""
         with patch(
-            "app.media_processing.OCRProcessor._check_available_backends",
+            "core.processing.media_processing.OCRProcessor._check_available_backends",
             return_value=[],
         ):
             processor = OCRProcessor()
@@ -27,7 +27,7 @@ class TestOCRProcessor:
     def test_init_with_easyocr(self):
         """Test OCR processor initialization with EasyOCR available."""
         with patch(
-            "app.media_processing.OCRProcessor._check_available_backends",
+            "core.processing.media_processing.OCRProcessor._check_available_backends",
             return_value=["easyocr"],
         ):
             processor = OCRProcessor()
@@ -36,7 +36,7 @@ class TestOCRProcessor:
     def test_extract_text_no_backends(self):
         """Test text extraction with no OCR backends available."""
         with patch(
-            "app.media_processing.OCRProcessor._check_available_backends",
+            "core.processing.media_processing.OCRProcessor._check_available_backends",
             return_value=[],
         ):
             processor = OCRProcessor()
@@ -51,8 +51,8 @@ class TestOCRProcessor:
             finally:
                 tmp_path.unlink()
 
-    @patch("app.media_processing.Image")
-    @patch("app.media_processing.ImageEnhance")
+    @patch("core.processing.media_processing.Image")
+    @patch("core.processing.media_processing.ImageEnhance")
     def test_preprocess_image(self, mock_image_enhance, mock_image):
         """Test image preprocessing functionality."""
         # Mock PIL Image
@@ -89,8 +89,8 @@ class TestOCRProcessor:
         finally:
             tmp_path.unlink()
 
-    @patch("app.media_processing.OCRProcessor._check_available_backends")
-    @patch("app.media_processing.OCRProcessor._preprocess_image")
+    @patch("core.processing.media_processing.OCRProcessor._check_available_backends")
+    @patch("core.processing.media_processing.OCRProcessor._preprocess_image")
     def test_extract_text_with_mocked_easyocr(
         self, mock_preprocess, mock_check_backends
     ):
@@ -142,7 +142,7 @@ class TestTableDetector:
     def test_detect_tables_in_pdf_no_libraries(self):
         """Test PDF table detection with no libraries available."""
         with patch(
-            "app.media_processing.TableDetector._check_table_detection_methods",
+            "core.processing.media_processing.TableDetector._check_table_detection_methods",
             return_value=["basic"],
         ):
             detector = TableDetector()
@@ -157,7 +157,9 @@ class TestTableDetector:
             finally:
                 tmp_path.unlink()
 
-    @patch("app.media_processing.TableDetector._check_table_detection_methods")
+    @patch(
+        "core.processing.media_processing.TableDetector._check_table_detection_methods"
+    )
     def test_detect_tables_with_mocked_camelot(self, mock_check_methods):
         """Test table detection with mocked Camelot."""
         mock_check_methods.return_value = ["camelot"]
@@ -221,8 +223,8 @@ class TestMediaProcessor:
         assert processor.stats["images_processed"] == 0
 
     @patch("PIL.Image.open")
-    @patch("app.media_processing.OCRProcessor.extract_text")
-    @patch("app.media_processing.TableDetector.detect_tables_in_image")
+    @patch("core.processing.media_processing.OCRProcessor.extract_text")
+    @patch("core.processing.media_processing.TableDetector.detect_tables_in_image")
     def test_process_image_success(
         self, mock_detect_tables, mock_extract_text, mock_image_open
     ):
@@ -288,7 +290,7 @@ class TestMediaProcessor:
         finally:
             tmp_path.unlink()
 
-    @patch("app.media_processing.TableDetector.detect_tables_in_pdf")
+    @patch("core.processing.media_processing.TableDetector.detect_tables_in_pdf")
     def test_process_pdf_enhanced(self, mock_detect_tables):
         """Test enhanced PDF processing."""
         # Mock table detection results
@@ -392,8 +394,8 @@ class TestIntegration:
         assert result["success"] is False
         assert "error" in result
 
-    @patch("app.media_processing.OCRProcessor")
-    @patch("app.media_processing.TableDetector")
+    @patch("core.processing.media_processing.OCRProcessor")
+    @patch("core.processing.media_processing.TableDetector")
     def test_initialization_with_mocked_components(
         self, mock_table_detector, mock_ocr_processor
     ):

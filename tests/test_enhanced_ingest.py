@@ -14,8 +14,8 @@ from core.rag.ingest import extract_metadata, load_documents
 class TestEnhancedMetadataExtraction:
     """Test enhanced metadata extraction with media processing."""
 
-    @patch("app.ingest.MetadataEnricher")
-    @patch("app.media_processing.media_processor")
+    @patch("core.rag.ingest.MetadataEnricher")
+    @patch("core.processing.media_processing.media_processor")
     def test_extract_metadata_with_image_ocr(self, mock_media_processor, mock_enricher):
         """Test metadata extraction for images with OCR."""
         # Mock document intelligence
@@ -85,8 +85,8 @@ class TestEnhancedMetadataExtraction:
         finally:
             tmp_path.unlink()
 
-    @patch("app.ingest.MetadataEnricher")
-    @patch("app.media_processing.media_processor")
+    @patch("core.rag.ingest.MetadataEnricher")
+    @patch("core.processing.media_processing.media_processor")
     def test_extract_metadata_image_no_text(self, mock_media_processor, mock_enricher):
         """Test metadata extraction for images with no OCR text."""
         # Mock document intelligence
@@ -141,8 +141,8 @@ class TestEnhancedMetadataExtraction:
         finally:
             tmp_path.unlink()
 
-    @patch("app.ingest.MetadataEnricher")
-    @patch("app.media_processing.media_processor")
+    @patch("core.rag.ingest.MetadataEnricher")
+    @patch("core.processing.media_processing.media_processor")
     @patch("pypdf.PdfReader")
     def test_extract_metadata_pdf_with_tables(
         self, mock_pdf_reader, mock_media_processor, mock_enricher
@@ -210,8 +210,8 @@ class TestEnhancedMetadataExtraction:
         finally:
             tmp_path.unlink()
 
-    @patch("app.ingest.MetadataEnricher")
-    @patch("app.media_processing.media_processor")
+    @patch("core.rag.ingest.MetadataEnricher")
+    @patch("core.processing.media_processing.media_processor")
     def test_extract_metadata_processing_failure(
         self, mock_media_processor, mock_enricher
     ):
@@ -262,10 +262,10 @@ class TestEnhancedMetadataExtraction:
 class TestEnhancedDocumentLoading:
     """Test enhanced document loading with OCR integration."""
 
-    @patch("app.ingest.extract_metadata")
-    @patch("app.ingest.get_loader_for_file")
-    @patch("app.ingest.validate_path")
-    @patch("app.ingest.create_progress_bar")
+    @patch("core.rag.ingest.extract_metadata")
+    @patch("core.rag.ingest.get_loader_for_file")
+    @patch("core.rag.ingest.validate_path")
+    @patch("core.rag.ingest.create_progress_bar")
     def test_load_documents_with_ocr_text(
         self,
         mock_progress_bar,
@@ -319,10 +319,10 @@ class TestEnhancedDocumentLoading:
                 assert doc.metadata["filename"] == "test_image.png"
                 assert "ocr_text" in doc.metadata
 
-    @patch("app.ingest.extract_metadata")
-    @patch("app.ingest.get_loader_for_file")
-    @patch("app.ingest.validate_path")
-    @patch("app.ingest.create_progress_bar")
+    @patch("core.rag.ingest.extract_metadata")
+    @patch("core.rag.ingest.get_loader_for_file")
+    @patch("core.rag.ingest.validate_path")
+    @patch("core.rag.ingest.create_progress_bar")
     def test_load_documents_image_no_ocr_text(
         self,
         mock_progress_bar,
@@ -376,10 +376,10 @@ class TestEnhancedDocumentLoading:
                 assert doc.page_content == ""
                 assert doc.metadata["filename"] == "chart.png"
 
-    @patch("app.ingest.extract_metadata")
-    @patch("app.ingest.get_loader_for_file")
-    @patch("app.ingest.validate_path")
-    @patch("app.ingest.create_progress_bar")
+    @patch("core.rag.ingest.extract_metadata")
+    @patch("core.rag.ingest.get_loader_for_file")
+    @patch("core.rag.ingest.validate_path")
+    @patch("core.rag.ingest.create_progress_bar")
     def test_load_documents_mixed_content(
         self,
         mock_progress_bar,

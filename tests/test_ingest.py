@@ -13,7 +13,7 @@ class TestGetLoaderForFile:
     def test_pdf_loader_created(self):
         """Should return a PyPDFLoader for .pdf files."""
         pdf_path = Path("test.pdf")
-        with patch("app.ingest.PyPDFLoader") as mock_loader:
+        with patch("core.rag.ingest.PyPDFLoader") as mock_loader:
             loader = get_loader_for_file(pdf_path)
             mock_loader.assert_called_once_with("test.pdf")
             assert loader == mock_loader.return_value
@@ -21,7 +21,7 @@ class TestGetLoaderForFile:
     def test_docx_loader_created(self):
         """Should return a Docx2txtLoader for .docx files."""
         docx_path = Path("test.docx")
-        with patch("app.ingest.Docx2txtLoader") as mock_loader:
+        with patch("core.rag.ingest.Docx2txtLoader") as mock_loader:
             loader = get_loader_for_file(docx_path)
             mock_loader.assert_called_once_with("test.docx")
             assert loader == mock_loader.return_value
@@ -32,7 +32,7 @@ class TestGetLoaderForFile:
 
         for ext in text_extensions:
             path = Path(f"test{ext}")
-            with patch("app.ingest.TextLoader") as mock_loader:
+            with patch("core.rag.ingest.TextLoader") as mock_loader:
                 loader = get_loader_for_file(path)
                 mock_loader.assert_called_once_with(str(path), autodetect_encoding=True)
                 assert loader == mock_loader.return_value
@@ -101,8 +101,8 @@ class TestEnhancedChunking:
 
         # Mock both SmartChunker and SemanticChunker to raise exceptions
         with (
-            patch("app.ingest.SmartChunker") as mock_smart_chunker,
-            patch("app.ingest.SemanticChunker") as mock_semantic_chunker,
+            patch("core.rag.ingest.SmartChunker") as mock_smart_chunker,
+            patch("core.rag.ingest.SemanticChunker") as mock_semantic_chunker,
         ):
             mock_smart_chunker.return_value.chunk_document.side_effect = Exception(
                 "Smart chunking failed"
@@ -134,7 +134,7 @@ class TestLoadDocuments:
         # Create fake files
         (tmp_path / "file1.pdf").write_text("Fake PDF")
         (tmp_path / "file2.xyz").write_text("Unsupported")
-        with patch("app.ingest.PyPDFLoader") as mock_loader:
+        with patch("core.rag.ingest.PyPDFLoader") as mock_loader:
             mock_loader.return_value.load.return_value = fake_docs
             docs = load_documents(tmp_path)
             assert docs == fake_docs

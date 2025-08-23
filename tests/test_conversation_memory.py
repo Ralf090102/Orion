@@ -395,7 +395,7 @@ class TestEnhancedChatSession:
         # Patch the global memory manager to use our test config
         self.test_manager = ConversationMemoryManager(config)
 
-        with patch("app.chat.memory_manager", self.test_manager):
+        with patch("core.rag.chat.memory_manager", self.test_manager):
             self.session = ChatSession(
                 session_id="test_session",
                 user_id="test_user",
@@ -411,7 +411,7 @@ class TestEnhancedChatSession:
 
     def test_adds_messages_to_persistent_memory(self):
         """Should add messages to both session and persistent memory"""
-        with patch("app.chat.memory_manager", self.test_manager):
+        with patch("core.rag.chat.memory_manager", self.test_manager):
             self.session.add_message("user", "What is Python?")
             self.session.add_message("assistant", "Python is a programming language")
 
@@ -437,7 +437,7 @@ class TestEnhancedChatSession:
         )
 
         # Create new session with same ID - should load history
-        with patch("app.chat.memory_manager", self.test_manager):
+        with patch("core.rag.chat.memory_manager", self.test_manager):
             new_session = ChatSession(
                 session_id="existing_session",
                 user_id="test_user",
@@ -454,7 +454,7 @@ class TestEnhancedChatSession:
     def test_detects_query_types(self):
         """Should detect different query types"""
         # Add initial context
-        with patch("app.chat.memory_manager", self.test_manager):
+        with patch("core.rag.chat.memory_manager", self.test_manager):
             self.session.add_message("user", "What is Python?")
             self.session.add_message("assistant", "Python is a programming language")
 
@@ -469,7 +469,7 @@ class TestEnhancedChatSession:
 
     def test_clears_memory_properly(self):
         """Should clear both session and persistent memory"""
-        with patch("app.chat.memory_manager", self.test_manager):
+        with patch("core.rag.chat.memory_manager", self.test_manager):
             # Add messages
             self.session.add_message("user", "Test message 1")
             self.session.add_message("assistant", "Test response 1")
@@ -504,7 +504,7 @@ class TestMemoryIntegration:
         test_manager = ConversationMemoryManager(config)
 
         try:
-            with patch("app.chat.memory_manager", test_manager):
+            with patch("core.rag.chat.memory_manager", test_manager):
                 # Create session manager
                 session_manager = ChatSessionManager()
 

@@ -56,7 +56,7 @@ class TestCreatePrompt:
 class TestQueryEnhancement:
     """Tests for enhanced query processing"""
 
-    @patch("app.query_enhancement.ChatOllama")
+    @patch("core.rag.query_enhancement.ChatOllama")
     def test_query_expansion(self, mock_llm):
         """Should expand query into multiple variations"""
         # Mock LLM response
@@ -73,7 +73,7 @@ class TestQueryEnhancement:
         assert "What is machine learning?" in variations  # Original included
         assert any("ML" in var for var in variations)  # Contains variations
 
-    @patch("app.query_enhancement.ChatOllama")
+    @patch("core.rag.query_enhancement.ChatOllama")
     def test_hyde_generation(self, mock_llm):
         """Should generate hypothetical document"""
         mock_response = Mock()
@@ -88,7 +88,7 @@ class TestQueryEnhancement:
         assert len(hyde_doc) > 50  # Should be substantial
         assert "machine learning" in hyde_doc.lower()
 
-    @patch("app.query_enhancement.ChatOllama")
+    @patch("core.rag.query_enhancement.ChatOllama")
     def test_query_decomposition_simple_query(self, mock_llm):
         """Should not decompose simple queries"""
         enhancer = QueryEnhancer("test-model")
@@ -98,7 +98,7 @@ class TestQueryEnhancement:
         assert len(sub_questions) == 1
         assert sub_questions[0] == "What is Python?"
 
-    @patch("app.query_enhancement.ChatOllama")
+    @patch("core.rag.query_enhancement.ChatOllama")
     def test_query_decomposition_complex_query(self, mock_llm):
         """Should decompose complex multi-part queries"""
         mock_response = Mock()
@@ -118,10 +118,10 @@ class TestQueryEnhancement:
 class TestEnhancedQueryKnowledgebase:
     """Tests for the enhanced query_knowledgebase function"""
 
-    @patch("app.query.load_vectorstore")
-    @patch("app.query.QueryEnhancer")
-    @patch("app.query.search_relevant_documents")
-    @patch("app.query.generate_response")
+    @patch("core.rag.query.load_vectorstore")
+    @patch("core.rag.query.QueryEnhancer")
+    @patch("core.rag.query.search_relevant_documents")
+    @patch("core.rag.query.generate_response")
     def test_enhanced_query_with_multiple_variations(
         self, mock_generate, mock_search, mock_enhancer_class, mock_load_vs
     ):
@@ -151,9 +151,9 @@ class TestEnhancedQueryKnowledgebase:
         # Should search with multiple queries (original + expanded + hyde)
         assert mock_search.call_count >= 2
 
-    @patch("app.query.load_vectorstore")
-    @patch("app.query.search_relevant_documents")
-    @patch("app.query.generate_response")
+    @patch("core.rag.query.load_vectorstore")
+    @patch("core.rag.query.search_relevant_documents")
+    @patch("core.rag.query.generate_response")
     def test_basic_query_without_enhancement(
         self, mock_generate, mock_search, mock_load_vs
     ):
