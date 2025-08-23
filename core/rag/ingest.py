@@ -10,7 +10,7 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
-from app.utils import (
+from core.utils.orion_utils import (
     log_info,
     log_success,
     log_warning,
@@ -19,7 +19,7 @@ from app.utils import (
     validate_path,
     create_progress_bar,
 )
-from app.async_processing import AsyncDocumentProcessor
+from core.processing.async_processing import AsyncDocumentProcessor
 from langchain_community.vectorstores import FAISS
 from langchain_ollama import OllamaEmbeddings
 from langchain_community.document_loaders import (
@@ -29,8 +29,8 @@ from langchain_community.document_loaders import (
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.schema import Document
-from app.chunking import SemanticChunker
-from app.document_intelligence import (
+from core.processing.chunking import SemanticChunker
+from core.processing.document_intelligence import (
     MetadataEnricher,
     SmartChunker,
     DocumentMetadata,
@@ -422,7 +422,7 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
                     }
 
                     if file_type in image_extensions:
-                        from app.media_processing import media_processor
+                        from core.processing.media_processing import media_processor
 
                         image_analysis = media_processor.process_image(file_path)
 
@@ -471,7 +471,7 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
         if file_type == ".pdf":
             try:
                 from pypdf import PdfReader
-                from app.media_processing import media_processor
+                from core.processing.media_processing import media_processor
 
                 reader = PdfReader(str(file_path))
                 # Only override if document intelligence didn't find a title
@@ -887,7 +887,7 @@ async def incremental_vectorstore_async(
     """
     log_info("🔄 Starting async incremental vectorstore update...")
 
-    from app.incremental_updates import IncrementalUpdateManager
+    from core.processing.incremental_updates import IncrementalUpdateManager
 
     # Initialize incremental update manager
     update_manager = IncrementalUpdateManager(folder_path)

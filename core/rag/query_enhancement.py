@@ -5,7 +5,7 @@ Advanced query processing for better retrieval.
 from typing import List
 from langchain_ollama import ChatOllama
 from langchain.schema import HumanMessage
-from app.utils import log_info, log_warning, log_debug
+from core.utils.orion_utils import log_info, log_warning, log_debug
 
 
 class QueryEnhancer:

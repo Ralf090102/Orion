@@ -3,9 +3,9 @@ Tests for Orion's enhanced query processing functions.
 """
 
 from unittest.mock import Mock, patch
-from app.query import format_context, create_prompt, query_knowledgebase
-from app.query_enhancement import QueryEnhancer
-from app.query_processor import QueryProcessor, QueryIntent, QueryAnalysis
+from core.rag.query import format_context, create_prompt, query_knowledgebase
+from core.rag.query_enhancement import QueryEnhancer
+from core.rag.query_processor import QueryProcessor, QueryIntent, QueryAnalysis
 
 
 class TestFormatContext:

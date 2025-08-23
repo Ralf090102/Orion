@@ -3,7 +3,7 @@ Tests for Enhanced Document Intelligence system
 """
 
 from datetime import datetime
-from app.document_intelligence import (
+from core.processing.document_intelligence import (
     DocumentTypeDetector,
     MetadataEnricher,
     SmartChunker,

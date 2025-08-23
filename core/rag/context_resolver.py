@@ -7,11 +7,11 @@ query processing and follow-up handling.
 
 from typing import Dict, List, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
-from app.conversation_memory import QueryType, ConversationContext
-from app.utils import log_debug
+from core.rag.conversation_memory import QueryType, ConversationContext
+from core.utils.orion_utils import log_debug
 
 if TYPE_CHECKING:
-    from app.chat import ChatSession
+    from core.rag.chat import ChatSession
 
 
 @dataclass

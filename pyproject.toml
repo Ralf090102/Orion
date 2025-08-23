@@ -12,6 +12,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    # Core RAG & LLM
     "ollama",
     "chardet",
     "rank_bm25",
@@ -21,6 +22,8 @@ dependencies = [
     "langchain-text-splitters",
     "sentence_transformers",
     "faiss-cpu",
+    
+    # Document processing
     "pandas",
     "python-docx",
     "python-pptx",
@@ -28,15 +31,27 @@ dependencies = [
     "pypdf",
     "PyMuPDF",
     "docx2txt",
+    "pillow",
+    
+    # FastAPI Backend
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
+    "python-multipart",
+    
+    # System integration
+    "pystray",
+    "psutil",
+    
+    # Utilities
     "tqdm",
     "typer",
     "rich",
-    "requests",
-    "pillow"
+    "requests"
 ]
 
 [tool.setuptools]
-packages = ["app"]
+packages = ["core", "backend", "system_tray"]
 
 [project.optional-dependencies]
 dev = [

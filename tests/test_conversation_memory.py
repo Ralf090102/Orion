@@ -7,15 +7,15 @@ import time
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 
-from app.conversation_memory import (
+from core.rag.conversation_memory import (
     ConversationMemoryManager,
     ConversationMemoryConfig,
     LLMQueryClassifier,
     QueryType,
     ConversationContext,
 )
-from app.context_resolver import ContextAwareQueryResolver
-from app.chat import ChatSession, ChatSessionManager
+from core.rag.context_resolver import ContextAwareQueryResolver
+from core.rag.chat import ChatSession, ChatSessionManager
 
 
 class TestLLMQueryClassifier:
@@ -357,7 +357,7 @@ class TestContextAwareQueryResolver:
 
     def test_creates_context_aware_prompts(self):
         """Should create prompts with conversation context"""
-        from app.context_resolver import ResolvedQuery
+        from core.rag.context_resolver import ResolvedQuery
 
         resolved_query = ResolvedQuery(
             original_query="tell me more",

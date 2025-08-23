@@ -2,7 +2,7 @@
 Tests for enhanced semantic chunking.
 """
 
-from app.chunking import SemanticChunker
+from core.processing.chunking import SemanticChunker
 
 
 class TestSemanticChunker:

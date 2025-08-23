@@ -97,7 +97,7 @@ def get_installation_help():
 
     help_text.append("Test Installation:")
     test_command = (
-        'python -c "from app.media_processing import media_processor; '
+        'python -c "from core.processing.media_processing import media_processor; '
         'print(media_processor.ocr_processor.available_backends)"'
     )
     help_text.append(f"  {test_command}")

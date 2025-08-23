@@ -5,7 +5,7 @@ Enhanced with smart caching for better performance.
 
 import os
 from typing import List, Optional, Tuple, TYPE_CHECKING
-from app.utils import (
+from core.utils.orion_utils import (
     log_info,
     log_warning,
     log_error,
@@ -13,7 +13,7 @@ from app.utils import (
     log_debug,
     log_progress,
 )
-from app.caching import (
+from core.utils.caching import (
     cached,
     cache_query_result,
     get_cached_query_result,
@@ -21,13 +21,13 @@ from app.caching import (
 from langchain_community.vectorstores import FAISS
 from langchain_ollama import OllamaEmbeddings
 from langchain.schema import Document
-from app.llm import generate_response
-from app.query_enhancement import QueryEnhancer
-from app.query_processor import QueryProcessor, QueryIntent
-from app.context_resolver import context_resolver
+from core.rag.llm import generate_response
+from core.rag.query_enhancement import QueryEnhancer
+from core.rag.query_processor import QueryProcessor, QueryIntent
+from core.rag.context_resolver import context_resolver
 
 if TYPE_CHECKING:
-    from app.chat import ChatSession
+    from core.rag.chat import ChatSession
 
 EMBEDDING_MODEL = "nomic-embed-text"
 
@@ -713,14 +713,14 @@ def test_search_returns_at_most_k(monkeypatch):
                 Document(page_content="c"),
             ]
 
-    from app.query import search_relevant_documents
+    from core.rag.query import search_relevant_documents
 
     docs = search_relevant_documents(DummyVS(), "q", k=2, use_mmr=True)
     assert len(docs) == 2
 
 
 def test_prompt_contains_context():
-    from app.query import create_prompt
+    from core.rag.query import create_prompt
 
     ctx = "Document 1: Hello"
     p = create_prompt("What?", ctx)
@@ -728,7 +728,7 @@ def test_prompt_contains_context():
 
 
 def test_validate_path_dir(tmp_path):
-    from app.utils import validate_path
+    from core.utils.orion_utils import validate_path
 
     p = validate_path(str(tmp_path), must_exist=True, path_type="dir")
     assert p.exists() and p.is_dir()

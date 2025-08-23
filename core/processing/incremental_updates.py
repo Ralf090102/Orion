@@ -23,9 +23,9 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Any
 from dataclasses import dataclass, asdict
 
-from app.utils import log_info, log_debug, log_warning, log_error
-from app.async_processing import AsyncDocumentProcessor
-from app.caching import _global_cache
+from core.utils.orion_utils import log_info, log_debug, log_warning, log_error
+from core.processing.async_processing import AsyncDocumentProcessor
+from core.utils.caching import _global_cache
 
 
 @dataclass

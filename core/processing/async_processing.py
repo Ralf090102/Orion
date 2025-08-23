@@ -14,7 +14,7 @@ from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor
 from langchain.schema import Document
 
-from app.utils import log_info, log_success, log_warning, log_error
+from core.utils.orion_utils import log_info, log_success, log_warning, log_error
 
 
 class AsyncDocumentProcessor:
@@ -67,7 +67,7 @@ class AsyncDocumentProcessor:
         """
         try:
             # Import here to avoid circular imports
-            from app.ingest import (
+            from core.rag.ingest import (
                 get_loader_for_file,
                 extract_metadata,
                 SUPPORTED_EXTENSIONS,
@@ -131,7 +131,7 @@ class AsyncDocumentProcessor:
             return []
 
         # Import here to avoid circular imports
-        from app.ingest import SUPPORTED_EXTENSIONS
+        from core.rag.ingest import SUPPORTED_EXTENSIONS
 
         # Find all supported files
         supported_files = [
@@ -350,7 +350,7 @@ def compare_performance(folder_path: str):
     This function demonstrates the performance difference between
     synchronous and asynchronous document loading.
     """
-    from app.ingest import load_documents  # Original sync function
+    from core.rag.ingest import load_documents  # Original sync function
 
     print("🔄 Performance Comparison: Sync vs Async Document Loading")
     print("=" * 60)

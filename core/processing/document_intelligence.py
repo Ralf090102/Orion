@@ -15,7 +15,7 @@ from datetime import datetime
 import hashlib
 import re
 
-from app.utils import log_debug, log_warning
+from core.utils.orion_utils import log_debug, log_warning
 
 
 class DocumentType:

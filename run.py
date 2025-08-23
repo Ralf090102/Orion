@@ -12,23 +12,23 @@ from pathlib import Path
 
 # Import temp cleanup early to prevent exit errors
 
-from app.ingest import (
+from core.rag.ingest import (
     rebuild_vectorstore,
     incremental_vectorstore,
     rebuild_vectorstore_async,
     incremental_vectorstore_async,
 )
-from app.query import query_knowledgebase, query_with_performance_optimizations
-from app.config import Config
-from app.utils import (
+from core.rag.query import query_knowledgebase, query_with_performance_optimizations
+from core.utils.config import Config
+from core.utils.orion_utils import (
     log_info,
     log_success,
     log_error,
     log_warning,
     set_verbose_mode,
 )
-from app.llm import get_available_models, check_ollama_connection
-from app.caching import get_global_cache_stats, clear_global_cache
+from core.rag.llm import get_available_models, check_ollama_connection
+from core.utils.caching import get_global_cache_stats, clear_global_cache
 
 
 def print_banner():
@@ -126,7 +126,7 @@ def check_system_health(config: Config) -> bool:
 
     # Phase 1 & 2: Check media processing capabilities
     try:
-        from app.media_config import check_dependencies
+        from core.utils.media_config import check_dependencies
 
         dependencies = check_dependencies()
         available_features = []
@@ -159,7 +159,7 @@ def check_system_health(config: Config) -> bool:
                 f"⚠️ Optional features not available: {', '.join(missing_features)}"
             )
             help_command = (
-                'python -c "from app.media_config import get_installation_help; '
+                'python -c "from core.utils.media_config import get_installation_help; '
                 'print(get_installation_help())"'
             )
             log_info(f"💡 Run '{help_command}' for installation help")
@@ -233,7 +233,7 @@ def setup_user_workspace(config: Config) -> Config:
 
         # Count documents in workspace
         try:
-            from app.query import load_vectorstore
+            from core.rag.query import load_vectorstore
 
             vs = load_vectorstore(workspace_path, config.embedding_model)
             if vs:
@@ -272,7 +272,7 @@ def handle_ingestion(config: Config) -> bool:
             print(f"❌ Invalid path: {e}")
 
     # Show supported file types
-    from app.ingest import SUPPORTED_EXTENSIONS
+    from core.rag.ingest import SUPPORTED_EXTENSIONS
 
     print(f"\n📋 Supported file types: {', '.join(sorted(SUPPORTED_EXTENSIONS))}")
 
@@ -419,7 +419,7 @@ def handle_interactive_query(config: Config):
         selected_model = config.llm_model
 
     # Initialize conversation memory with chat session
-    from app.chat import ChatSessionManager
+    from core.rag.chat import ChatSessionManager
 
     session_manager = ChatSessionManager()
     chat_session = session_manager.get_or_create_session(
@@ -688,8 +688,8 @@ def show_cache_stats():
 def show_media_processing_stats():
     """Show enhanced media processing statistics (Phase 1 & 2)"""
     try:
-        from app.media_processing import media_processor
-        from app.media_config import check_dependencies
+        from core.processing.media_processing import media_processor
+        from core.utils.media_config import check_dependencies
 
         print("\n🖼️ Media Processing Statistics:")
         print("-" * 35)
@@ -763,7 +763,7 @@ def show_query_examples():
 def show_knowledge_base_stats(config: Config):
     """Show statistics about the knowledge base"""
     try:
-        from app.query import load_vectorstore
+        from core.rag.query import load_vectorstore
 
         vs = load_vectorstore(config.user_persist_path, config.embedding_model)
 
@@ -960,9 +960,9 @@ if __name__ == "__main__":
         print("\n\n👋 Interrupted by user. Goodbye!")
         # Force cleanup before exit
         try:
-            import app.media_processing
+            import core.processing.media_processing
 
-            app.media_processing._cleanup_all_resources()
+            core.processing.media_processing._cleanup_all_resources()
         except Exception:
             pass
         sys.exit(0)
@@ -970,17 +970,17 @@ if __name__ == "__main__":
         log_error(f"❌ Unexpected error: {e}")
         # Force cleanup before exit
         try:
-            import app.media_processing
+            import core.processing.media_processing
 
-            app.media_processing._cleanup_all_resources()
+            core.processing.media_processing._cleanup_all_resources()
         except Exception:
             pass
         sys.exit(1)
     finally:
         # Ensure cleanup always happens
         try:
-            import app.media_processing
+            import core.processing.media_processing
 
-            app.media_processing._cleanup_all_resources()
+            core.processing.media_processing._cleanup_all_resources()
         except Exception:
             pass

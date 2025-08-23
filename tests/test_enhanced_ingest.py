@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 import tempfile
 
-from app.ingest import extract_metadata, load_documents
+from core.rag.ingest import extract_metadata, load_documents
 
 
 class TestEnhancedMetadataExtraction:
@@ -474,7 +474,7 @@ class TestEnhancedProcessingIntegration:
     def test_supported_extensions_includes_images(self):
         """Test that supported extensions include image formats."""
         # This test ensures our constants include the image formats we're processing
-        from app.ingest import SUPPORTED_EXTENSIONS
+        from core.rag.ingest import SUPPORTED_EXTENSIONS
 
         image_extensions = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff"}
 
@@ -485,7 +485,7 @@ class TestEnhancedProcessingIntegration:
     def test_processing_error_resilience(self):
         """Test that processing continues even when individual files fail."""
         # This is more of a design principle test - ensuring robust error handling
-        from app.ingest import extract_metadata
+        from core.rag.ingest import extract_metadata
 
         # Test with non-existent file - should not crash
         fake_path = Path("non_existent_file.png")

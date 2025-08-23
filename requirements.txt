@@ -27,6 +27,16 @@ tabula-py
 # Embeddings & vectorstore
 faiss-cpu
 
+# FastAPI Backend
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
+
+# System Tray & Desktop
+pystray
+psutil
+
 # CLI & utilities
 typer
 rich

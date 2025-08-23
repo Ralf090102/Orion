@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from functools import wraps
 import sqlite3
 
-from app.utils import log_info, log_debug, log_warning
+from core.utils.orion_utils import log_info, log_debug, log_warning
 
 
 @dataclass

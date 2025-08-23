@@ -2,7 +2,7 @@
 Tests for enhanced configuration with user workspaces.
 """
 
-from app.config import Config, DEFAULT_USER_ID
+from core.utils.config import Config, DEFAULT_USER_ID
 
 
 class TestConfigUserWorkspace:

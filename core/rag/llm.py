@@ -6,7 +6,7 @@ import time
 import ollama
 from functools import lru_cache
 from typing import Optional
-from app.utils import log_info, log_error, log_warning, log_debug
+from core.utils.orion_utils import log_info, log_error, log_warning, log_debug
 from langchain_ollama import ChatOllama
 from langchain.schema import HumanMessage
 

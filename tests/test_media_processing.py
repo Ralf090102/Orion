@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 import tempfile
 
-from app.media_processing import OCRProcessor, TableDetector, MediaProcessor
+from core.processing.media_processing import OCRProcessor, TableDetector, MediaProcessor
 from app.media_config import check_dependencies, get_processing_config
 
 
@@ -374,7 +374,7 @@ class TestIntegration:
 
     def test_media_processor_global_instance(self):
         """Test that global media processor instance works."""
-        from app.media_processing import media_processor
+        from core.processing.media_processing import media_processor
 
         assert hasattr(media_processor, "ocr_processor")
         assert hasattr(media_processor, "table_detector")

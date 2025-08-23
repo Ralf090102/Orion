@@ -4,7 +4,7 @@ Tests for Orion's enhanced document ingestion functions.
 
 from pathlib import Path
 from unittest.mock import patch
-from app.ingest import get_loader_for_file, load_documents, chunk_documents
+from core.rag.ingest import get_loader_for_file, load_documents, chunk_documents
 
 
 class TestGetLoaderForFile:

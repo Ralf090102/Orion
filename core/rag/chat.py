@@ -5,8 +5,8 @@ Chat session management with enhanced conversation memory and context.
 import time
 from typing import List, Dict, Optional
 from dataclasses import dataclass
-from app.utils import log_info
-from app.conversation_memory import memory_manager, ConversationContext, QueryType
+from core.utils.orion_utils import log_info
+from core.rag.conversation_memory import memory_manager, ConversationContext, QueryType
 
 
 @dataclass

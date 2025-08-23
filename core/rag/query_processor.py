@@ -11,7 +11,7 @@ from enum import Enum
 from typing import List
 from dataclasses import dataclass
 import re
-from app.utils import log_info, log_debug
+from core.utils.orion_utils import log_info, log_debug
 
 
 class QueryIntent(Enum):

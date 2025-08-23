@@ -15,8 +15,8 @@ from typing import List, Dict, Optional, Set
 from dataclasses import dataclass
 from enum import Enum
 
-from app.utils import log_info, log_warning, log_error, log_debug
-from app.llm import generate_response, check_ollama_connection
+from core.utils.orion_utils import log_info, log_warning, log_error, log_debug
+from core.rag.llm import generate_response, check_ollama_connection
 
 
 class QueryType(Enum):

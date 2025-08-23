@@ -14,7 +14,7 @@ from datetime import datetime
 
 # Import temp cleanup to patch rmtree and prevent exit errors
 
-from app.utils import log_info, log_warning, log_error, timer
+from core.utils.orion_utils import log_info, log_warning, log_error, timer
 
 # Global cleanup registry for temporary files and resources
 _cleanup_registry = set()  # Use set to avoid duplicates
