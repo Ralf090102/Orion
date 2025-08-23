@@ -56,3 +56,15 @@ Thumbs.db
 
 # Demos
 demos/
+
+# Utility scripts (exclude from CI)
+check_*.py
+verify_*.py
+setup_*.py
+test_run_*.py
+
+# Test results
+test-results/
+.coverage
+.pytest_cache/
+htmlcov/
