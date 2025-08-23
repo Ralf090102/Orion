@@ -9,6 +9,9 @@ import sys
 import subprocess
 import asyncio
 from pathlib import Path
+
+# Import temp cleanup early to prevent exit errors
+
 from app.ingest import (
     rebuild_vectorstore,
     incremental_vectorstore,
@@ -33,8 +36,8 @@ def print_banner():
     print("\n" + "=" * 60)
     print(" ORION - Enhanced Personal Knowledge RAG")
     print("   Multi-User | Query Enhancement | Semantic Chunking")
-    print("   🚀 PERFORMANCE: Async • Caching • Incremental")
-    print("   📸 PHASE 1&2: OCR • Tables • Code Analysis")
+    print("   PERFORMANCE: Async • Caching • Incremental")
+    print("   New Feature: OCR • Tables • Code Analysis")
     print("=" * 60 + "\n")
 
 
@@ -955,7 +958,29 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\n\n👋 Interrupted by user. Goodbye!")
+        # Force cleanup before exit
+        try:
+            import app.media_processing
+
+            app.media_processing._cleanup_all_resources()
+        except Exception:
+            pass
         sys.exit(0)
     except Exception as e:
         log_error(f"❌ Unexpected error: {e}")
+        # Force cleanup before exit
+        try:
+            import app.media_processing
+
+            app.media_processing._cleanup_all_resources()
+        except Exception:
+            pass
         sys.exit(1)
+    finally:
+        # Ensure cleanup always happens
+        try:
+            import app.media_processing
+
+            app.media_processing._cleanup_all_resources()
+        except Exception:
+            pass

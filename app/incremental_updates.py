@@ -344,7 +344,7 @@ class IncrementalUpdateManager:
                 log_info(f"Processing {len(files_to_process)} documents...")
 
                 # Use async processing for better performance
-                processed_docs = await self.async_processor.load_documents_async(
+                processed_docs = await self.async_processor.load_documents_from_paths(
                     files_to_process
                 )
 

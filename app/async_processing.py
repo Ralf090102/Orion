@@ -39,6 +39,16 @@ class AsyncDocumentProcessor:
         self.max_workers = max_workers
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
 
+    def __del__(self):
+        """Cleanup ThreadPoolExecutor on deletion."""
+        if hasattr(self, "executor"):
+            self.executor.shutdown(wait=False)
+
+    async def cleanup(self):
+        """Explicitly cleanup resources."""
+        if hasattr(self, "executor"):
+            self.executor.shutdown(wait=True)
+
     async def load_document_async(self, file_path: Path) -> Optional[List[Document]]:
         """
         Load a single document asynchronously.
@@ -166,6 +176,86 @@ class AsyncDocumentProcessor:
         log_success(
             f"Async loading completed: {len(all_docs)} documents loaded "
             f"in {total_time:.2f}s (failed: {failed_count})"
+        )
+
+        return all_docs
+
+    async def load_documents_from_paths(
+        self, file_paths: List[str], batch_size: int = 50
+    ) -> List[Document]:
+        """
+        Load documents from a list of file paths asynchronously in batches.
+
+        Processing in batches prevents overwhelming the system with too many
+        concurrent operations when dealing with hundreds of files.
+
+        Args:
+            file_paths: List of file paths to load
+            batch_size: Number of files to process simultaneously (default: 50)
+
+        Returns:
+            List of loaded documents
+        """
+        if not file_paths:
+            log_warning("No file paths provided")
+            return []
+
+        total_files = len(file_paths)
+        log_info(f"Loading {total_files} documents in batches of {batch_size}...")
+        start_time = time.time()
+
+        # Convert string paths to Path objects
+        path_objects = [Path(path) for path in file_paths]
+
+        all_docs = []
+        total_failed = 0
+
+        # Process files in batches to prevent resource exhaustion
+        for i in range(0, len(path_objects), batch_size):
+            batch_end = min(i + batch_size, len(path_objects))
+            batch_paths = path_objects[i:batch_end]
+            batch_num = (i // batch_size) + 1
+            total_batches = (len(path_objects) - 1) // batch_size + 1
+
+            log_info(
+                f"Processing batch {batch_num}/{total_batches} ({len(batch_paths)} files)..."
+            )
+
+            # Create async tasks for this batch
+            tasks = [self.load_document_async(file_path) for file_path in batch_paths]
+
+            try:
+                # Execute batch tasks concurrently
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Process batch results
+                batch_failed = 0
+                for j, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        log_error(f"Exception loading {batch_paths[j].name}: {result}")
+                        batch_failed += 1
+                    elif result is not None:
+                        all_docs.extend(result)
+                    else:
+                        batch_failed += 1
+
+                total_failed += batch_failed
+                log_info(
+                    f"Batch {batch_num} completed: {len(batch_paths) - batch_failed}/{len(batch_paths)} files loaded"
+                )
+
+            except Exception as e:
+                log_error(f"Critical error in batch {batch_num}: {e}")
+                total_failed += len(batch_paths)
+                continue
+
+        # Calculate performance metrics
+        end_time = time.time()
+        total_time = end_time - start_time
+
+        log_success(
+            f"Batch loading completed: {len(all_docs)} documents loaded "
+            f"from {total_files} files in {total_time:.2f}s (failed: {total_failed})"
         )
 
         return all_docs

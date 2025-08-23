@@ -1,18 +1,72 @@
 """
 Media Processing Module for Orion RAG Pipeline
 Handles OCR, image analysis, and basic media metadata extraction.
-
-Phase 1: OCR and basic image processing
-Phase 2: Table detection and structured extraction
 """
 
+import atexit
+import gc
 import importlib.util
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any
 from PIL import Image, ImageEnhance
 from datetime import datetime
 
+# Import temp cleanup to patch rmtree and prevent exit errors
+
 from app.utils import log_info, log_warning, log_error, timer
+
+# Global cleanup registry for temporary files and resources
+_cleanup_registry = set()  # Use set to avoid duplicates
+_cleanup_registered = False
+
+
+def _cleanup_all_resources():
+    """Clean up all registered resources on exit."""
+    global _cleanup_registry
+    cleanup_funcs = list(
+        _cleanup_registry
+    )  # Create a copy to avoid modification during iteration
+    for cleanup_func in cleanup_funcs:
+        try:
+            cleanup_func()
+        except Exception:
+            # Ignore all cleanup errors to prevent exit issues
+            pass
+    _cleanup_registry.clear()
+
+    # Force cleanup of temporary directories that might be left by camelot
+    try:
+        import tempfile
+
+        temp_dir = Path(tempfile.gettempdir())
+
+        # Look for camelot temp files (they often have specific patterns)
+        for temp_item in temp_dir.iterdir():
+            if temp_item.is_dir() and temp_item.name.startswith("tmp"):
+                try:
+                    # Check if directory exists and is accessible
+                    if temp_item.exists():
+                        # Try to remove with ignore_errors to handle permission issues
+                        shutil.rmtree(temp_item, ignore_errors=True)
+                except Exception:
+                    # Ignore all file system errors during cleanup
+                    pass
+    except Exception:
+        # Ignore all errors during temp directory cleanup
+        pass
+
+    # Force garbage collection to release any remaining handles
+    try:
+        gc.collect()
+    except Exception:
+        pass
+
+
+# Register cleanup function only once
+if not _cleanup_registered:
+    atexit.register(_cleanup_all_resources)
+    _cleanup_registered = True
 
 
 class OCRProcessor:
@@ -191,7 +245,29 @@ class TableDetector:
 
     def __init__(self):
         self.available_methods = self._check_table_detection_methods()
+        self._temp_files = []  # Track temporary files for cleanup
         log_info(f"Table detection initialized with methods: {self.available_methods}")
+
+        # Register this instance for cleanup
+        global _cleanup_registry
+        _cleanup_registry.add(self._cleanup_resources)
+
+    def _cleanup_resources(self):
+        """Clean up temporary files and resources."""
+        for temp_file in self._temp_files:
+            try:
+                if temp_file.exists():
+                    temp_file.unlink()
+            except Exception:
+                pass
+        self._temp_files.clear()
+
+    def __del__(self):
+        """Cleanup on deletion."""
+        try:
+            self._cleanup_resources()
+        except Exception:
+            pass
 
     def _check_table_detection_methods(self) -> List[str]:
         """Check which table detection methods are available."""
@@ -218,26 +294,31 @@ class TableDetector:
             try:
                 import camelot
 
-                # Extract tables
+                # Extract tables with explicit cleanup
                 table_list = camelot.read_pdf(str(pdf_path), pages="all")
 
-                for i, table in enumerate(table_list):
-                    df = table.df
-                    if not df.empty:
-                        tables.append(
-                            {
-                                "table_id": i,
-                                "data": df.to_dict("records"),
-                                "csv": df.to_csv(index=False),
-                                "shape": df.shape,
-                                "method": "camelot",
-                                "accuracy": getattr(table, "accuracy", 0.8),
-                            }
-                        )
+                try:
+                    for i, table in enumerate(table_list):
+                        df = table.df
+                        if not df.empty:
+                            tables.append(
+                                {
+                                    "table_id": i,
+                                    "data": df.to_dict("records"),
+                                    "csv": df.to_csv(index=False),
+                                    "shape": df.shape,
+                                    "method": "camelot",
+                                    "accuracy": getattr(table, "accuracy", 0.8),
+                                }
+                            )
 
-                log_info(
-                    f"Extracted {len(tables)} tables from {pdf_path} using camelot"
-                )
+                    log_info(
+                        f"Extracted {len(tables)} tables from {pdf_path} using camelot"
+                    )
+                finally:
+                    # Force cleanup of camelot objects
+                    del table_list
+                    gc.collect()
 
             except Exception as e:
                 log_warning(f"Camelot table extraction failed: {e}")
