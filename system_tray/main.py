@@ -214,21 +214,37 @@ class OrionSystemTray:
             return
 
         try:
-            # Find available port
+            # Get system configuration
             system_config = self.config_service.get_system_config()
+            
+            # Find available port
             self.server_port = self.port_manager.find_available_port(system_config.port)
+            
+            if self.server_port != system_config.port:
+                logger.info(f"Requested port {system_config.port} not available, using {self.server_port}")
 
             # Start server in background thread
             self.server_thread = threading.Thread(target=self._run_server, args=(self.server_port,), daemon=True)
             self.server_thread.start()
 
-            self.is_server_running = True
-            self._update_menu()
-
-            logger.info(f"Server started on port {self.server_port}")
+            # Give server a moment to start
+            import time
+            time.sleep(2)
+            
+            # Verify server is running
+            if self._check_server_health():
+                self.is_server_running = True
+                self._update_menu()
+                logger.info(f"✅ Server started successfully on port {self.server_port}")
+            else:
+                logger.error("❌ Server failed to start properly")
+                self.is_server_running = False
+                self.server_port = None
 
         except Exception as e:
             logger.error(f"Failed to start server: {e}")
+            self.is_server_running = False
+            self.server_port = None
 
     def _stop_server(self, icon, item) -> None:
         """Stop the FastAPI server"""
@@ -265,19 +281,39 @@ class OrionSystemTray:
     def _run_server(self, port: int) -> None:
         """Run FastAPI server in background thread"""
         try:
-            # TODO: Import and run actual FastAPI server
-            # For now, this is a placeholder
-            import time
-
-            logger.info(f"Mock server running on port {port}")
-
-            # Mock server loop
-            while self.is_server_running:
-                time.sleep(1)
-
+            import uvicorn
+            from backend.main import create_app
+            
+            logger.info(f"Starting FastAPI server on port {port}")
+            
+            # Create FastAPI app
+            app = create_app()
+            
+            # Run server with uvicorn
+            uvicorn.run(
+                app,
+                host="127.0.0.1",
+                port=port,
+                log_level="warning",  # Reduce log noise in system tray
+                access_log=False      # Disable access logging for system tray
+            )
+            
         except Exception as e:
             logger.error(f"Server error: {e}")
             self.is_server_running = False
+    
+    def _check_server_health(self) -> bool:
+        """Check if server is responding to health checks"""
+        if not self.server_port:
+            return False
+            
+        try:
+            import requests
+            response = requests.get(f"http://127.0.0.1:{self.server_port}/health", timeout=5)
+            return response.status_code == 200
+        except Exception as e:
+            logger.debug(f"Health check failed: {e}")
+            return False
 
     def _open_settings(self, icon, item) -> None:
         """Open settings dialog or web interface settings page"""
