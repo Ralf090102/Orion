@@ -66,14 +66,18 @@ media = [
     "camelot-py[cv]",
     "tabula-py"
 ]
+gpu = [
+    "pytorch",
+    "pynvml"
+]
 
 
 [tool.black]
-line-length = 88
+line-length = 128
 target-version = ['py313']
 
 [tool.flake8]
-max-line-length = 88
+max-line-length = 128
 extend-ignore = ["E203"]
 
 [tool.ruff]

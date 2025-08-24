@@ -163,9 +163,7 @@ class IncrementalUpdateManager:
         """Save document metadata to disk."""
         try:
             # Convert DocumentMetadata objects to dict for JSON serialization
-            metadata_dict = {
-                path: asdict(metadata) for path, metadata in self.metadata.items()
-            }
+            metadata_dict = {path: asdict(metadata) for path, metadata in self.metadata.items()}
 
             with open(self.metadata_file, "w", encoding="utf-8") as f:
                 json.dump(metadata_dict, f, indent=2)
@@ -207,11 +205,7 @@ class IncrementalUpdateManager:
                         # Existing file - check if changed
                         existing = self.metadata[file_path_str]
 
-                        if (
-                            checksum != existing.checksum
-                            or size != existing.size
-                            or last_modified > existing.last_modified
-                        ):
+                        if checksum != existing.checksum or size != existing.size or last_modified > existing.last_modified:
 
                             changed_files.append(file_path_str)
                             log_debug(f"Changed: {file_path_str}")
@@ -281,9 +275,7 @@ class IncrementalUpdateManager:
         # Skip very large files (>10MB) to avoid memory issues
         try:
             if file_path.stat().st_size > 10 * 1024 * 1024:
-                log_warning(
-                    f"Skipping large file: {file_path} ({file_path.stat().st_size} bytes)"
-                )
+                log_warning(f"Skipping large file: {file_path} ({file_path.stat().st_size} bytes)")
                 return False
         except Exception as e:
             log_warning(f"Error checking file size for {file_path}: {e}")
@@ -291,9 +283,7 @@ class IncrementalUpdateManager:
 
         return extension in valid_extensions
 
-    async def process_incremental_update(
-        self, force_full_rebuild: bool = False
-    ) -> Dict[str, Any]:
+    async def process_incremental_update(self, force_full_rebuild: bool = False) -> Dict[str, Any]:
         """
         Process incremental updates for changed documents.
 
@@ -344,9 +334,7 @@ class IncrementalUpdateManager:
                 log_info(f"Processing {len(files_to_process)} documents...")
 
                 # Use async processing for better performance
-                processed_docs = await self.async_processor.load_documents_from_paths(
-                    files_to_process
-                )
+                processed_docs = await self.async_processor.load_documents_from_paths(files_to_process)
 
                 # Update metadata for processed files
                 for i, file_path in enumerate(files_to_process):
@@ -371,9 +359,7 @@ class IncrementalUpdateManager:
             self.stats["processing_time"] = processing_time
 
             log_info(f"Incremental update completed in {processing_time:.2f}s")
-            log_info(
-                f"  Processed: {len(results['added']) + len(results['updated'])} files"
-            )
+            log_info(f"  Processed: {len(results['added']) + len(results['updated'])} files")
             log_info(f"  Deleted: {len(results['deleted'])} files")
             log_info(f"  Errors: {len(results['errors'])}")
 
@@ -498,9 +484,7 @@ async def quick_incremental_update(documents_dir: str) -> Dict[str, Any]:
     return await manager.process_incremental_update()
 
 
-def setup_hot_reload(
-    documents_dir: str, check_interval: int = 300
-) -> IncrementalUpdateManager:
+def setup_hot_reload(documents_dir: str, check_interval: int = 300) -> IncrementalUpdateManager:
     """
     Set up hot reload for automatic updates.
 

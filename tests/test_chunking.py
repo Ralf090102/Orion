@@ -57,9 +57,7 @@ We found that..."""
 
         # Should use semantic chunking
         assert len(chunks) > 0
-        assert any(
-            chunk["metadata"].get("chunk_type") == "semantic_header" for chunk in chunks
-        )
+        assert any(chunk["metadata"].get("chunk_type") == "semantic_header" for chunk in chunks)
 
     def test_chunk_document_fallback_to_standard(self):
         """Should fall back to standard chunking for non-structured text"""
@@ -72,9 +70,7 @@ We found that..."""
 
         # Should use standard chunking
         assert len(chunks) > 0
-        assert any(
-            chunk["metadata"].get("chunk_type") == "standard" for chunk in chunks
-        )
+        assert any(chunk["metadata"].get("chunk_type") == "standard" for chunk in chunks)
 
     def test_preserves_metadata(self):
         """Should preserve and enhance metadata in chunks"""

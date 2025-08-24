@@ -61,9 +61,7 @@ def get_user_input(prompt: str, default: str = None, valid_options: list = None)
             if response.lower() in [opt.lower() for opt in valid_options]:
                 return response.lower()
             else:
-                print(
-                    f"❌ Invalid choice. Please enter one of: {', '.join(valid_options)}"
-                )
+                print(f"❌ Invalid choice. Please enter one of: {', '.join(valid_options)}")
                 continue
 
         if response or not default:
@@ -100,9 +98,7 @@ def check_system_health(config: Config) -> bool:
 
         # Check for partial match (e.g., "mistral" matches "mistral:latest")
         found = any(
-            required_model in available_model
-            or available_model.startswith(required_model + ":")
-            for available_model in models
+            required_model in available_model or available_model.startswith(required_model + ":") for available_model in models
         )
 
         if not found:
@@ -114,9 +110,7 @@ def check_system_health(config: Config) -> bool:
         for model in missing_models:
             print(f"   ollama pull {model}")
 
-        install_missing = get_user_input(
-            "\nInstall missing models now?", "y", ["y", "n"]
-        )
+        install_missing = get_user_input("\nInstall missing models now?", "y", ["y", "n"])
         if install_missing == "y":
             return install_models(missing_models)
         else:
@@ -155,12 +149,9 @@ def check_system_health(config: Config) -> bool:
             log_success(f"✅ Enhanced processing: {', '.join(available_features)}")
 
         if missing_features:
-            log_warning(
-                f"⚠️ Optional features not available: {', '.join(missing_features)}"
-            )
+            log_warning(f"⚠️ Optional features not available: {', '.join(missing_features)}")
             help_command = (
-                'python -c "from core.utils.media_config import get_installation_help; '
-                'print(get_installation_help())"'
+                'python -c "from core.utils.media_config import get_installation_help; ' 'print(get_installation_help())"'
             )
             log_info(f"💡 Run '{help_command}' for installation help")
 
@@ -211,11 +202,7 @@ def setup_user_workspace(config: Config) -> Config:
     existing_users = []
 
     if base_vectorstore.exists():
-        existing_users = [
-            d.name
-            for d in base_vectorstore.iterdir()
-            if d.is_dir() and not d.name.startswith(".")
-        ]
+        existing_users = [d.name for d in base_vectorstore.iterdir() if d.is_dir() and not d.name.startswith(".")]
 
     if existing_users:
         print(f"📁 Found existing workspaces: {', '.join(existing_users)}")
@@ -237,11 +224,7 @@ def setup_user_workspace(config: Config) -> Config:
 
             vs = load_vectorstore(workspace_path, config.embedding_model)
             if vs:
-                doc_count = (
-                    len(vs.docstore._dict)
-                    if hasattr(vs.docstore, "_dict")
-                    else "unknown"
-                )
+                doc_count = len(vs.docstore._dict) if hasattr(vs.docstore, "_dict") else "unknown"
                 log_info(f"📊 Workspace contains ~{doc_count} document chunks")
         except Exception:
             log_info("📊 Workspace exists but couldn't count documents")
@@ -277,11 +260,7 @@ def handle_ingestion(config: Config) -> bool:
     print(f"\n📋 Supported file types: {', '.join(sorted(SUPPORTED_EXTENSIONS))}")
 
     # Count files in folder
-    supported_files = [
-        f
-        for f in folder_path.rglob("*")
-        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
-    ]
+    supported_files = [f for f in folder_path.rglob("*") if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS]
 
     if not supported_files:
         log_warning("❌ No supported files found in the specified folder")
@@ -301,14 +280,10 @@ def handle_ingestion(config: Config) -> bool:
             print(f"   {f.name}")
 
     # Choose ingestion mode
-    ingest_mode = get_user_input(
-        "Ingestion mode", "increment", ["rebuild", "increment"]
-    )
+    ingest_mode = get_user_input("Ingestion mode", "increment", ["rebuild", "increment"])
 
     # Ask about performance optimization
-    use_async = get_user_input(
-        "Use async processing for faster performance?", "y", ["y", "n"]
-    )
+    use_async = get_user_input("Use async processing for faster performance?", "y", ["y", "n"])
 
     print(f"\n🚀 Starting {ingest_mode} ingestion...")
     if use_async == "y":
@@ -363,9 +338,7 @@ def handle_ingestion(config: Config) -> bool:
                 if use_async == "y":
                     cache_stats = get_global_cache_stats()
                     if cache_stats.get("total_requests", 0) > 0:
-                        print(
-                            f"📊 Cache performance: {cache_stats['hit_rate']:.1%} hit rate"
-                        )
+                        print(f"📊 Cache performance: {cache_stats['hit_rate']:.1%} hit rate")
                 return True
             else:
                 log_error("❌ Document ingestion failed")
@@ -407,9 +380,7 @@ def handle_interactive_query(config: Config):
                 str(1) if available_models else config.llm_model,
             )
 
-            if model_choice.isdigit() and 1 <= int(model_choice) <= len(
-                available_models
-            ):
+            if model_choice.isdigit() and 1 <= int(model_choice) <= len(available_models):
                 selected_model = available_models[int(model_choice) - 1]
             else:
                 selected_model = model_choice
@@ -422,9 +393,7 @@ def handle_interactive_query(config: Config):
     from core.rag.chat import ChatSessionManager
 
     session_manager = ChatSessionManager()
-    chat_session = session_manager.get_or_create_session(
-        user_id=config.user_id, enable_memory=True
-    )
+    chat_session = session_manager.get_or_create_session(user_id=config.user_id, enable_memory=True)
 
     # Query enhancement options
     print("\n⚙️ Query Enhancement Options:")
@@ -597,9 +566,7 @@ def handle_interactive_query(config: Config):
 
         except Exception as e:
             log_error(f"❌ Query failed: {e}")
-            print(
-                "💡 Try rephrasing your question or check if the knowledge base exists"
-            )
+            print("💡 Try rephrasing your question or check if the knowledge base exists")
 
 
 def show_performance_dashboard():
@@ -699,9 +666,7 @@ def show_media_processing_stats():
         print(f"   Images processed:     {media_stats.get('images_processed', 0)}")
         print(f"   Text extracted:       {media_stats.get('text_extracted', 0)}")
         print(f"   Tables found:         {media_stats.get('tables_found', 0)}")
-        print(
-            f"   Avg processing time:  {media_stats.get('avg_processing_time', 0):.2f}s"
-        )
+        print(f"   Avg processing time:  {media_stats.get('avg_processing_time', 0):.2f}s")
 
         if media_stats.get("images_processed", 0) > 0:
             extraction_rate = media_stats.get("text_extraction_rate", 0)
@@ -768,9 +733,7 @@ def show_knowledge_base_stats(config: Config):
         vs = load_vectorstore(config.user_persist_path, config.embedding_model)
 
         if vs:
-            doc_count = (
-                len(vs.docstore._dict) if hasattr(vs.docstore, "_dict") else "unknown"
-            )
+            doc_count = len(vs.docstore._dict) if hasattr(vs.docstore, "_dict") else "unknown"
             print("\n📊 Knowledge Base Statistics:")
             print(f"   📂 Workspace: {config.user_persist_path}")
             print(f"   📄 Document chunks: {doc_count}")
@@ -811,9 +774,7 @@ def main():
         print("6. Media processing stats")
         print("7. Exit")
 
-        choice = get_user_input(
-            "Select option", "2", ["1", "2", "3", "4", "5", "6", "7"]
-        )
+        choice = get_user_input("Select option", "2", ["1", "2", "3", "4", "5", "6", "7"])
 
         if choice == "1":
             handle_ingestion(config)
@@ -875,11 +836,7 @@ def change_models(config: Config):
     if available_models:
         print("\nAvailable models:")
         for i, model in enumerate(available_models, 1):
-            indicator = (
-                "🤖"
-                if model == config.llm_model
-                else "🧠" if model == config.embedding_model else "  "
-            )
+            indicator = "🤖" if model == config.llm_model else "🧠" if model == config.embedding_model else "  "
             print(f"  {i}. {model} {indicator}")
 
         llm_choice = get_user_input("Select LLM model number or name", config.llm_model)
@@ -888,9 +845,7 @@ def change_models(config: Config):
         else:
             config.llm_model = llm_choice
 
-        embed_choice = get_user_input(
-            "Select embedding model number or name", config.embedding_model
-        )
+        embed_choice = get_user_input("Select embedding model number or name", config.embedding_model)
         if embed_choice.isdigit() and 1 <= int(embed_choice) <= len(available_models):
             config.embedding_model = available_models[int(embed_choice) - 1]
         else:
@@ -915,21 +870,15 @@ def change_chunking_params(config: Config):
 
     try:
         new_chunk_size = int(get_user_input("New chunk size", str(config.chunk_size)))
-        new_chunk_overlap = int(
-            get_user_input("New chunk overlap", str(config.chunk_overlap))
-        )
-        new_retrieval_k = int(
-            get_user_input("New retrieval K", str(config.retrieval_k))
-        )
+        new_chunk_overlap = int(get_user_input("New chunk overlap", str(config.chunk_overlap)))
+        new_retrieval_k = int(get_user_input("New retrieval K", str(config.retrieval_k)))
 
         config.chunk_size = new_chunk_size
         config.chunk_overlap = new_chunk_overlap
         config.retrieval_k = new_retrieval_k
 
         log_success("✅ Chunking settings updated")
-        log_warning(
-            "⚠️ You may need to rebuild your vectorstore for changes to take effect"
-        )
+        log_warning("⚠️ You may need to rebuild your vectorstore for changes to take effect")
 
     except ValueError:
         log_error("❌ Invalid numeric input")

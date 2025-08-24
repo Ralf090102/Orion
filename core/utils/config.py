@@ -139,23 +139,13 @@ class Config:
             chunk_overlap=int(os.getenv("ORION_CHUNK_OVERLAP", DEFAULT_CHUNK_OVERLAP)),
             retrieval_k=int(os.getenv("ORION_RETRIEVAL_K", DEFAULT_RETRIEVAL_K)),
             temperature=float(os.getenv("ORION_TEMPERATURE", DEFAULT_TEMPERATURE)),
-            max_tokens=(
-                int(v) if (v := os.getenv("ORION_MAX_TOKENS")) else DEFAULT_MAX_TOKENS
-            ),
+            max_tokens=(int(v) if (v := os.getenv("ORION_MAX_TOKENS")) else DEFAULT_MAX_TOKENS),
             persist_path=os.getenv("ORION_PERSIST_PATH", DEFAULT_VECTORSTORE_PATH),
             user_id=os.getenv("ORION_USER_ID", DEFAULT_USER_ID),
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", OLLAMA_BASE_URL),
             ollama_timeout=int(os.getenv("OLLAMA_TIMEOUT", OLLAMA_TIMEOUT)),
             verbose=bool(os.getenv("ORION_VERBOSE", DEFAULT_VERBOSE)),
-            enable_deduplication=bool(
-                os.getenv("ORION_ENABLE_DEDUPLICATION", DEFAULT_ENABLE_DEDUPLICATION)
-            ),
-            enable_normalization=bool(
-                os.getenv("ORION_ENABLE_NORMALIZATION", DEFAULT_ENABLE_NORMALIZATION)
-            ),
-            deduplication_threshold=float(
-                os.getenv(
-                    "ORION_DEDUPLICATION_THRESHOLD", DEFAULT_DEDUPLICATION_THRESHOLD
-                )
-            ),
+            enable_deduplication=bool(os.getenv("ORION_ENABLE_DEDUPLICATION", DEFAULT_ENABLE_DEDUPLICATION)),
+            enable_normalization=bool(os.getenv("ORION_ENABLE_NORMALIZATION", DEFAULT_ENABLE_NORMALIZATION)),
+            deduplication_threshold=float(os.getenv("ORION_DEDUPLICATION_THRESHOLD", DEFAULT_DEDUPLICATION_THRESHOLD)),
         )

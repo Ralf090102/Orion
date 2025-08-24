@@ -139,9 +139,7 @@ class DocumentTypeDetector:
         file_extension = Path(filepath).suffix.lower()
         if file_extension in self.extension_mappings:
             detected_type = self.extension_mappings[file_extension]
-            log_debug(
-                f"Detected type '{detected_type}' for {filepath} based on extension"
-            )
+            log_debug(f"Detected type '{detected_type}' for {filepath} based on extension")
             return detected_type
 
         # Fallback to content-based detection if content is provided
@@ -166,13 +164,9 @@ class DocumentTypeDetector:
         content_lower = content.lower().strip()
 
         # Check for code patterns
-        if any(
-            pattern in content for pattern in ["def ", "import ", "class ", "from "]
-        ):
+        if any(pattern in content for pattern in ["def ", "import ", "class ", "from "]):
             return DocumentType.CODE_PYTHON
-        elif any(
-            pattern in content for pattern in ["function ", "const ", "let ", "var "]
-        ):
+        elif any(pattern in content for pattern in ["function ", "const ", "let ", "var "]):
             return DocumentType.CODE_JAVASCRIPT
         elif content.startswith("<?xml") or "<html" in content_lower:
             return DocumentType.CODE_HTML
@@ -187,9 +181,7 @@ class DocumentTypeDetector:
                 pass
 
         # Check for markdown patterns
-        if any(
-            pattern in content for pattern in ["# ", "## ", "### ", "```", "* ", "- "]
-        ):
+        if any(pattern in content for pattern in ["# ", "## ", "### ", "```", "* ", "- "]):
             return DocumentType.MARKDOWN
 
         return DocumentType.TEXT_PLAIN
@@ -219,15 +211,9 @@ class MetadataEnricher:
         metadata = DocumentMetadata(
             filename=file_path.name,
             filepath=str(file_path.absolute()),
-            file_size=(
-                file_stats.st_size if file_stats else len(content.encode("utf-8"))
-            ),
-            created_date=(
-                datetime.fromtimestamp(file_stats.st_ctime) if file_stats else None
-            ),
-            modified_date=(
-                datetime.fromtimestamp(file_stats.st_mtime) if file_stats else None
-            ),
+            file_size=(file_stats.st_size if file_stats else len(content.encode("utf-8"))),
+            created_date=(datetime.fromtimestamp(file_stats.st_ctime) if file_stats else None),
+            modified_date=(datetime.fromtimestamp(file_stats.st_mtime) if file_stats else None),
             document_type=doc_type,
             content_hash=hashlib.md5(content.encode("utf-8")).hexdigest(),
         )
@@ -250,9 +236,7 @@ class MetadataEnricher:
         # Extract topics and keywords
         self._extract_topics_and_keywords(content, metadata)
 
-        log_debug(
-            f"Extracted metadata for {filepath}: type={doc_type}, words={metadata.word_count}"
-        )
+        log_debug(f"Extracted metadata for {filepath}: type={doc_type}, words={metadata.word_count}")
         return metadata
 
     def _analyze_content_structure(self, content: str, metadata: DocumentMetadata):
@@ -272,16 +256,12 @@ class MetadataEnricher:
                 # Remove markdown heading markers
                 title = re.sub(r"^#+\s*", "", line)
                 # Remove common prefixes
-                title = re.sub(
-                    r"^(class|def|function|import)\s+", "", title, flags=re.IGNORECASE
-                )
+                title = re.sub(r"^(class|def|function|import)\s+", "", title, flags=re.IGNORECASE)
                 if len(title) < 100 and title:
                     metadata.title = title
                     break
 
-    def _analyze_code_content(
-        self, content: str, metadata: DocumentMetadata, doc_type: str
-    ):
+    def _analyze_code_content(self, content: str, metadata: DocumentMetadata, doc_type: str):
         """Analyze code-specific content"""
 
         # Language-specific analysis
@@ -297,28 +277,16 @@ class MetadataEnricher:
             metadata.classes_detected = list(set(class_matches))
 
             # Extract imports
-            import_matches = re.findall(
-                r"(?:from\s+(\S+)\s+import|import\s+(\S+))", content
-            )
+            import_matches = re.findall(r"(?:from\s+(\S+)\s+import|import\s+(\S+))", content)
             imports = [match[0] if match[0] else match[1] for match in import_matches]
             metadata.imports_detected = list(set(imports))
 
         elif doc_type in [DocumentType.CODE_JAVASCRIPT, DocumentType.CODE_TYPESCRIPT]:
-            metadata.programming_language = (
-                "JavaScript"
-                if doc_type == DocumentType.CODE_JAVASCRIPT
-                else "TypeScript"
-            )
+            metadata.programming_language = "JavaScript" if doc_type == DocumentType.CODE_JAVASCRIPT else "TypeScript"
 
             # Extract functions
-            function_matches = re.findall(
-                r"function\s+(\w+)|const\s+(\w+)\s*=.*?=>", content
-            )
-            functions = [
-                match[0] if match[0] else match[1]
-                for match in function_matches
-                if any(match)
-            ]
+            function_matches = re.findall(r"function\s+(\w+)|const\s+(\w+)\s*=.*?=>", content)
+            functions = [match[0] if match[0] else match[1] for match in function_matches if any(match)]
             metadata.functions_detected = list(set(functions))
 
             # Extract imports
@@ -330,9 +298,7 @@ class MetadataEnricher:
         # Extract headings as potential topics
         heading_matches = re.findall(r"^#+\s+(.+)$", content, re.MULTILINE)
         if heading_matches:
-            metadata.topics = list(
-                set(heading_matches[:10])
-            )  # Top 10 headings as topics
+            metadata.topics = list(set(heading_matches[:10]))  # Top 10 headings as topics
 
         # Extract links for reference tracking
         link_matches = re.findall(r"\[([^\]]+)\]\([^\)]+\)", content)
@@ -347,10 +313,7 @@ class MetadataEnricher:
             metadata.topics.append("multi_page_document")
 
         # Look for academic paper patterns
-        if any(
-            term in content.lower()
-            for term in ["abstract", "references", "bibliography", "doi:"]
-        ):
+        if any(term in content.lower() for term in ["abstract", "references", "bibliography", "doi:"]):
             metadata.topics.append("academic_paper")
 
     def _extract_topics_and_keywords(self, content: str, metadata: DocumentMetadata):
@@ -422,9 +385,7 @@ class SmartChunker:
         self.chunk_size = chunk_size
         self.overlap = overlap
 
-    def chunk_document(
-        self, content: str, metadata: DocumentMetadata
-    ) -> List[Dict[str, Any]]:
+    def chunk_document(self, content: str, metadata: DocumentMetadata) -> List[Dict[str, Any]]:
         """
         Create smart chunks based on document type and structure
 
@@ -451,9 +412,7 @@ class SmartChunker:
         else:
             return self._chunk_generic_text(content, metadata)
 
-    def _chunk_markdown(
-        self, content: str, metadata: DocumentMetadata
-    ) -> List[Dict[str, Any]]:
+    def _chunk_markdown(self, content: str, metadata: DocumentMetadata) -> List[Dict[str, Any]]:
         """Chunk markdown documents by sections and headings"""
         chunks = []
 
@@ -470,9 +429,7 @@ class SmartChunker:
 
             # If section is too long, split it further
             if len(section) > self.chunk_size:
-                sub_chunks = self._split_long_text(
-                    section, self.chunk_size, self.overlap
-                )
+                sub_chunks = self._split_long_text(section, self.chunk_size, self.overlap)
                 for j, sub_chunk in enumerate(sub_chunks):
                     chunks.append(
                         {
@@ -482,11 +439,7 @@ class SmartChunker:
                                 "chunk_index": len(chunks),
                                 "chunk_type": "markdown_section",
                                 "section_heading": heading,
-                                "subsection": (
-                                    f"{heading} - Part {j+1}"
-                                    if len(sub_chunks) > 1
-                                    else heading
-                                ),
+                                "subsection": (f"{heading} - Part {j+1}" if len(sub_chunks) > 1 else heading),
                             },
                         }
                     )
@@ -506,9 +459,7 @@ class SmartChunker:
         log_debug(f"Created {len(chunks)} markdown chunks for {metadata.filename}")
         return chunks
 
-    def _chunk_code(
-        self, content: str, metadata: DocumentMetadata
-    ) -> List[Dict[str, Any]]:
+    def _chunk_code(self, content: str, metadata: DocumentMetadata) -> List[Dict[str, Any]]:
         """Chunk code documents by functions, classes, and logical blocks"""
         chunks = []
 
@@ -517,9 +468,7 @@ class SmartChunker:
             parts = re.split(r"\n(?=(?:def |class |import |from ))", content)
         else:
             # Generic code splitting
-            parts = re.split(
-                r"\n(?=(?:function |class |const |let |var |import ))", content
-            )
+            parts = re.split(r"\n(?=(?:function |class |const |let |var |import ))", content)
 
         current_chunk = ""
         for part in parts:
@@ -529,9 +478,7 @@ class SmartChunker:
             # If adding this part would exceed chunk size, start a new chunk
             if current_chunk and len(current_chunk + part) > self.chunk_size:
                 if current_chunk:
-                    chunks.append(
-                        self._create_code_chunk(current_chunk, metadata, len(chunks))
-                    )
+                    chunks.append(self._create_code_chunk(current_chunk, metadata, len(chunks)))
                 current_chunk = part
             else:
                 current_chunk += part
@@ -543,9 +490,7 @@ class SmartChunker:
         log_debug(f"Created {len(chunks)} code chunks for {metadata.filename}")
         return chunks
 
-    def _create_code_chunk(
-        self, content: str, metadata: DocumentMetadata, index: int
-    ) -> Dict[str, Any]:
+    def _create_code_chunk(self, content: str, metadata: DocumentMetadata, index: int) -> Dict[str, Any]:
         """Create a code chunk with appropriate metadata"""
         # Detect what's in this chunk
         chunk_type = "code_block"
@@ -553,10 +498,7 @@ class SmartChunker:
             chunk_type = "function"
         elif content.strip().startswith(("class ", "class:")):
             chunk_type = "class"
-        elif any(
-            content.strip().startswith(imp)
-            for imp in ["import ", "from ", "const ", "let ", "var "]
-        ):
+        elif any(content.strip().startswith(imp) for imp in ["import ", "from ", "const ", "let ", "var "]):
             chunk_type = "declarations"
 
         return {
@@ -569,9 +511,7 @@ class SmartChunker:
             },
         }
 
-    def _chunk_pdf_text(
-        self, content: str, metadata: DocumentMetadata
-    ) -> List[Dict[str, Any]]:
+    def _chunk_pdf_text(self, content: str, metadata: DocumentMetadata) -> List[Dict[str, Any]]:
         """Chunk PDF extracted text, preserving paragraphs when possible"""
         # Split by paragraphs first
         paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
@@ -581,10 +521,7 @@ class SmartChunker:
 
         for paragraph in paragraphs:
             # If adding this paragraph would exceed chunk size, start new chunk
-            if (
-                current_chunk
-                and len(current_chunk + "\n\n" + paragraph) > self.chunk_size
-            ):
+            if current_chunk and len(current_chunk + "\n\n" + paragraph) > self.chunk_size:
                 chunks.append(
                     {
                         "text": current_chunk,
@@ -597,9 +534,7 @@ class SmartChunker:
                 )
                 current_chunk = paragraph
             else:
-                current_chunk = (
-                    (current_chunk + "\n\n" + paragraph) if current_chunk else paragraph
-                )
+                current_chunk = (current_chunk + "\n\n" + paragraph) if current_chunk else paragraph
 
         # Add final chunk
         if current_chunk:
@@ -616,9 +551,7 @@ class SmartChunker:
 
         return chunks
 
-    def _chunk_generic_text(
-        self, content: str, metadata: DocumentMetadata
-    ) -> List[Dict[str, Any]]:
+    def _chunk_generic_text(self, content: str, metadata: DocumentMetadata) -> List[Dict[str, Any]]:
         """Generic text chunking with overlap"""
         chunks = []
         text_parts = self._split_long_text(content, self.chunk_size, self.overlap)

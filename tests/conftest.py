@@ -45,9 +45,7 @@ def mock_ollama_list_failure():
     Fixture: Mocks ollama.list() and ollama.show() to raise exceptions.
     """
     with (
-        patch(
-            "core.rag.llm.ollama.list", side_effect=Exception("Ollama down")
-        ) as mock_list,
+        patch("core.rag.llm.ollama.list", side_effect=Exception("Ollama down")) as mock_list,
         patch("core.rag.llm.ollama.show", side_effect=Exception("Ollama down")),
     ):
         # Clear the LRU cache for model_exists to prevent cached results

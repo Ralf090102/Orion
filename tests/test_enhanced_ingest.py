@@ -144,9 +144,7 @@ class TestEnhancedMetadataExtraction:
     @patch("core.rag.ingest.MetadataEnricher")
     @patch("core.processing.media_processing.media_processor")
     @patch("pypdf.PdfReader")
-    def test_extract_metadata_pdf_with_tables(
-        self, mock_pdf_reader, mock_media_processor, mock_enricher
-    ):
+    def test_extract_metadata_pdf_with_tables(self, mock_pdf_reader, mock_media_processor, mock_enricher):
         """Test metadata extraction for PDFs with table detection."""
         # Mock document intelligence
         mock_doc_metadata = Mock()
@@ -212,9 +210,7 @@ class TestEnhancedMetadataExtraction:
 
     @patch("core.rag.ingest.MetadataEnricher")
     @patch("core.processing.media_processing.media_processor")
-    def test_extract_metadata_processing_failure(
-        self, mock_media_processor, mock_enricher
-    ):
+    def test_extract_metadata_processing_failure(self, mock_media_processor, mock_enricher):
         """Test metadata extraction when media processing fails."""
         # Mock document intelligence
         mock_doc_metadata = Mock()
@@ -313,9 +309,7 @@ class TestEnhancedDocumentLoading:
 
                 # Document should have OCR text as content
                 doc = docs[0]
-                assert (
-                    doc.page_content == "This is text extracted from the image via OCR"
-                )
+                assert doc.page_content == "This is text extracted from the image via OCR"
                 assert doc.metadata["filename"] == "test_image.png"
                 assert "ocr_text" in doc.metadata
 
@@ -453,12 +447,8 @@ class TestEnhancedDocumentLoading:
                 assert len(docs) == 2
 
                 # Find the text and image documents
-                text_doc = next(
-                    d for d in docs if d.metadata["filename"] == "document.txt"
-                )
-                image_doc = next(
-                    d for d in docs if d.metadata["filename"] == "scan.png"
-                )
+                text_doc = next(d for d in docs if d.metadata["filename"] == "document.txt")
+                image_doc = next(d for d in docs if d.metadata["filename"] == "scan.png")
 
                 # Text document should have original content
                 assert text_doc.page_content == "Original text file content"
@@ -497,9 +487,7 @@ class TestEnhancedProcessingIntegration:
             assert metadata["type"] == ".png"
         except Exception as e:
             # If it does raise an exception, it should be handled gracefully
-            pytest.fail(
-                f"extract_metadata should handle missing files gracefully, but raised: {e}"
-            )
+            pytest.fail(f"extract_metadata should handle missing files gracefully, but raised: {e}")
 
 
 # Additional fixtures specific to enhanced processing

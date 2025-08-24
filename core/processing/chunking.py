@@ -83,7 +83,4 @@ class SemanticChunker:
 
         # Fallback to standard chunking
         base_chunks = self.base_splitter.split_text(text)
-        return [
-            {"text": chunk, "metadata": {**metadata, "chunk_type": "standard"}}
-            for chunk in base_chunks
-        ]
+        return [{"text": chunk, "metadata": {**metadata, "chunk_type": "standard"}} for chunk in base_chunks]

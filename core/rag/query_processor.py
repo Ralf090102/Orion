@@ -129,9 +129,7 @@ class QueryProcessor:
         best_intent = max(intent_scores, key=intent_scores.get)
         confidence = min(intent_scores[best_intent], 1.0)  # Cap at 1.0
 
-        log_debug(
-            f"Intent detection: {best_intent.value} (confidence: {confidence:.2f})"
-        )
+        log_debug(f"Intent detection: {best_intent.value} (confidence: {confidence:.2f})")
         return best_intent, confidence
 
     def extract_keywords(self, query: str) -> List[str]:
@@ -207,11 +205,7 @@ class QueryProcessor:
         # Different strategies based on intent
         if intent == QueryIntent.ANALYTICAL:
             # Look for comparison patterns
-            if (
-                "compare" in query_lower
-                or "vs" in query_lower
-                or "versus" in query_lower
-            ):
+            if "compare" in query_lower or "vs" in query_lower or "versus" in query_lower:
                 # Try to extract the items being compared
                 # This is a simple heuristic - could be much more sophisticated
                 if " and " in query_lower:
@@ -365,7 +359,5 @@ class QueryProcessor:
             reasoning=reasoning,
         )
 
-        log_info(
-            f"Query analysis complete: Intent={intent.value}, Can answer={can_answer}"
-        )
+        log_info(f"Query analysis complete: Intent={intent.value}, Can answer={can_answer}")
         return analysis

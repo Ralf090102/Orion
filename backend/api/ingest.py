@@ -19,9 +19,7 @@ async def ingest_documents(request: IngestRequest, background_tasks: BackgroundT
     try:
         if request.async_processing:
             # Start background processing
-            task_id = await ingest_service.start_async_ingest(
-                request.folder_path, request.chunk_size, request.chunk_overlap
-            )
+            task_id = await ingest_service.start_async_ingest(request.folder_path, request.chunk_size, request.chunk_overlap)
 
             return IngestResponse(
                 task_id=task_id,
@@ -30,9 +28,7 @@ async def ingest_documents(request: IngestRequest, background_tasks: BackgroundT
             )
         else:
             # Synchronous processing
-            result = await ingest_service.ingest_documents(
-                request.folder_path, request.chunk_size, request.chunk_overlap
-            )
+            result = await ingest_service.ingest_documents(request.folder_path, request.chunk_size, request.chunk_overlap)
 
             return IngestResponse(
                 task_id=None,
@@ -66,9 +62,7 @@ async def incremental_ingest(request: IngestRequest):
     Perform incremental document ingestion (only changed files)
     """
     try:
-        result = await ingest_service.incremental_ingest(
-            request.folder_path, request.chunk_size, request.chunk_overlap
-        )
+        result = await ingest_service.incremental_ingest(request.folder_path, request.chunk_size, request.chunk_overlap)
 
         return IngestResponse(
             status=IngestStatus.COMPLETED,

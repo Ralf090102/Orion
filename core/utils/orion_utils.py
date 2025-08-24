@@ -70,9 +70,7 @@ def timer(func):
             return func(*args, **kwargs)
         finally:
             end = time.time()
-            log_info(
-                f"{func.__name__} completed in {end - start:.2f}s", verbose_only=True
-            )
+            log_info(f"{func.__name__} completed in {end - start:.2f}s", verbose_only=True)
 
     return wrapper
 
@@ -145,9 +143,7 @@ def get_file_count(folder_path: str, extensions: Optional[list] = None) -> int:
     if extensions:
         exts = {e.lower() if e.startswith(".") else f".{e.lower()}" for e in extensions}
 
-        return sum(
-            1 for f in path.iterdir() if f.is_file() and f.suffix.lower() in exts
-        )
+        return sum(1 for f in path.iterdir() if f.is_file() and f.suffix.lower() in exts)
 
     return sum(1 for f in path.iterdir() if f.is_file())
 

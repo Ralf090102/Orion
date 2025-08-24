@@ -201,22 +201,16 @@ class TestConversationMemoryManager:
         """Should detect follow-up queries based on context"""
         # Set up conversation history
         self.manager.add_message("session1", "user1", "user", "What is Python?")
-        self.manager.add_message(
-            "session1", "user1", "assistant", "Python is a programming language"
-        )
+        self.manager.add_message("session1", "user1", "assistant", "Python is a programming language")
 
         # Add follow-up question
-        message_id = self.manager.add_message(
-            "session1", "user1", "user", "tell me more about it"
-        )
+        message_id = self.manager.add_message("session1", "user1", "user", "tell me more about it")
 
         assert message_id is not None
 
         # Check that it was detected as follow-up
         history = self.manager.get_conversation_history("session1", "user1")
-        follow_up_message = [
-            msg for msg in history if msg.content == "tell me more about it"
-        ][0]
+        follow_up_message = [msg for msg in history if msg.content == "tell me more about it"][0]
         assert follow_up_message.query_type in [
             QueryType.FOLLOW_UP.value,
             QueryType.REFERENCE.value,
@@ -226,9 +220,7 @@ class TestConversationMemoryManager:
         """Should disable memory when storage limit is reached"""
         # Mock file size check to simulate large database
         with patch("os.path.getsize", return_value=25 * 1024**3):  # 25GB
-            result = self.manager.add_message(
-                "session1", "user1", "user", "test message"
-            )
+            result = self.manager.add_message("session1", "user1", "user", "test message")
             assert result is None  # Should not store when over limit
 
     def test_clears_session_memory(self):
@@ -266,9 +258,7 @@ class TestConversationMemoryManager:
     def test_cleanup_old_conversations(self):
         """Should clean up old conversations"""
         # Add old message (simulate by manually setting old timestamp)
-        message_id = self.manager.add_message(
-            "old_session", "user1", "user", "Old message"
-        )
+        message_id = self.manager.add_message("old_session", "user1", "user", "Old message")
 
         # Manually update timestamp to be old
         import sqlite3
@@ -331,16 +321,11 @@ class TestContextAwareQueryResolver:
 
     def test_enhances_follow_up_queries(self):
         """Should enhance follow-up queries with context"""
-        resolved = self.resolver.resolve_query(
-            "tell me more about functions", self.session
-        )
+        resolved = self.resolver.resolve_query("tell me more about functions", self.session)
 
         assert resolved.query_type == QueryType.FOLLOW_UP
         assert resolved.context_used
-        assert (
-            "python" in resolved.resolved_query.lower()
-            or "programming" in resolved.resolved_query.lower()
-        )
+        assert "python" in resolved.resolved_query.lower() or "programming" in resolved.resolved_query.lower()
         assert len(resolved.topics_referenced) > 0
         assert "functions" in resolved.enhancement_explanation
 
@@ -372,9 +357,7 @@ class TestContextAwareQueryResolver:
         rag_context = "Python is a high-level programming language..."
         base_prompt = "You are a helpful assistant."
 
-        prompt = self.resolver.create_context_aware_prompt(
-            resolved_query, rag_context, base_prompt
-        )
+        prompt = self.resolver.create_context_aware_prompt(resolved_query, rag_context, base_prompt)
 
         assert base_prompt in prompt
         assert "follow_up" in prompt.lower()
@@ -421,20 +404,14 @@ class TestEnhancedChatSession:
         assert self.session.messages[1].content == "Python is a programming language"
 
         # Check persistent memory
-        history = self.test_manager.get_conversation_history(
-            "test_session", "test_user"
-        )
+        history = self.test_manager.get_conversation_history("test_session", "test_user")
         assert len(history) >= 2
 
     def test_loads_conversation_history_on_init(self):
         """Should load existing conversation history when session is created"""
         # Add messages to persistent storage first
-        self.test_manager.add_message(
-            "existing_session", "test_user", "user", "Previous message"
-        )
-        self.test_manager.add_message(
-            "existing_session", "test_user", "assistant", "Previous response"
-        )
+        self.test_manager.add_message("existing_session", "test_user", "user", "Previous message")
+        self.test_manager.add_message("existing_session", "test_user", "assistant", "Previous response")
 
         # Create new session with same ID - should load history
         with patch("core.rag.chat.memory_manager", self.test_manager):
@@ -476,9 +453,7 @@ class TestEnhancedChatSession:
 
             # Verify messages exist
             assert len(self.session.messages) > 0
-            history = self.test_manager.get_conversation_history(
-                "test_session", "test_user"
-            )
+            history = self.test_manager.get_conversation_history("test_session", "test_user")
             assert len(history) > 0
 
             # Clear memory
@@ -486,9 +461,7 @@ class TestEnhancedChatSession:
 
             # Verify both are cleared
             assert len(self.session.messages) == 0
-            history = self.test_manager.get_conversation_history(
-                "test_session", "test_user"
-            )
+            history = self.test_manager.get_conversation_history("test_session", "test_user")
             assert len(history) == 0
 
 
@@ -509,9 +482,7 @@ class TestMemoryIntegration:
                 session_manager = ChatSessionManager()
 
                 # Start conversation
-                session = session_manager.get_or_create_session(
-                    "user1", enable_memory=True
-                )
+                session = session_manager.get_or_create_session("user1", enable_memory=True)
 
                 # User asks initial question
                 session.add_message("user", "What is machine learning?")
@@ -526,10 +497,7 @@ class TestMemoryIntegration:
                 # Check that conversation context is maintained
                 context = session.get_conversation_context()
                 assert len(context.recent_topics) > 0
-                assert any(
-                    "machine" in topic.lower() or "learning" in topic.lower()
-                    for topic in context.recent_topics
-                )
+                assert any("machine" in topic.lower() or "learning" in topic.lower() for topic in context.recent_topics)
 
                 # Check query type detection
                 query_type = session.detect_query_type("what are some examples?")

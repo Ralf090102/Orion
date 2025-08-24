@@ -98,9 +98,7 @@ def check_model_availability(model: str) -> bool:
         is_available = any(model == m or model in m for m in available_models)
 
         if not is_available:
-            log_warning(
-                f"Model '{model}' not found. Available models: {available_models}"
-            )
+            log_warning(f"Model '{model}' not found. Available models: {available_models}")
             log_info(f"To install the model, run: ollama pull {model}")
 
         return is_available
@@ -165,9 +163,7 @@ def generate_response(
         # Generate response
         if stream:
             content = ""
-            for chunk in ollama.chat(
-                model=model, messages=messages, options=options, stream=True
-            ):
+            for chunk in ollama.chat(model=model, messages=messages, options=options, stream=True):
                 part = chunk.get("message", {}).get("content", "")
                 if part:
                     if on_token:
@@ -290,9 +286,7 @@ def chat(
             # Ollama supports seed as a generation option
             seed=seed,
         )
-        log_info(
-            f"Sending prompt to model '{model}' (temp={temperature}, stop={stop}, seed={seed})"
-        )
+        log_info(f"Sending prompt to model '{model}' (temp={temperature}, stop={stop}, seed={seed})")
         response = chat_model.invoke([HumanMessage(content=prompt)])
         return response.content.strip()
     except Exception as e:

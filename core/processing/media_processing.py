@@ -24,9 +24,7 @@ _cleanup_registered = False
 def _cleanup_all_resources():
     """Clean up all registered resources on exit."""
     global _cleanup_registry
-    cleanup_funcs = list(
-        _cleanup_registry
-    )  # Create a copy to avoid modification during iteration
+    cleanup_funcs = list(_cleanup_registry)  # Create a copy to avoid modification during iteration
     for cleanup_func in cleanup_funcs:
         try:
             cleanup_func()
@@ -135,9 +133,7 @@ class OCRProcessor:
 
             # Initialize reader (this is cached after first use)
             if not hasattr(self, "_easyocr_reader"):
-                self._easyocr_reader = easyocr.Reader(
-                    ["en"], gpu=False
-                )  # Use CPU for compatibility
+                self._easyocr_reader = easyocr.Reader(["en"], gpu=False)  # Use CPU for compatibility
 
             # Preprocess image
             img = self._preprocess_image(image_path)
@@ -152,17 +148,11 @@ class OCRProcessor:
 
             for bbox, text, confidence in results:
                 if confidence > 0.5:  # Filter low-confidence text
-                    text_blocks.append(
-                        {"text": text, "confidence": confidence, "bbox": bbox}
-                    )
+                    text_blocks.append({"text": text, "confidence": confidence, "bbox": bbox})
                     full_text += text + " "
                     confidence_scores.append(confidence)
 
-            avg_confidence = (
-                sum(confidence_scores) / len(confidence_scores)
-                if confidence_scores
-                else 0
-            )
+            avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0
 
             return {
                 "text": full_text.strip(),
@@ -190,13 +180,9 @@ class OCRProcessor:
 
             # Get confidence data
             try:
-                data = pytesseract.image_to_data(
-                    img, output_type=pytesseract.Output.DICT
-                )
+                data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
                 confidences = [int(conf) for conf in data["conf"] if int(conf) > 0]
-                avg_confidence = (
-                    sum(confidences) / len(confidences) if confidences else 0
-                )
+                avg_confidence = sum(confidences) / len(confidences) if confidences else 0
             except Exception:
                 avg_confidence = 0.8  # Fallback confidence
 
@@ -312,9 +298,7 @@ class TableDetector:
                                 }
                             )
 
-                    log_info(
-                        f"Extracted {len(tables)} tables from {pdf_path} using camelot"
-                    )
+                    log_info(f"Extracted {len(tables)} tables from {pdf_path} using camelot")
                 finally:
                     # Force cleanup of camelot objects
                     del table_list
@@ -450,12 +434,8 @@ class MediaProcessor:
         """Get processing statistics."""
         return {
             **self.stats,
-            "avg_processing_time": (
-                self.stats["processing_time"] / max(self.stats["images_processed"], 1)
-            ),
-            "text_extraction_rate": (
-                self.stats["text_extracted"] / max(self.stats["images_processed"], 1)
-            ),
+            "avg_processing_time": (self.stats["processing_time"] / max(self.stats["images_processed"], 1)),
+            "text_extraction_rate": (self.stats["text_extracted"] / max(self.stats["images_processed"], 1)),
         }
 
 

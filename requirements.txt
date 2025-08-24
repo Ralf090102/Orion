@@ -37,6 +37,10 @@ python-multipart
 pystray
 psutil
 
+# GPU Acceleration (Optional - NVIDIA users)
+torch
+pynvml
+
 # CLI & utilities
 typer
 rich

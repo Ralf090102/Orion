@@ -57,15 +57,12 @@ Format as a simple list:"""
             variations = [
                 line.strip().lstrip("123.-• ")
                 for line in response.content.split("\n")
-                if line.strip()
-                and not line.strip().startswith("1.") == line.strip().startswith("2.")
+                if line.strip() and not line.strip().startswith("1.") == line.strip().startswith("2.")
             ]
 
             # Filter out empty and duplicate variations
             variations = [v for v in variations if v and v != query]
-            variations = list(
-                dict.fromkeys(variations)
-            )  # Remove duplicates while preserving order
+            variations = list(dict.fromkeys(variations))  # Remove duplicates while preserving order
 
             log_debug(f"Generated {len(variations)} query variations")
             return [query] + variations[:3]  # Include original + top 3 variations
@@ -118,9 +115,7 @@ List only the key search terms, separated by commas:"""
         ]
 
         query_lower = query.lower()
-        complexity_score = sum(
-            1 for indicator in complexity_indicators if indicator in query_lower
-        )
+        complexity_score = sum(1 for indicator in complexity_indicators if indicator in query_lower)
 
         if complexity_score < 2:
             log_info("Query appears simple, skipping decomposition")
@@ -141,9 +136,7 @@ List only the key search terms, separated by commas:"""
         try:
             response = self.llm.invoke([HumanMessage(content=prompt)])
             # Parse the numbered list
-            lines = [
-                line.strip() for line in response.content.split("\n") if line.strip()
-            ]
+            lines = [line.strip() for line in response.content.split("\n") if line.strip()]
             sub_questions = []
 
             for line in lines:
@@ -201,25 +194,13 @@ Return only the category name:"""
             else:
                 # Fallback classification based on keywords
                 query_lower = query.lower()
-                if any(
-                    word in query_lower
-                    for word in ["what is", "define", "definition", "who is"]
-                ):
+                if any(word in query_lower for word in ["what is", "define", "definition", "who is"]):
                     return "factual"
-                elif any(
-                    word in query_lower
-                    for word in ["how to", "steps", "procedure", "process"]
-                ):
+                elif any(word in query_lower for word in ["how to", "steps", "procedure", "process"]):
                     return "procedural"
-                elif any(
-                    word in query_lower
-                    for word in ["compare", "contrast", "difference", "versus"]
-                ):
+                elif any(word in query_lower for word in ["compare", "contrast", "difference", "versus"]):
                     return "comparative"
-                elif any(
-                    word in query_lower
-                    for word in ["why", "analyze", "explain", "reasoning"]
-                ):
+                elif any(word in query_lower for word in ["why", "analyze", "explain", "reasoning"]):
                     return "analytical"
                 else:
                     return "general"

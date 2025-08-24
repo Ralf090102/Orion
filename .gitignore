@@ -68,3 +68,7 @@ test-results/
 .coverage
 .pytest_cache/
 htmlcov/
+
+# Orion configuration and data
+orion-config/
+orion-data/

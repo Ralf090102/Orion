@@ -16,9 +16,7 @@ class IngestService:
     def __init__(self):
         self.active_tasks: Dict[str, Dict[str, Any]] = {}
 
-    async def ingest_documents(
-        self, folder_path: str, chunk_size: int = 1000, chunk_overlap: int = 200
-    ) -> Dict[str, Any]:
+    async def ingest_documents(self, folder_path: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> Dict[str, Any]:
         """
         Synchronous document ingestion
         """
@@ -36,9 +34,7 @@ class IngestService:
 
             # Get document count (approximate)
             doc_count = len(list(Path(folder_path).rglob("*.pdf")))  # Simplified
-            chunk_count = (
-                vectorstore.index.ntotal if hasattr(vectorstore.index, "ntotal") else 0
-            )
+            chunk_count = vectorstore.index.ntotal if hasattr(vectorstore.index, "ntotal") else 0
 
             return {
                 "document_count": doc_count,
@@ -50,9 +46,7 @@ class IngestService:
             log_error(f"Ingestion failed: {e}")
             raise
 
-    async def start_async_ingest(
-        self, folder_path: str, chunk_size: int = 1000, chunk_overlap: int = 200
-    ) -> str:
+    async def start_async_ingest(self, folder_path: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> str:
         """
         Start asynchronous document ingestion
         """
@@ -66,15 +60,11 @@ class IngestService:
         }
 
         # Start background task
-        asyncio.create_task(
-            self._run_async_ingest(task_id, folder_path, chunk_size, chunk_overlap)
-        )
+        asyncio.create_task(self._run_async_ingest(task_id, folder_path, chunk_size, chunk_overlap))
 
         return task_id
 
-    async def _run_async_ingest(
-        self, task_id: str, folder_path: str, chunk_size: int, chunk_overlap: int
-    ):
+    async def _run_async_ingest(self, task_id: str, folder_path: str, chunk_size: int, chunk_overlap: int):
         """
         Run the actual ingestion task
         """
@@ -95,9 +85,7 @@ class IngestService:
             )
 
         except Exception as e:
-            self.active_tasks[task_id].update(
-                {"status": IngestStatus.FAILED, "message": str(e), "error": str(e)}
-            )
+            self.active_tasks[task_id].update({"status": IngestStatus.FAILED, "message": str(e), "error": str(e)})
 
     async def get_task_status(self, task_id: str) -> IngestResponse:
         """
@@ -118,9 +106,7 @@ class IngestService:
             error=task_data.get("error"),
         )
 
-    async def incremental_ingest(
-        self, folder_path: str, chunk_size: int = 1000, chunk_overlap: int = 200
-    ) -> Dict[str, Any]:
+    async def incremental_ingest(self, folder_path: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> Dict[str, Any]:
         """
         Perform incremental document ingestion
         """

@@ -34,13 +34,7 @@ EMBEDDING_MODEL = "nomic-embed-text"
 
 def stable_doc_key(d: Document) -> tuple:
     m = d.metadata or {}
-    src = (
-        m.get("source")
-        or m.get("file_path")
-        or m.get("original_source")
-        or m.get("filepath")
-        or "unknown"
-    )
+    src = m.get("source") or m.get("file_path") or m.get("original_source") or m.get("filepath") or "unknown"
     page = m.get("page")
 
     import hashlib
@@ -49,9 +43,7 @@ def stable_doc_key(d: Document) -> tuple:
     return (src, page, h)
 
 
-def load_vectorstore(
-    persist_path: str, embedding_model: str = EMBEDDING_MODEL
-) -> Optional[FAISS]:
+def load_vectorstore(persist_path: str, embedding_model: str = EMBEDDING_MODEL) -> Optional[FAISS]:
     """
     Loads FAISS vectorstore from disk.
 
@@ -63,18 +55,14 @@ def load_vectorstore(
         FAISS vectorstore or None if failed
     """
     if not os.path.exists(persist_path):
-        log_error(
-            f"Vectorstore not found at '{persist_path}'. Please run ingestion first."
-        )
+        log_error(f"Vectorstore not found at '{persist_path}'. Please run ingestion first.")
 
         return None
 
     log_info("Loading vectorstore...", verbose_only=True)
     try:
         embeddings = OllamaEmbeddings(model=embedding_model)
-        vectorstore = FAISS.load_local(
-            persist_path, embeddings=embeddings, allow_dangerous_deserialization=True
-        )
+        vectorstore = FAISS.load_local(persist_path, embeddings=embeddings, allow_dangerous_deserialization=True)
         log_success("Vectorstore loaded successfully")
 
         return vectorstore
@@ -139,9 +127,7 @@ def search_relevant_documents(
     try:
         # --- Embedding search ---
         if use_mmr:
-            emb_docs = vectorstore.max_marginal_relevance_search(
-                query, k=k, fetch_k=fetch_k
-            )
+            emb_docs = vectorstore.max_marginal_relevance_search(query, k=k, fetch_k=fetch_k)
         else:
             try:
                 scored = vectorstore.similarity_search_with_score(query, k=max(k, 10))
@@ -185,16 +171,12 @@ def search_relevant_documents(
                     setattr(search_relevant_documents, "_RERANKER", _RERANKER)
                 pairs = [(query, d.page_content) for d in merged_docs]
                 scores = _RERANKER.predict(pairs)
-                reranked = sorted(
-                    zip(merged_docs, scores), key=lambda x: x[1], reverse=True
-                )
+                reranked = sorted(zip(merged_docs, scores), key=lambda x: x[1], reverse=True)
                 final_docs = [doc for doc, _ in reranked[:k]]
                 if verbose:
                     log_info(f"Reranked top {len(final_docs)} docs with cross-encoder")
             except Exception as e:
-                log_warning(
-                    f"Cross-encoder unavailable or failed; using merged order. ({e})"
-                )
+                log_warning(f"Cross-encoder unavailable or failed; using merged order. ({e})")
 
         if verbose:
             log_success(f"Returning {len(final_docs)} documents")
@@ -251,11 +233,7 @@ def format_context(
         m = d.metadata or {}
         sources.append(
             {
-                "source": m.get("source")
-                or m.get("file_path")
-                or m.get("original_source")
-                or m.get("filepath")
-                or "unknown",
+                "source": m.get("source") or m.get("file_path") or m.get("original_source") or m.get("filepath") or "unknown",
                 "page": m.get("page"),
                 "idx": i,
             }
@@ -318,18 +296,12 @@ def create_prompt(query: str, context: str, query_analysis=None) -> str:
 
     if not context.strip():
         return (
-            guardrail
-            + intent_guidance
-            + "\n\nNo relevant context was found for the question below. "
+            guardrail + intent_guidance + "\n\nNo relevant context was found for the question below. "
             "Please suggest providing more documents.\n\n"
             f"Question: {query}"
         )
 
-    return (
-        guardrail + intent_guidance + f"\n\nContext:\n{context}\n\n"
-        f"Question: {query}\n\n"
-        "Answer:"
-    )
+    return guardrail + intent_guidance + f"\n\nContext:\n{context}\n\n" f"Question: {query}\n\n" "Answer:"
 
 
 def query_knowledgebase(
@@ -370,9 +342,7 @@ def query_knowledgebase(
     resolved_query = None
     if chat_session:
         resolved_query = context_resolver.resolve_query(query, chat_session)
-        log_info(
-            f"Query resolution: {resolved_query.query_type.value} -> {resolved_query.enhancement_explanation}"
-        )
+        log_info(f"Query resolution: {resolved_query.query_type.value} -> {resolved_query.enhancement_explanation}")
 
         # Use the resolved query for processing
         processing_query = resolved_query.resolved_query
@@ -394,15 +364,11 @@ def query_knowledgebase(
         }
 
     # Log analysis results for debugging/monitoring
-    log_info(
-        f"Query intent: {query_analysis.intent.value} (confidence: {query_analysis.confidence:.2f})"
-    )
+    log_info(f"Query intent: {query_analysis.intent.value} (confidence: {query_analysis.confidence:.2f})")
     log_debug(f"Extracted keywords: {query_analysis.keywords}")
 
     if len(query_analysis.sub_queries) > 1:
-        log_debug(
-            f"Complex query broken into {len(query_analysis.sub_queries)} sub-queries"
-        )
+        log_debug(f"Complex query broken into {len(query_analysis.sub_queries)} sub-queries")
 
     vectorstore = load_vectorstore(persist_path, embedding_model)
     if not vectorstore:
@@ -439,18 +405,12 @@ def query_knowledgebase(
                 hyde_doc = enhancer.generate_hypothetical_document(processing_query)
 
             # 3. Include sub-queries if we have a complex query
-            search_queries = [processing_query] + query_variations[
-                1:2
-            ]  # Original + 1 variation
+            search_queries = [processing_query] + query_variations[1:2]  # Original + 1 variation
 
             if len(query_analysis.sub_queries) > 1:
                 # Add the most important sub-query
-                search_queries.append(
-                    query_analysis.sub_queries[1]
-                )  # Skip the original
-                log_debug(
-                    f"Added sub-query for complex question: {query_analysis.sub_queries[1]}"
-                )
+                search_queries.append(query_analysis.sub_queries[1])  # Skip the original
+                log_debug(f"Added sub-query for complex question: {query_analysis.sub_queries[1]}")
 
             # Add HyDE doc and keyword query
             search_queries.extend([hyde_doc, keyword_query])
@@ -458,9 +418,7 @@ def query_knowledgebase(
             # Limit to 4 total queries for efficiency
             search_queries = search_queries[:4]
 
-            log_info(
-                f"Generated {len(search_queries)} optimized search variants using query analysis"
-            )
+            log_info(f"Generated {len(search_queries)} optimized search variants using query analysis")
 
         except Exception as e:
             log_warning(f"Query enhancement failed: {e}, using original query only")
@@ -516,9 +474,7 @@ def query_knowledgebase(
                 "If the document is not relevant, say so.\n\n"
                 f"Document:\n{doc.page_content}\n\nQuestion: {query}"
             )
-            summaries.append(
-                generate_response(doc_prompt, model=model, temperature=0.2)
-            )
+            summaries.append(generate_response(doc_prompt, model=model, temperature=0.2))
         combined_context = "\n".join(summaries)
         context, sources = combined_context, [
             {
@@ -541,13 +497,9 @@ def query_knowledgebase(
         )
     else:
         # Use original prompt creation
-        prompt = create_prompt(
-            query, context, query_analysis
-        )  # Use original query for response with analysis
+        prompt = create_prompt(query, context, query_analysis)  # Use original query for response with analysis
 
-    log_progress(
-        f"Generating response with model '{model}' using {len(final_docs)} documents..."
-    )
+    log_progress(f"Generating response with model '{model}' using {len(final_docs)} documents...")
     answer = generate_response(prompt, model=model)
 
     if answer.startswith("[Error:"):
@@ -684,9 +636,7 @@ def query_with_performance_optimizations(
     start_time = time.time()
 
     # Use cached version for better performance
-    result = query_knowledgebase_cached(
-        query=query, persist_path=persist_path, model=model, k=k, **kwargs
-    )
+    result = query_knowledgebase_cached(query=query, persist_path=persist_path, model=model, k=k, **kwargs)
 
     # Add performance metadata
     response_time = time.time() - start_time

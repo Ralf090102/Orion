@@ -137,9 +137,7 @@ class SmartCache:
         }
 
         key_string = json.dumps(key_data, sort_keys=True, default=str)
-        return hashlib.sha256(key_string.encode()).hexdigest()[
-            :16
-        ]  # 16 chars is enough
+        return hashlib.sha256(key_string.encode()).hexdigest()[:16]  # 16 chars is enough
 
     def get(self, key: str) -> Optional[Any]:
         """
@@ -228,9 +226,7 @@ class SmartCache:
             return
 
         # Find entry with oldest last_accessed time
-        lru_key = min(
-            self._memory_cache.keys(), key=lambda k: self._memory_cache[k].last_accessed
-        )
+        lru_key = min(self._memory_cache.keys(), key=lambda k: self._memory_cache[k].last_accessed)
 
         del self._memory_cache[lru_key]
         self.stats["evictions"] += 1

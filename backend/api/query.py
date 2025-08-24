@@ -17,13 +17,9 @@ async def search_documents(request: QueryRequest):
     Search documents in the vectorstore
     """
     try:
-        results = await query_service.search(
-            query=request.query, k=request.k, filters=request.filters
-        )
+        results = await query_service.search(query=request.query, k=request.k, filters=request.filters)
 
-        return QueryResponse(
-            query=request.query, results=results, total_results=len(results)
-        )
+        return QueryResponse(query=request.query, results=results, total_results=len(results))
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

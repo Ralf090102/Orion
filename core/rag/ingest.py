@@ -148,9 +148,7 @@ def chunk_documents(texts: List[Dict], chunk_size: int, chunk_overlap: int):
     smart_chunker = SmartChunker(chunk_size=chunk_size, overlap=chunk_overlap)
 
     # Fallback semantic chunker for edge cases
-    semantic_chunker = SemanticChunker(
-        chunk_size=chunk_size, chunk_overlap=chunk_overlap
-    )
+    semantic_chunker = SemanticChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
     all_chunks = []
 
@@ -186,10 +184,7 @@ def chunk_documents(texts: List[Dict], chunk_size: int, chunk_overlap: int):
                 )
 
             all_chunks.extend(chunks)
-            log_info(
-                f"Smart chunking created {len(chunks)} chunks for "
-                f"{doc['metadata'].get('source', 'unknown')}"
-            )
+            log_info(f"Smart chunking created {len(chunks)} chunks for " f"{doc['metadata'].get('source', 'unknown')}")
 
         except Exception as e:
             log_warning(
@@ -272,9 +267,7 @@ def dedupe_documents_by_content(docs: list[Document]) -> list[Document]:
     return out
 
 
-def write_index_meta(
-    persist_path: str, *, embedding_model: str, chunk_size: int, chunk_overlap: int
-):
+def write_index_meta(persist_path: str, *, embedding_model: str, chunk_size: int, chunk_overlap: int):
     """
     Writes metadata for the FAISS index to disk.
 
@@ -358,11 +351,7 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
         "type": file_type,
         "filename": file_path.name,
         "ext": file_path.suffix.lower(),
-        "hash": (
-            hashlib.md5(file_path.read_bytes()).hexdigest()
-            if file_path.is_file()
-            else None
-        ),
+        "hash": (hashlib.md5(file_path.read_bytes()).hexdigest() if file_path.is_file() else None),
     }
 
     try:
@@ -374,9 +363,7 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
                 with open(file_path, encoding="utf-8", errors="ignore") as f:
                     content = f.read()
             except Exception as e:
-                log_warning(
-                    f"Could not read file content for intelligence analysis: {e}"
-                )
+                log_warning(f"Could not read file content for intelligence analysis: {e}")
 
             if content:
                 # Use our document intelligence system
@@ -432,37 +419,24 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
                                 {
                                     "image_analysis": {
                                         "dimensions": (
-                                            f"{image_analysis['metadata']['width']}"
-                                            f"x{image_analysis['metadata']['height']}"
+                                            f"{image_analysis['metadata']['width']}" f"x{image_analysis['metadata']['height']}"
                                         ),
                                         "format": image_analysis["metadata"]["format"],
                                         "mode": image_analysis["metadata"]["mode"],
-                                        "ocr_text_length": len(
-                                            ocr_result.get("text", "")
-                                        ),
-                                        "ocr_confidence": ocr_result.get(
-                                            "confidence", 0
-                                        ),
+                                        "ocr_text_length": len(ocr_result.get("text", "")),
+                                        "ocr_confidence": ocr_result.get("confidence", 0),
                                         "ocr_method": ocr_result.get("method", "none"),
-                                        "tables_found": len(
-                                            image_analysis.get("tables", [])
-                                        ),
-                                        "processing_time": image_analysis.get(
-                                            "processing_time", 0
-                                        ),
+                                        "tables_found": len(image_analysis.get("tables", [])),
+                                        "processing_time": image_analysis.get("processing_time", 0),
                                     }
                                 }
                             )
 
                             # If OCR found text, add it to the document content
                             ocr_text = ocr_result.get("text", "").strip()
-                            if (
-                                ocr_text and len(ocr_text) > 10
-                            ):  # Only if substantial text found
+                            if ocr_text and len(ocr_text) > 10:  # Only if substantial text found
                                 meta["ocr_text"] = ocr_text
-                                log_info(
-                                    f"OCR extracted {len(ocr_text)} characters from image"
-                                )
+                                log_info(f"OCR extracted {len(ocr_text)} characters from image")
 
                 except Exception as e:
                     log_warning(f"Enhanced processing failed for {file_path}: {e}")
@@ -489,15 +463,9 @@ def extract_metadata(file_path: Path, file_type: str, extra=None):
                             {
                                 "pdf_tables": {
                                     "table_count": len(tables),
-                                    "total_rows": sum(
-                                        t.get("shape", [0, 0])[0] for t in tables
-                                    ),
-                                    "total_columns": sum(
-                                        t.get("shape", [0, 0])[1] for t in tables
-                                    ),
-                                    "extraction_methods": list(
-                                        set(t.get("method", "unknown") for t in tables)
-                                    ),
+                                    "total_rows": sum(t.get("shape", [0, 0])[0] for t in tables),
+                                    "total_columns": sum(t.get("shape", [0, 0])[1] for t in tables),
+                                    "extraction_methods": list(set(t.get("method", "unknown") for t in tables)),
                                 }
                             }
                         )
@@ -644,11 +612,7 @@ def load_documents(folder_path: str) -> List[Document]:
         log_error(str(e))
         return []
 
-    supported_files = [
-        f
-        for f in folder.rglob("*")
-        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
-    ]
+    supported_files = [f for f in folder.rglob("*") if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS]
     if not supported_files:
         log_warning(f"No supported files found in '{folder_path}'")
         return []
@@ -666,9 +630,7 @@ def load_documents(folder_path: str) -> List[Document]:
                     for doc in file_docs:
                         doc.metadata.update(meta)
                     docs.extend(file_docs)
-                    ingest_events.append(
-                        {"file": file_path.name, "status": "success", "meta": meta}
-                    )
+                    ingest_events.append({"file": file_path.name, "status": "success", "meta": meta})
                 else:
                     loader = get_loader_for_file(file_path)
                     if loader == "metadata_only":
@@ -718,9 +680,7 @@ def load_documents(folder_path: str) -> List[Document]:
                         for doc in file_docs:
                             doc.metadata.update(meta)
                         docs.extend(file_docs)
-                        ingest_events.append(
-                            {"file": file_path.name, "status": "success", "meta": meta}
-                        )
+                        ingest_events.append({"file": file_path.name, "status": "success", "meta": meta})
                     else:
                         ingest_events.append(
                             {
@@ -731,9 +691,7 @@ def load_documents(folder_path: str) -> List[Document]:
                         )
             except Exception as e:
                 failed_files.append(file_path.name)
-                ingest_events.append(
-                    {"file": file_path.name, "status": "failed", "error": str(e)}
-                )
+                ingest_events.append({"file": file_path.name, "status": "failed", "error": str(e)})
             progress.advance(task)
 
     log_dir = Path("data/ingest")
@@ -744,12 +702,8 @@ def load_documents(folder_path: str) -> List[Document]:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
     if failed_files:
-        log_warning(
-            f"Failed to load {len(failed_files)} files: {', '.join(failed_files)}"
-        )
-    log_success(
-        f"Loaded {len(docs)} document chunks from {len(supported_files) - len(failed_files)} files"
-    )
+        log_warning(f"Failed to load {len(failed_files)} files: {', '.join(failed_files)}")
+    log_success(f"Loaded {len(docs)} document chunks from {len(supported_files) - len(failed_files)} files")
     return docs
 
 
@@ -790,11 +744,7 @@ async def rebuild_vectorstore_async(
         processor = AsyncDocumentProcessor()
         # Get all supported files
         folder = Path(folder_path)
-        supported_files = [
-            str(f)
-            for f in folder.rglob("*")
-            if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
-        ]
+        supported_files = [str(f) for f in folder.rglob("*") if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS]
 
         if not supported_files:
             log_warning(f"No supported files found in '{folder_path}'")
@@ -844,9 +794,7 @@ async def rebuild_vectorstore_async(
             chunk_overlap=chunk_overlap,
         )
 
-        log_success(
-            f"Async rebuild complete! {len(chunks)} chunks from {len(docs)} documents."
-        )
+        log_success(f"Async rebuild complete! {len(chunks)} chunks from {len(docs)} documents.")
         return vectorstore
 
     except Exception as e:
@@ -904,16 +852,12 @@ async def incremental_vectorstore_async(
 
         try:
             embeddings = OllamaEmbeddings(model=embedding_model)
-            vectorstore = FAISS.load_local(
-                persist_path, embeddings, allow_dangerous_deserialization=True
-            )
+            vectorstore = FAISS.load_local(persist_path, embeddings, allow_dangerous_deserialization=True)
             return vectorstore
         except Exception as e:
             log_warning(f"Could not load existing vectorstore: {e}")
             # Fall back to full rebuild
-            return await rebuild_vectorstore_async(
-                folder_path, persist_path, chunk_size, chunk_overlap, embedding_model
-            )
+            return await rebuild_vectorstore_async(folder_path, persist_path, chunk_size, chunk_overlap, embedding_model)
 
     elif update_results.get("status") == "success":
         # Process changed documents
@@ -933,9 +877,7 @@ async def incremental_vectorstore_async(
                 # Load existing vectorstore or create new one
                 try:
                     embeddings = OllamaEmbeddings(model=embedding_model)
-                    vectorstore = FAISS.load_local(
-                        persist_path, embeddings, allow_dangerous_deserialization=True
-                    )
+                    vectorstore = FAISS.load_local(persist_path, embeddings, allow_dangerous_deserialization=True)
                     log_info("📂 Loaded existing vectorstore")
                 except Exception as e:
                     log_warning(f"Could not load existing vectorstore: {e}")
@@ -954,9 +896,7 @@ async def incremental_vectorstore_async(
                     # Convert and chunk new documents
                     docs = []
                     for doc in new_docs:
-                        docs.append(
-                            {"text": doc.page_content, "metadata": doc.metadata}
-                        )
+                        docs.append({"text": doc.page_content, "metadata": doc.metadata})
 
                     chunks = chunk_documents(docs, chunk_size, chunk_overlap)
                     texts = [c["text"] for c in chunks]
@@ -973,14 +913,10 @@ async def incremental_vectorstore_async(
                     manifest = load_manifest(persist_path)
                     for file_path in changed_files:
                         if Path(file_path).exists():
-                            manifest["files"][file_path] = file_checksum(
-                                Path(file_path)
-                            )
+                            manifest["files"][file_path] = file_checksum(Path(file_path))
                     save_manifest(persist_path, manifest)
 
-                    log_success(
-                        f"🎉 Incremental update complete! Added {len(chunks)} new chunks."
-                    )
+                    log_success(f"🎉 Incremental update complete! Added {len(chunks)} new chunks.")
 
                 return vectorstore
 
@@ -997,9 +933,7 @@ async def incremental_vectorstore_async(
 
     else:
         log_error("❌ Incremental update failed, falling back to full rebuild")
-        return await rebuild_vectorstore_async(
-            folder_path, persist_path, chunk_size, chunk_overlap, embedding_model
-        )
+        return await rebuild_vectorstore_async(folder_path, persist_path, chunk_size, chunk_overlap, embedding_model)
 
 
 @timer
@@ -1026,13 +960,9 @@ def build_vectorstore(
         FAISS vectorstore or None if failed.
     """
     if mode == "rebuild":
-        return rebuild_vectorstore(
-            folder_path, persist_path, chunk_size, chunk_overlap, embedding_model
-        )
+        return rebuild_vectorstore(folder_path, persist_path, chunk_size, chunk_overlap, embedding_model)
     elif mode == "increment":
-        return incremental_vectorstore(
-            folder_path, persist_path, chunk_size, chunk_overlap, embedding_model
-        )
+        return incremental_vectorstore(folder_path, persist_path, chunk_size, chunk_overlap, embedding_model)
     else:
         log_error(f"Invalid mode '{mode}'. Use 'rebuild' or 'increment'.")
         return None
@@ -1088,9 +1018,7 @@ def rebuild_vectorstore(
     vectorstore.save_local(persist_path)
     save_manifest(persist_path, manifest)
 
-    log_success(
-        f"Rebuilt vectorstore with {len(chunks)} chunks from {len(docs)} documents."
-    )
+    log_success(f"Rebuilt vectorstore with {len(chunks)} chunks from {len(docs)} documents.")
     return True
 
 
@@ -1145,9 +1073,7 @@ def incremental_vectorstore(
         log_info(f"Detected {len(removed)} deleted files: {removed}")
 
     if changed_docs or removed:
-        return rebuild_vectorstore(
-            folder_path, persist_path, chunk_size, chunk_overlap, embedding_model
-        )
+        return rebuild_vectorstore(folder_path, persist_path, chunk_size, chunk_overlap, embedding_model)
 
     log_info("No document changes detected. Vectorstore is up-to-date.")
     return True

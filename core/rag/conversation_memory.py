@@ -98,11 +98,7 @@ class LLMQueryClassifier:
         """Detect query type using LLM with fallback to patterns"""
 
         # Quick pre-filter: if no context at all, likely NEW_TOPIC unless clearly referential
-        if (
-            not context.recent_topics
-            and not context.last_user_query
-            and not context.recent_sources
-        ):
+        if not context.recent_topics and not context.last_user_query and not context.recent_sources:
             # Check for obvious reference words
             if any(
                 ref_word in query.lower()
@@ -176,8 +172,7 @@ class LLMQueryClassifier:
                         subject_words = subject.split()
                         topic_overlap = any(
                             any(
-                                topic_word in recent_topic.lower()
-                                or recent_topic.lower() in topic_word
+                                topic_word in recent_topic.lower() or recent_topic.lower() in topic_word
                                 for recent_topic in context.recent_topics
                             )
                             for topic_word in subject_words
@@ -213,9 +208,7 @@ class LLMQueryClassifier:
 
         # Get LLM response
         try:
-            response = generate_response(
-                prompt, model=self.model, max_tokens=10, temperature=0.1
-            )
+            response = generate_response(prompt, model=self.model, max_tokens=10, temperature=0.1)
             classification = self._parse_llm_response(response)
 
             log_debug(f"LLM classified '{query[:50]}...' as {classification.value}")
@@ -293,28 +286,18 @@ Respond with only one word: FOLLOW_UP, REFERENCE, CLARIFICATION, or NEW_TOPIC"""
             return QueryType.NEW_TOPIC
 
         # Default fallback
-        log_warning(
-            f"Could not parse LLM response: '{response}', defaulting to NEW_TOPIC"
-        )
+        log_warning(f"Could not parse LLM response: '{response}', defaulting to NEW_TOPIC")
         return QueryType.NEW_TOPIC
 
     def _simple_heuristic(self, query: str) -> QueryType:
         """Simple heuristic when no LLM or patterns available"""
         query_lower = query.lower()
 
-        if any(
-            word in query_lower for word in ["more", "tell me", "what else", "continue"]
-        ):
+        if any(word in query_lower for word in ["more", "tell me", "what else", "continue"]):
             return QueryType.FOLLOW_UP
-        elif any(
-            word in query_lower
-            for word in ["clarify", "explain", "what mean", "understand"]
-        ):
+        elif any(word in query_lower for word in ["clarify", "explain", "what mean", "understand"]):
             return QueryType.CLARIFICATION
-        elif any(
-            word in query_lower
-            for word in ["mentioned", "said", "discussed", "before", "earlier"]
-        ):
+        elif any(word in query_lower for word in ["mentioned", "said", "discussed", "before", "earlier"]):
             return QueryType.REFERENCE
         else:
             return QueryType.NEW_TOPIC
@@ -459,16 +442,11 @@ class PatternBasedFallback:
         # Context-based decisions
         if context.recent_topics:
             # Simple pronoun + context check
-            if (
-                any(ref in query_lower for ref in ["that", "this", "it"])
-                and len(context.recent_topics) > 0
-            ):
+            if any(ref in query_lower for ref in ["that", "this", "it"]) and len(context.recent_topics) > 0:
                 return QueryType.REFERENCE
 
             # Topic overlap check
-            matching_topics = [
-                topic for topic in context.recent_topics if topic.lower() in query_lower
-            ]
+            matching_topics = [topic for topic in context.recent_topics if topic.lower() in query_lower]
             if len(matching_topics) >= 1:
                 return QueryType.FOLLOW_UP
 
@@ -506,15 +484,9 @@ class ConversationMemoryManager:
                 )
 
                 # Create indexes separately
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_session_id ON messages(session_id)"
-                )
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_user_id ON messages(user_id)"
-                )
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp)"
-                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_session_id ON messages(session_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_user_id ON messages(user_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp)")
 
                 # Create sessions table for metadata
                 conn.execute(
@@ -531,12 +503,8 @@ class ConversationMemoryManager:
                 )
 
                 # Create indexes for sessions table
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)"
-                )
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity)"
-                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity)")
 
                 conn.commit()
                 log_info(f"Initialized conversation database: {self._db_path}")
@@ -586,9 +554,7 @@ class ConversationMemoryManager:
 
             if role == "user":
                 context = self.get_conversation_context(session_id, user_id)
-                query_type = self.query_classifier.detect_query_type(
-                    content, context
-                ).value
+                query_type = self.query_classifier.detect_query_type(content, context).value
 
             # Create message
             message = ConversationMessage(
@@ -627,13 +593,9 @@ class ConversationMemoryManager:
                 message_id = cursor.lastrowid
 
                 # Update session metadata in same transaction
-                self._update_session_metadata_in_transaction(
-                    conn, session_id, user_id, topics
-                )
+                self._update_session_metadata_in_transaction(conn, session_id, user_id, topics)
 
-                log_info(
-                    f"Added message to conversation memory: {session_id} ({query_type})"
-                )
+                log_info(f"Added message to conversation memory: {session_id} ({query_type})")
                 return message_id
 
         except Exception as e:
@@ -662,9 +624,7 @@ class ConversationMemoryManager:
 
                 # Merge topics (keep recent ones)
                 all_topics = current_topics + topics
-                unique_topics = list(dict.fromkeys(all_topics))[
-                    -20:
-                ]  # Keep last 20 topics
+                unique_topics = list(dict.fromkeys(all_topics))[-20:]  # Keep last 20 topics
 
                 conn.execute(
                     """
@@ -694,22 +654,16 @@ class ConversationMemoryManager:
         except Exception as e:
             log_error(f"Failed to update session metadata in transaction: {e}")
 
-    def _update_session_metadata(
-        self, session_id: str, user_id: str, topics: List[str]
-    ):
+    def _update_session_metadata(self, session_id: str, user_id: str, topics: List[str]):
         """Update session metadata with latest activity"""
         try:
             with sqlite3.connect(self._db_path) as conn:
-                self._update_session_metadata_in_transaction(
-                    conn, session_id, user_id, topics
-                )
+                self._update_session_metadata_in_transaction(conn, session_id, user_id, topics)
 
         except Exception as e:
             log_error(f"Failed to update session metadata: {e}")
 
-    def get_conversation_context(
-        self, session_id: str, user_id: str
-    ) -> ConversationContext:
+    def get_conversation_context(self, session_id: str, user_id: str) -> ConversationContext:
         """Get conversation context for query resolution"""
         try:
             with sqlite3.connect(self._db_path) as conn:
@@ -765,9 +719,7 @@ class ConversationMemoryManager:
             log_error(f"Failed to get conversation context: {e}")
             return ConversationContext([], [], None, None, set())
 
-    def get_conversation_history(
-        self, session_id: str, user_id: str, limit: Optional[int] = None
-    ) -> List[ConversationMessage]:
+    def get_conversation_history(self, session_id: str, user_id: str, limit: Optional[int] = None) -> List[ConversationMessage]:
         """Get conversation history for a session"""
         try:
             limit = limit or self.config.context_window_size * 2
@@ -832,21 +784,15 @@ class ConversationMemoryManager:
             cutoff_time = time.time() - (days_old * 24 * 60 * 60)
 
             with sqlite3.connect(self._db_path) as conn:
-                cursor = conn.execute(
-                    "DELETE FROM messages WHERE timestamp < ?", (cutoff_time,)
-                )
+                cursor = conn.execute("DELETE FROM messages WHERE timestamp < ?", (cutoff_time,))
                 deleted_messages = cursor.rowcount
 
-                cursor = conn.execute(
-                    "DELETE FROM sessions WHERE last_activity < ?", (cutoff_time,)
-                )
+                cursor = conn.execute("DELETE FROM sessions WHERE last_activity < ?", (cutoff_time,))
                 deleted_sessions = cursor.rowcount
 
                 conn.commit()
 
-                log_info(
-                    f"Cleaned up {deleted_messages} old messages and {deleted_sessions} old sessions"
-                )
+                log_info(f"Cleaned up {deleted_messages} old messages and {deleted_sessions} old sessions")
 
         except Exception as e:
             log_error(f"Failed to cleanup old conversations: {e}")

@@ -83,17 +83,13 @@ class TestOCRProcessor:
             mock_image_enhance.Contrast.assert_called_once_with(mock_img)
 
             # Use processed_img to avoid unused variable warning
-            assert (
-                processed_img is not None
-            ), "Image preprocessing should return a result"
+            assert processed_img is not None, "Image preprocessing should return a result"
         finally:
             tmp_path.unlink()
 
     @patch("core.processing.media_processing.OCRProcessor._check_available_backends")
     @patch("core.processing.media_processing.OCRProcessor._preprocess_image")
-    def test_extract_text_with_mocked_easyocr(
-        self, mock_preprocess, mock_check_backends
-    ):
+    def test_extract_text_with_mocked_easyocr(self, mock_preprocess, mock_check_backends):
         """Test text extraction with mocked EasyOCR."""
         mock_check_backends.return_value = ["easyocr"]
 
@@ -157,9 +153,7 @@ class TestTableDetector:
             finally:
                 tmp_path.unlink()
 
-    @patch(
-        "core.processing.media_processing.TableDetector._check_table_detection_methods"
-    )
+    @patch("core.processing.media_processing.TableDetector._check_table_detection_methods")
     def test_detect_tables_with_mocked_camelot(self, mock_check_methods):
         """Test table detection with mocked Camelot."""
         mock_check_methods.return_value = ["camelot"]
@@ -225,9 +219,7 @@ class TestMediaProcessor:
     @patch("PIL.Image.open")
     @patch("core.processing.media_processing.OCRProcessor.extract_text")
     @patch("core.processing.media_processing.TableDetector.detect_tables_in_image")
-    def test_process_image_success(
-        self, mock_detect_tables, mock_extract_text, mock_image_open
-    ):
+    def test_process_image_success(self, mock_detect_tables, mock_extract_text, mock_image_open):
         """Test successful image processing."""
         # Mock PIL Image
         mock_img = MagicMock()
@@ -355,9 +347,7 @@ class TestMediaConfig:
 
         # All values should be boolean (regardless of actual availability)
         for key, available in deps.items():
-            assert isinstance(
-                available, bool
-            ), f"Dependency {key} should return boolean, got {type(available)}"
+            assert isinstance(available, bool), f"Dependency {key} should return boolean, got {type(available)}"
 
     def test_check_dependencies_structure(self):
         """Test that check_dependencies returns proper structure."""
@@ -396,9 +386,7 @@ class TestIntegration:
 
     @patch("core.processing.media_processing.OCRProcessor")
     @patch("core.processing.media_processing.TableDetector")
-    def test_initialization_with_mocked_components(
-        self, mock_table_detector, mock_ocr_processor
-    ):
+    def test_initialization_with_mocked_components(self, mock_table_detector, mock_ocr_processor):
         """Test that MediaProcessor initializes components correctly."""
         processor = MediaProcessor()
 

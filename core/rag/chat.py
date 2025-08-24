@@ -42,9 +42,7 @@ class ChatSession:
     def _load_conversation_history(self):
         """Load recent conversation history from memory manager"""
         try:
-            history = memory_manager.get_conversation_history(
-                self.session_id, self.user_id, self.max_context_messages * 2
-            )
+            history = memory_manager.get_conversation_history(self.session_id, self.user_id, self.max_context_messages * 2)
 
             # Convert to ChatMessage format
             for msg in history:
@@ -60,21 +58,15 @@ class ChatSession:
         except Exception as e:
             log_info(f"Could not load conversation history: {e}")
 
-    def add_message(
-        self, role: str, content: str, sources: Optional[List[Dict]] = None
-    ):
+    def add_message(self, role: str, content: str, sources: Optional[List[Dict]] = None):
         """Add a message to the session with enhanced memory tracking."""
-        message = ChatMessage(
-            role=role, content=content, timestamp=time.time(), sources=sources
-        )
+        message = ChatMessage(role=role, content=content, timestamp=time.time(), sources=sources)
         self.messages.append(message)
 
         # Add to persistent memory
         if self.enable_memory:
             try:
-                memory_manager.add_message(
-                    self.session_id, self.user_id, role, content, sources
-                )
+                memory_manager.add_message(self.session_id, self.user_id, role, content, sources)
             except Exception as e:
                 log_info(f"Could not save message to memory: {e}")
 
@@ -103,9 +95,7 @@ class ChatSession:
     def get_conversation_context(self) -> ConversationContext:
         """Get enhanced conversation context for query resolution"""
         if self.enable_memory:
-            return memory_manager.get_conversation_context(
-                self.session_id, self.user_id
-            )
+            return memory_manager.get_conversation_context(self.session_id, self.user_id)
         else:
             # Fallback: create basic context from in-memory messages
             topics = []
@@ -193,9 +183,7 @@ class ChatSessionManager:
                 max_context_messages=max_context_messages,
                 enable_memory=enable_memory,
             )
-            log_info(
-                f"Created new chat session: {session_id} (memory: {enable_memory})"
-            )
+            log_info(f"Created new chat session: {session_id} (memory: {enable_memory})")
 
         # Update user's current session
         self.user_sessions[user_id] = session_id

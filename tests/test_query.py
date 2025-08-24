@@ -61,9 +61,7 @@ class TestQueryEnhancement:
         """Should expand query into multiple variations"""
         # Mock LLM response
         mock_response = Mock()
-        mock_response.content = (
-            "1. What is machine learning?\n2. How does ML work?\n3. ML fundamentals"
-        )
+        mock_response.content = "1. What is machine learning?\n2. How does ML work?\n3. ML fundamentals"
         mock_llm.return_value.invoke.return_value = mock_response
 
         enhancer = QueryEnhancer("test-model")
@@ -77,9 +75,7 @@ class TestQueryEnhancement:
     def test_hyde_generation(self, mock_llm):
         """Should generate hypothetical document"""
         mock_response = Mock()
-        mock_response.content = (
-            "Machine learning is a subset of AI that enables computers to learn..."
-        )
+        mock_response.content = "Machine learning is a subset of AI that enables computers to learn..."
         mock_llm.return_value.invoke.return_value = mock_response
 
         enhancer = QueryEnhancer("test-model")
@@ -110,9 +106,7 @@ class TestQueryEnhancement:
         sub_questions = enhancer.decompose_complex_query(complex_query)
 
         assert len(sub_questions) > 1
-        assert all(
-            len(q) > 10 for q in sub_questions
-        )  # All should be substantial questions
+        assert all(len(q) > 10 for q in sub_questions)  # All should be substantial questions
 
 
 class TestEnhancedQueryKnowledgebase:
@@ -122,9 +116,7 @@ class TestEnhancedQueryKnowledgebase:
     @patch("core.rag.query.QueryEnhancer")
     @patch("core.rag.query.search_relevant_documents")
     @patch("core.rag.query.generate_response")
-    def test_enhanced_query_with_multiple_variations(
-        self, mock_generate, mock_search, mock_enhancer_class, mock_load_vs
-    ):
+    def test_enhanced_query_with_multiple_variations(self, mock_generate, mock_search, mock_enhancer_class, mock_load_vs):
         """Should use query enhancement by default"""
         # Setup mocks
         mock_vs = Mock()
@@ -154,9 +146,7 @@ class TestEnhancedQueryKnowledgebase:
     @patch("core.rag.query.load_vectorstore")
     @patch("core.rag.query.search_relevant_documents")
     @patch("core.rag.query.generate_response")
-    def test_basic_query_without_enhancement(
-        self, mock_generate, mock_search, mock_load_vs
-    ):
+    def test_basic_query_without_enhancement(self, mock_generate, mock_search, mock_load_vs):
         """Should work without query enhancement"""
         # Setup mocks
         mock_vs = Mock()
@@ -321,9 +311,7 @@ class TestQueryProcessor:
         # Should generate diagnostic sub-questions
         assert len(sub_queries) > 1
         sub_queries_text = " ".join(sub_queries).lower()
-        assert any(
-            word in sub_queries_text for word in ["causes", "solutions", "error"]
-        )
+        assert any(word in sub_queries_text for word in ["causes", "solutions", "error"])
 
     def test_sub_query_generation_simple_query(self):
         """Should not break down simple queries unnecessarily"""
@@ -371,9 +359,7 @@ class TestQueryProcessor:
 
         for query in technical_with_my:
             can_answer, reasoning = self.processor.validate_query(query, [])
-            assert (
-                can_answer is True
-            )  # These are technical questions, not personal info
+            assert can_answer is True  # These are technical questions, not personal info
 
     def test_query_validation_technical_queries(self):
         """Should accept technical queries we can likely answer"""
@@ -386,9 +372,7 @@ class TestQueryProcessor:
         for query in technical_queries:
             can_answer, reasoning = self.processor.validate_query(query, [])
             assert can_answer is True
-            assert (
-                "technical" in reasoning.lower() or "documentation" in reasoning.lower()
-            )
+            assert "technical" in reasoning.lower() or "documentation" in reasoning.lower()
 
     def test_query_validation_default_acceptance(self):
         """Should default to accepting queries we might be able to answer"""

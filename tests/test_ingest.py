@@ -104,21 +104,15 @@ class TestEnhancedChunking:
             patch("core.rag.ingest.SmartChunker") as mock_smart_chunker,
             patch("core.rag.ingest.SemanticChunker") as mock_semantic_chunker,
         ):
-            mock_smart_chunker.return_value.chunk_document.side_effect = Exception(
-                "Smart chunking failed"
-            )
-            mock_semantic_chunker.return_value.chunk_document.side_effect = Exception(
-                "Chunking failed"
-            )
+            mock_smart_chunker.return_value.chunk_document.side_effect = Exception("Smart chunking failed")
+            mock_semantic_chunker.return_value.chunk_document.side_effect = Exception("Chunking failed")
 
             chunks = chunk_documents(docs, chunk_size=100, chunk_overlap=20)
 
             # Should still return chunks with fallback
             assert len(chunks) > 0
             # Should have fallback chunk type
-            assert any(
-                chunk["metadata"].get("chunk_type") == "fallback" for chunk in chunks
-            )
+            assert any(chunk["metadata"].get("chunk_type") == "fallback" for chunk in chunks)
 
 
 class TestLoadDocuments:

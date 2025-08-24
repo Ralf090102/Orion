@@ -27,12 +27,8 @@ class TestDocumentTypeDetector:
         """Should detect JavaScript/TypeScript files"""
         assert self.detector.detect_type("app.js") == DocumentType.CODE_JAVASCRIPT
         assert self.detector.detect_type("app.ts") == DocumentType.CODE_TYPESCRIPT
-        assert (
-            self.detector.detect_type("component.jsx") == DocumentType.CODE_JAVASCRIPT
-        )
-        assert (
-            self.detector.detect_type("component.tsx") == DocumentType.CODE_TYPESCRIPT
-        )
+        assert self.detector.detect_type("component.jsx") == DocumentType.CODE_JAVASCRIPT
+        assert self.detector.detect_type("component.tsx") == DocumentType.CODE_TYPESCRIPT
 
     def test_markdown_file_detection(self):
         """Should detect markdown files"""
@@ -42,22 +38,13 @@ class TestDocumentTypeDetector:
     def test_content_based_detection(self):
         """Should detect type from content when extension is unknown"""
         python_content = "def hello():\n    print('world')"
-        assert (
-            self.detector.detect_type("unknown_file", python_content)
-            == DocumentType.CODE_PYTHON
-        )
+        assert self.detector.detect_type("unknown_file", python_content) == DocumentType.CODE_PYTHON
 
         js_content = "function hello() {\n  console.log('world');\n}"
-        assert (
-            self.detector.detect_type("unknown_file", js_content)
-            == DocumentType.CODE_JAVASCRIPT
-        )
+        assert self.detector.detect_type("unknown_file", js_content) == DocumentType.CODE_JAVASCRIPT
 
         json_content = '{"key": "value", "number": 42}'
-        assert (
-            self.detector.detect_type("unknown_file", json_content)
-            == DocumentType.CODE_JSON
-        )
+        assert self.detector.detect_type("unknown_file", json_content) == DocumentType.CODE_JSON
 
     def test_unknown_file_fallback(self):
         """Should return unknown for unrecognized files"""
@@ -274,10 +261,7 @@ if __name__ == "__main__":
 
         # Check chunk types
         chunk_types = [chunk["metadata"]["chunk_type"] for chunk in chunks]
-        assert any(
-            chunk_type in ["code_block", "function", "class", "declarations"]
-            for chunk_type in chunk_types
-        )
+        assert any(chunk_type in ["code_block", "function", "class", "declarations"] for chunk_type in chunk_types)
 
     def test_generic_text_chunking_with_overlap(self):
         """Should chunk generic text with proper overlap"""

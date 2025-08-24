@@ -92,9 +92,7 @@ class ContextAwareQueryResolver:
             )
 
         # Enhance query with context
-        enhanced_query, topics_used, sources_used, explanation = (
-            self._enhance_query_with_context(query, query_type, context)
-        )
+        enhanced_query, topics_used, sources_used, explanation = self._enhance_query_with_context(query, query_type, context)
 
         log_debug(f"Query resolution: {query_type.value} -> {explanation}")
 
@@ -129,9 +127,7 @@ class ContextAwareQueryResolver:
 
         if relevant_topics:
             # Use templates to enhance query with topics
-            templates = self.context_templates.get(
-                query_type, self.context_templates[QueryType.FOLLOW_UP]
-            )
+            templates = self.context_templates.get(query_type, self.context_templates[QueryType.FOLLOW_UP])
             template = templates[0]  # Use first template
 
             topics_str = ", ".join(relevant_topics[:3])  # Limit to top 3 topics
@@ -143,21 +139,13 @@ class ContextAwareQueryResolver:
             source_names = [src.get("source", "Unknown") for src in relevant_sources]
             source_context = f" (referencing sources: {', '.join(source_names[:2])})"
             enhanced_query += source_context
-            explanation_parts.append(
-                f"Added source references: {len(relevant_sources)} sources"
-            )
+            explanation_parts.append(f"Added source references: {len(relevant_sources)} sources")
 
-        explanation = (
-            "; ".join(explanation_parts)
-            if explanation_parts
-            else "Context enhancement applied"
-        )
+        explanation = "; ".join(explanation_parts) if explanation_parts else "Context enhancement applied"
 
         return enhanced_query, relevant_topics, relevant_sources, explanation
 
-    def _select_relevant_topics(
-        self, query: str, available_topics: List[str]
-    ) -> List[str]:
+    def _select_relevant_topics(self, query: str, available_topics: List[str]) -> List[str]:
         """Select topics from context that are relevant to the query"""
         if not available_topics:
             return []
@@ -173,9 +161,7 @@ class ContextAwareQueryResolver:
             if topic_lower in query_lower:
                 relevant_topics.append(topic)
             # Similar words (simple stem matching)
-            elif any(
-                word in topic_lower for word in query_lower.split() if len(word) > 3
-            ):
+            elif any(word in topic_lower for word in query_lower.split() if len(word) > 3):
                 relevant_topics.append(topic)
 
         # If no direct matches, include most recent topics for follow-up queries
@@ -184,9 +170,7 @@ class ContextAwareQueryResolver:
 
         return relevant_topics[:5]  # Limit to prevent prompt bloat
 
-    def create_context_aware_prompt(
-        self, resolved_query: ResolvedQuery, rag_context: str, base_prompt: str
-    ) -> str:
+    def create_context_aware_prompt(self, resolved_query: ResolvedQuery, rag_context: str, base_prompt: str) -> str:
         """
         Create a prompt that includes conversation context
 
@@ -220,17 +204,11 @@ class ContextAwareQueryResolver:
 
         # Add guidance based on query type
         if resolved_query.query_type == QueryType.FOLLOW_UP:
-            prompt_parts.append(
-                "\nPlease provide additional information building on our previous discussion."
-            )
+            prompt_parts.append("\nPlease provide additional information building on our previous discussion.")
         elif resolved_query.query_type == QueryType.REFERENCE:
-            prompt_parts.append(
-                "\nPlease reference our previous conversation when relevant."
-            )
+            prompt_parts.append("\nPlease reference our previous conversation when relevant.")
         elif resolved_query.query_type == QueryType.CLARIFICATION:
-            prompt_parts.append(
-                "\nPlease provide clarification and more detailed explanation."
-            )
+            prompt_parts.append("\nPlease provide clarification and more detailed explanation.")
 
         return "\n".join(prompt_parts)
 

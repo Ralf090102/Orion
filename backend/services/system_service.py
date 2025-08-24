@@ -18,9 +18,7 @@ class SystemService:
         Get comprehensive system health status
         """
         try:
-            ollama_status = (
-                "connected" if await check_ollama_connection() else "disconnected"
-            )
+            ollama_status = "connected" if await check_ollama_connection() else "disconnected"
         except Exception as e:
             ollama_status = "error"
             log_info(f"Error checking Ollama connection: {e}")
@@ -39,9 +37,7 @@ class SystemService:
                 "cpu_percent": psutil.cpu_percent(),
                 "memory_percent": psutil.virtual_memory().percent,
                 "disk_usage": (
-                    psutil.disk_usage("/").percent
-                    if platform.system() != "Windows"
-                    else psutil.disk_usage("C:").percent
+                    psutil.disk_usage("/").percent if platform.system() != "Windows" else psutil.disk_usage("C:").percent
                 ),
             },
         }
@@ -62,14 +58,9 @@ class SystemService:
             "system": {
                 "cpu_count": psutil.cpu_count(),
                 "memory_total_gb": round(psutil.virtual_memory().total / (1024**3), 2),
-                "memory_available_gb": round(
-                    psutil.virtual_memory().available / (1024**3), 2
-                ),
+                "memory_available_gb": round(psutil.virtual_memory().available / (1024**3), 2),
                 "disk_free_gb": round(
-                    psutil.disk_usage(
-                        "C:" if platform.system() == "Windows" else "/"
-                    ).free
-                    / (1024**3),
+                    psutil.disk_usage("C:" if platform.system() == "Windows" else "/").free / (1024**3),
                     2,
                 ),
             },

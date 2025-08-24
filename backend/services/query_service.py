@@ -20,9 +20,7 @@ class QueryService:
     def __init__(self):
         self.conversations: Dict[str, List[ChatMessage]] = {}
 
-    async def search(
-        self, query: str, k: int = 5, filters: Optional[Dict[str, Any]] = None
-    ) -> List[SearchResult]:
+    async def search(self, query: str, k: int = 5, filters: Optional[Dict[str, Any]] = None) -> List[SearchResult]:
         """
         Search documents in vectorstore
         """
@@ -39,9 +37,7 @@ class QueryService:
                         content=result.get("content", ""),
                         metadata=result.get("metadata", {}),
                         score=result.get("score", 0.0),
-                        document_id=result.get("metadata", {}).get(
-                            "source", f"doc_{i}"
-                        ),
+                        document_id=result.get("metadata", {}).get("source", f"doc_{i}"),
                         chunk_id=f"chunk_{i}",
                     )
                 )
@@ -74,9 +70,7 @@ class QueryService:
             answer = rag_result.get("answer", "No answer generated")
 
             # Store conversation
-            user_message = ChatMessage(
-                role="user", content=query, timestamp=datetime.now()
-            )
+            user_message = ChatMessage(role="user", content=query, timestamp=datetime.now())
 
             assistant_message = ChatMessage(
                 role="assistant",
@@ -88,9 +82,7 @@ class QueryService:
             if conversation_id not in self.conversations:
                 self.conversations[conversation_id] = []
 
-            self.conversations[conversation_id].extend(
-                [user_message, assistant_message]
-            )
+            self.conversations[conversation_id].extend([user_message, assistant_message])
 
             return QueryResponse(
                 query=query,
@@ -105,9 +97,7 @@ class QueryService:
             log_error(f"Chat failed: {e}")
             raise
 
-    async def find_similar(
-        self, document_id: str, limit: int = 5
-    ) -> List[Dict[str, Any]]:
+    async def find_similar(self, document_id: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
         Find documents similar to given document
         """
@@ -126,11 +116,7 @@ class QueryService:
                     created_at=messages[0].timestamp if messages else datetime.now(),
                     updated_at=messages[-1].timestamp if messages else datetime.now(),
                     message_count=len(messages),
-                    title=(
-                        messages[0].content[:50] + "..."
-                        if messages
-                        else "Empty conversation"
-                    ),
+                    title=(messages[0].content[:50] + "..." if messages else "Empty conversation"),
                 )
             )
         return conversations

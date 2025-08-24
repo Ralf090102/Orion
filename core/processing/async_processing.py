@@ -78,9 +78,7 @@ class AsyncDocumentProcessor:
                 return None
 
             # Extract metadata first (this is I/O intensive)
-            metadata = await asyncio.get_event_loop().run_in_executor(
-                self.executor, extract_metadata, file_path, suffix
-            )
+            metadata = await asyncio.get_event_loop().run_in_executor(self.executor, extract_metadata, file_path, suffix)
 
             # Get appropriate loader
             loader = get_loader_for_file(file_path)
@@ -92,9 +90,7 @@ class AsyncDocumentProcessor:
                 return None
             elif loader:
                 # Load document content in thread executor (I/O bound)
-                docs = await asyncio.get_event_loop().run_in_executor(
-                    self.executor, loader.load
-                )
+                docs = await asyncio.get_event_loop().run_in_executor(self.executor, loader.load)
 
                 # Add metadata to each document
                 for doc in docs:
@@ -134,11 +130,7 @@ class AsyncDocumentProcessor:
         from core.rag.ingest import SUPPORTED_EXTENSIONS
 
         # Find all supported files
-        supported_files = [
-            f
-            for f in folder.rglob("*")
-            if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
-        ]
+        supported_files = [f for f in folder.rglob("*") if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS]
 
         if not supported_files:
             log_warning(f"No supported files found in '{folder_path}'")
@@ -174,15 +166,12 @@ class AsyncDocumentProcessor:
         total_time = end_time - start_time
 
         log_success(
-            f"Async loading completed: {len(all_docs)} documents loaded "
-            f"in {total_time:.2f}s (failed: {failed_count})"
+            f"Async loading completed: {len(all_docs)} documents loaded " f"in {total_time:.2f}s (failed: {failed_count})"
         )
 
         return all_docs
 
-    async def load_documents_from_paths(
-        self, file_paths: List[str], batch_size: int = 50
-    ) -> List[Document]:
+    async def load_documents_from_paths(self, file_paths: List[str], batch_size: int = 50) -> List[Document]:
         """
         Load documents from a list of file paths asynchronously in batches.
 
@@ -217,9 +206,7 @@ class AsyncDocumentProcessor:
             batch_num = (i // batch_size) + 1
             total_batches = (len(path_objects) - 1) // batch_size + 1
 
-            log_info(
-                f"Processing batch {batch_num}/{total_batches} ({len(batch_paths)} files)..."
-            )
+            log_info(f"Processing batch {batch_num}/{total_batches} ({len(batch_paths)} files)...")
 
             # Create async tasks for this batch
             tasks = [self.load_document_async(file_path) for file_path in batch_paths]
@@ -240,9 +227,7 @@ class AsyncDocumentProcessor:
                         batch_failed += 1
 
                 total_failed += batch_failed
-                log_info(
-                    f"Batch {batch_num} completed: {len(batch_paths) - batch_failed}/{len(batch_paths)} files loaded"
-                )
+                log_info(f"Batch {batch_num} completed: {len(batch_paths) - batch_failed}/{len(batch_paths)} files loaded")
 
             except Exception as e:
                 log_error(f"Critical error in batch {batch_num}: {e}")
@@ -260,9 +245,7 @@ class AsyncDocumentProcessor:
 
         return all_docs
 
-    async def process_documents_in_batches(
-        self, documents: List[Document], batch_size: int = 10
-    ) -> List[Document]:
+    async def process_documents_in_batches(self, documents: List[Document], batch_size: int = 10) -> List[Document]:
         """
         Process documents in batches to avoid overwhelming the system.
 
@@ -279,9 +262,7 @@ class AsyncDocumentProcessor:
 
         for i in range(0, len(documents), batch_size):
             batch = documents[i : i + batch_size]
-            log_info(
-                f"Processing batch {i//batch_size + 1}/{(len(documents)-1)//batch_size + 1}"
-            )
+            log_info(f"Processing batch {i//batch_size + 1}/{(len(documents)-1)//batch_size + 1}")
 
             # Process batch asynchronously
             batch_tasks = [self.process_single_document(doc) for doc in batch]
