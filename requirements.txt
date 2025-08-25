@@ -47,8 +47,10 @@ rich
 tqdm
 requests
 
-# Dev tools
+# Testing & Development
+pytest
+pytest-asyncio
+httpx
 black
 ruff
-pytest
 pre-commit

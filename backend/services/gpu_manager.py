@@ -48,8 +48,9 @@ class GPUManager:
         """Check if PyTorch with CUDA is available"""
         try:
             import importlib.util
+
             torch_spec = importlib.util.find_spec("torch")
-            
+
             if torch_spec is not None:
                 self._torch_available = True
                 logger.debug("PyTorch available for GPU detection")

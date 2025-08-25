@@ -56,8 +56,10 @@ packages = ["core", "backend", "system_tray"]
 [project.optional-dependencies]
 dev = [
     "black",
-    "ruff",
+    "ruff", 
     "pytest",
+    "pytest-asyncio",
+    "httpx",
     "pre-commit"
 ]
 media = [
@@ -67,7 +69,7 @@ media = [
     "tabula-py"
 ]
 gpu = [
-    "pytorch",
+    "torch",
     "pynvml"
 ]
 
