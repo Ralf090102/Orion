@@ -9,8 +9,11 @@ from typing import List
 from backend.services.system_service import SystemService
 from backend.services import get_config_service, get_gpu_manager
 from backend.models.system import (
-    SystemHealth, SystemStats, SystemConfig, SystemConfigUpdateRequest,
-    ProfileInfo, AutoIndexingConfig
+    SystemHealth,
+    SystemStats,
+    SystemConfig,
+    SystemConfigUpdateRequest,
+    ProfileInfo,
 )
 
 router = APIRouter()
@@ -78,8 +81,9 @@ async def get_logs(lines: int = 100, system_service: SystemService = Depends(get
 
 # New Configuration Management Endpoints
 
+
 @router.get("/config", response_model=SystemConfig)
-async def get_system_config(config_service = Depends(get_configuration_service)):
+async def get_system_config(config_service=Depends(get_configuration_service)):
     """Get current system configuration"""
     try:
         return config_service.get_system_config()
@@ -88,10 +92,7 @@ async def get_system_config(config_service = Depends(get_configuration_service))
 
 
 @router.put("/config", response_model=SystemConfig)
-async def update_system_config(
-    update_request: SystemConfigUpdateRequest,
-    config_service = Depends(get_configuration_service)
-):
+async def update_system_config(update_request: SystemConfigUpdateRequest, config_service=Depends(get_configuration_service)):
     """Update system configuration"""
     try:
         return config_service.update_system_config(update_request)
@@ -101,8 +102,9 @@ async def update_system_config(
 
 # Profile Management Endpoints
 
+
 @router.get("/profiles", response_model=List[ProfileInfo])
-async def list_profiles(config_service = Depends(get_configuration_service)):
+async def list_profiles(config_service=Depends(get_configuration_service)):
     """List all available profiles"""
     try:
         return config_service.list_profiles()
@@ -111,7 +113,7 @@ async def list_profiles(config_service = Depends(get_configuration_service)):
 
 
 @router.get("/profiles/active", response_model=ProfileInfo)
-async def get_active_profile(config_service = Depends(get_configuration_service)):
+async def get_active_profile(config_service=Depends(get_configuration_service)):
     """Get currently active profile"""
     try:
         active_profile = config_service.get_active_profile()
@@ -125,7 +127,7 @@ async def get_active_profile(config_service = Depends(get_configuration_service)
 
 
 @router.post("/profiles/{profile_name}/activate", response_model=ProfileInfo)
-async def activate_profile(profile_name: str, config_service = Depends(get_configuration_service)):
+async def activate_profile(profile_name: str, config_service=Depends(get_configuration_service)):
     """Activate a specific profile"""
     try:
         return config_service.activate_profile(profile_name)
@@ -136,11 +138,7 @@ async def activate_profile(profile_name: str, config_service = Depends(get_confi
 
 
 @router.post("/profiles", response_model=ProfileInfo)
-async def create_profile(
-    name: str, 
-    display_name: str, 
-    config_service = Depends(get_configuration_service)
-):
+async def create_profile(name: str, display_name: str, config_service=Depends(get_configuration_service)):
     """Create a new profile"""
     try:
         return config_service.create_profile(name, display_name)
@@ -152,13 +150,14 @@ async def create_profile(
 
 # GPU Management Endpoints
 
+
 @router.get("/gpu/capabilities")
 async def get_gpu_capabilities():
     """Get GPU capabilities and status"""
     try:
         gpu_manager = get_gpu_manager()
         capabilities = gpu_manager.detect_gpu_capabilities()
-        
+
         return {
             "has_cuda": capabilities.has_cuda,
             "cuda_version": capabilities.cuda_version,
@@ -176,7 +175,7 @@ async def get_gpu_capabilities():
                     "temperature_c": gpu.temperature_c,
                 }
                 for gpu in capabilities.gpus
-            ]
+            ],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -188,10 +187,10 @@ async def get_optimal_gpu_memory(device_id: str = None):
     try:
         gpu_manager = get_gpu_manager()
         optimal_limit = gpu_manager.get_optimal_memory_limit(device_id)
-        
+
         if optimal_limit is None:
             return {"message": "No GPU available", "optimal_limit_mb": None}
-        
+
         return {"optimal_limit_mb": optimal_limit}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -405,7 +405,7 @@ class ConfigurationService:
     def _create_default_profile(self) -> None:
         """Create default user profile."""
         try:
-            default_profile = self.create_profile(name="default", display_name="Default Profile")
+            self.create_profile(name="default", display_name="Default Profile")
             logger.info("Created default profile")
 
         except Exception as e:

@@ -47,10 +47,15 @@ class GPUManager:
     def _check_torch_availability(self) -> None:
         """Check if PyTorch with CUDA is available"""
         try:
-            import torch
-
-            self._torch_available = True
-            logger.debug("PyTorch available for GPU detection")
+            import importlib.util
+            torch_spec = importlib.util.find_spec("torch")
+            
+            if torch_spec is not None:
+                self._torch_available = True
+                logger.debug("PyTorch available for GPU detection")
+            else:
+                self._torch_available = False
+                logger.debug("PyTorch not available, using nvidia-ml-py fallback")
         except ImportError:
             self._torch_available = False
             logger.debug("PyTorch not available, using nvidia-ml-py fallback")
@@ -123,7 +128,8 @@ class GPUManager:
                     torch.cuda.set_device(i)
                     used_memory = torch.cuda.memory_allocated(i) // (1024 * 1024)
                     free_memory = total_memory - used_memory
-                except:
+                except Exception as e:
+                    logger.warning(f"Failed to get GPU memory info: {e}")
                     used_memory = 0
                     free_memory = total_memory
 
@@ -229,8 +235,8 @@ class GPUManager:
             try:
                 cuda_version = pynvml.nvmlSystemGetCudaDriverVersion_v2()
                 cuda_version = f"{cuda_version // 1000}.{(cuda_version % 1000) // 10}"
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to get CUDA version: {e}")
 
             gpus = []
             for i in range(device_count):
@@ -249,13 +255,15 @@ class GPUManager:
                 try:
                     util = pynvml.nvmlDeviceGetUtilizationRates(handle)
                     gpu_util = util.gpu
-                except:
+                except Exception as e:
+                    logger.warning(f"Failed to get GPU utilization: {e}")
                     gpu_util = 0
 
                 # Get temperature
                 try:
                     temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
-                except:
+                except Exception as e:
+                    logger.warning(f"Failed to get GPU temperature: {e}")
                     temp = None
 
                 gpu_info = GPUInfo(

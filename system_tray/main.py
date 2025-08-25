@@ -26,8 +26,9 @@ except ImportError:
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from backend.services import get_config_service, create_port_manager, get_gpu_manager
-from backend.models.system import ProfileInfo
+# Backend imports after path setup
+from backend.services import get_config_service, create_port_manager, get_gpu_manager  # noqa: E402
+from backend.models.system import ProfileInfo  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,8 @@ class OrionSystemTray:
         try:
             # Try to use default font
             font = ImageFont.truetype("arial.ttf", 18)
-        except:
+        except Exception as e:
+            logger.warning(f"Font loading failed: {e}")
             # Fallback to default font
             font = ImageFont.load_default()
 
@@ -216,10 +218,10 @@ class OrionSystemTray:
         try:
             # Get system configuration
             system_config = self.config_service.get_system_config()
-            
+
             # Find available port
             self.server_port = self.port_manager.find_available_port(system_config.port)
-            
+
             if self.server_port != system_config.port:
                 logger.info(f"Requested port {system_config.port} not available, using {self.server_port}")
 
@@ -229,8 +231,9 @@ class OrionSystemTray:
 
             # Give server a moment to start
             import time
+
             time.sleep(2)
-            
+
             # Verify server is running
             if self._check_server_health():
                 self.is_server_running = True
@@ -283,32 +286,33 @@ class OrionSystemTray:
         try:
             import uvicorn
             from backend.main import create_app
-            
+
             logger.info(f"Starting FastAPI server on port {port}")
-            
+
             # Create FastAPI app
             app = create_app()
-            
+
             # Run server with uvicorn
             uvicorn.run(
                 app,
                 host="127.0.0.1",
                 port=port,
                 log_level="warning",  # Reduce log noise in system tray
-                access_log=False      # Disable access logging for system tray
+                access_log=False,  # Disable access logging for system tray
             )
-            
+
         except Exception as e:
             logger.error(f"Server error: {e}")
             self.is_server_running = False
-    
+
     def _check_server_health(self) -> bool:
         """Check if server is responding to health checks"""
         if not self.server_port:
             return False
-            
+
         try:
             import requests
+
             response = requests.get(f"http://127.0.0.1:{self.server_port}/health", timeout=5)
             return response.status_code == 200
         except Exception as e:
