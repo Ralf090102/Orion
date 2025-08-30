@@ -2,13 +2,14 @@
 Utility functions for Orion project.
 """
 
-import time
-import os
 import logging
-from functools import wraps
+import os
+import time
 from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
-from typing import Literal, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, Optional
+
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
@@ -25,7 +26,7 @@ def setup_logging(config: "OrionConfig"):
     """Setup logging based on configuration"""
     # Clear any existing handlers
     logger.handlers.clear()
-    
+
     # Set log level
     level_map = {
         "debug": logging.DEBUG,
@@ -34,7 +35,7 @@ def setup_logging(config: "OrionConfig"):
         "error": logging.ERROR,
     }
     logger.setLevel(level_map[config.logging.level.value])
-    
+
     # Console handler
     if config.logging.log_to_console:
         console_handler = logging.StreamHandler()
@@ -42,7 +43,7 @@ def setup_logging(config: "OrionConfig"):
         formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
-    
+
     # File handler
     if config.logging.log_to_file:
         os.makedirs(os.path.dirname(config.logging.log_file_path), exist_ok=True)
@@ -164,7 +165,7 @@ def ensure_directory(path: str) -> Path:
     return path_obj
 
 
-def get_file_count(folder_path: str, extensions: Optional[list] = None) -> int:
+def get_file_count(folder_path: str, extensions: list | None = None) -> int:
     """
     Count files in a directory with optional extension filtering.
 
