@@ -1,3 +1,6 @@
+# Exclude setup script
+!setup_dependencies.py
+
 # Python
 __pycache__/
 *.py[cod]
