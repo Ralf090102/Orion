@@ -1,0 +1,119 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Orion"
+version = "0.1.0"
+description = "A local multi-user Personal Knowledge RAG using Ollama"
+authors = [
+    { name="Ralf Wadee L. Hernandez", email="ralf.hernandez090102@gmail.com" }
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    # Core RAG & LLM
+    "ollama",
+    "chardet",
+    "rank_bm25",
+    "langchain",
+    "langchain-community", 
+    "langchain-ollama",
+    "langchain-text-splitters",
+    "sentence_transformers",
+    "faiss-cpu",
+    
+    # Document processing
+    "pandas",
+    "python-docx",
+    "python-pptx",
+    "openpyxl",
+    "pypdf",
+    "PyMuPDF",
+    "docx2txt",
+    "pillow",
+    
+    # FastAPI Backend
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
+    "python-multipart",
+    
+    # System integration
+    "pystray",
+    "psutil",
+    
+    # Utilities
+    "tqdm",
+    "typer",
+    "rich",
+    "requests"
+]
+
+[tool.setuptools]
+packages = ["core", "backend", "system_tray"]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "ruff", 
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+    "pre-commit"
+]
+media = [
+    "easyocr",
+    "pytesseract", 
+    "camelot-py[cv]",
+    "tabula-py"
+]
+gpu = [
+    "torch",
+    "pynvml"
+]
+
+
+[tool.black]
+line-length = 128
+target-version = ['py313']
+
+[tool.ruff]
+line-length = 128
+target-version = "py313"
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    "frontend/"
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP"]
+ignore = ["E203"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--tb=short",
+    "--strict-markers",
+    "-v",
+    "--disable-warnings"
+]
+norecursedirs = [".git", ".venv", "__pycache__", "build", "dist", "*.egg", "frontend"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore:.*Using extra keyword arguments on.*Field.*:DeprecationWarning"
+]
+markers = [
+    "unit: marks tests as unit tests (deselect with '-m \"not unit\"')",
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "gpu: marks tests as GPU-dependent (deselect with '-m \"not gpu\"')"
+]

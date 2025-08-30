@@ -1,0 +1,158 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# VSCode
+.vscode/
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Logs & temp files
+*.log
+*.tmp
+*.temp
+*.swp
+.DS_Store
+
+# FAISS vector store
+vectorstore/
+data/vectors/
+*.faiss
+*.fvecs
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+
+# Test artifacts
+coverage.xml
+htmlcov/
+.pytest_cache/
+test-results/
+
+# Local data
+data/
+*.db
+*.sqlite
+
+# OS-specific
+Thumbs.db
+
+# Ollama model cache
+~/.ollama/
+
+# Temporary scratch or dump files
+*.dump
+
+# Demos
+demos/
+
+# Utility scripts (exclude from CI)
+check_*.py
+verify_*.py
+setup_*.py
+test_run_*.py
+
+# Test results
+test-results/
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Orion configuration and data
+orion-config/
+orion-data/
+
+# Tauri build artifacts
+src-tauri/target/
+src-tauri/WixTools/
+src-tauri/gen/
+*.app
+*.deb
+*.rpm
+*.msi
+*.dmg
+*.AppImage
+
+# Frontend build artifacts
+frontend/dist/
+frontend/.svelte-kit/
+frontend/node_modules/
+frontend/package-lock.json
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+
+# OCR temporary files
+*.tesseract.tmp
+ocr_temp/
+temp_ocr/
+
+# Document processing cache
+.document_cache/
+.embeddings_cache/
+.processing_cache/
+
+# System tray icons and assets
+*.ico
+*.icns
+*.png.bak
+*.svg.bak
+
+# Configuration backups
+*.config.backup
+orion-config.*.backup
+*.json.backup
+
+# Large test files and benchmarks
+test_documents/
+benchmark_data/
+sample_documents/
+test_pdfs/
+
+# Media processing temporary files
+*.pdf.tmp
+*.docx.tmp
+temp_images/
+extracted_images/
+
+# Development and debugging
+debug_output/
+*.debug
+*.trace
+profiling_results/
+
+# IDE specific
+.idea/
+*.sublime-*
+*.code-workspace
+
+# Rust (for Tauri)
+Cargo.lock
+target/
+
+# Node.js (for frontend tooling)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini

@@ -1,0 +1,7 @@
+# Orion RAG - Personal Knowledge Assistant
+# This is a local/private application - block all crawlers
+User-agent: *
+Disallow: /
+
+# Add sitemap for public deployment??
+# Sitemap: https://your-domain.com/sitemap.xml
