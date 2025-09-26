@@ -91,7 +91,6 @@ src-tauri/gen/
 frontend/dist/
 frontend/.svelte-kit/
 frontend/node_modules/
-frontend/package-lock.json
 frontend/.env
 frontend/.env.local
 frontend/.env.production

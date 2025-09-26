@@ -1,10 +1,17 @@
 name: CI
 
+# Test Strategy:
+# - lint: Code quality checks (Black, Ruff)
+# - test-unit: Unit tests (fast, no external dependencies) 
+# - test-integrated: Integration tests and slow tests (cross-module, performance)
+# - test-llm: LLM functionality tests (requires Ollama)
+# - frontend-test: Frontend type checking, testing, and building
+
 on:
   push:
-    branches: ["main", "dev", "experimental", "refactor"]
+    branches: ["main", "dev", "experimental", "refactor*"]
   pull_request:
-    branches: ["main", "dev", "experimental", "refactor"]
+    branches: ["main", "dev", "experimental", "refactor*"]
 
 jobs:
   lint:
@@ -32,7 +39,7 @@ jobs:
         run: |
           ruff check .
 
-  test-cpu:
+  test-unit:
     runs-on: ubuntu-latest
     needs: lint
     steps:
@@ -48,12 +55,20 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install .[dev,media]
+          pip install .[dev]
           pip install pytest-cov
 
-      - name: Run Tests with Coverage
+      - name: Create test results directory
         run: |
-          pytest --cov=core --cov=backend --cov-report=xml --cov-report=term-missing --junitxml=test-results/junit.xml
+          mkdir -p test-results
+
+      - name: Run Unit Tests with Coverage
+        run: |
+          pytest test/ -m "unit and not slow" --cov=core --cov=backend --cov-report=xml --cov-report=term-missing --junitxml=test-results/junit-unit.xml
+
+      - name: Run Fast Tests  
+        run: |
+          pytest test/core/rag/test_query_fast.py --cov=core --cov=backend --cov-append --cov-report=xml --cov-report=term-missing --junitxml=test-results/junit-fast.xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -65,13 +80,13 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results-cpu
-          path: test-results/junit.xml
+          name: test-results-fast
+          path: test-results/
 
-  test-gpu:
+  test-integrated:
     runs-on: ubuntu-latest
     needs: lint
-    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'test-gpu')
+    if: contains(github.event.pull_request.labels.*.name, 'test-slow') || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -82,25 +97,25 @@ jobs:
           python-version: "3.13"
           cache: "pip"
 
-      - name: Install GPU dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install .[dev,media,gpu]
+          pip install .[dev,media]
 
-      - name: Run GPU detection tests (CPU fallback)
+      - name: Create test results directory
         run: |
-          pytest tests/test_backend_basic.py::test_gpu_manager_service -v --junitxml=test-results/junit-gpu.xml
+          mkdir -p test-results
 
-      - name: Run GPU-aware tests with CPU fallback
+      - name: Run Slow Tests and Integration Tests
         run: |
-          pytest -k "gpu" -v --tb=short || echo "No GPU hardware available, tests ran with CPU fallback"
+          pytest test/ -m "slow or integration" -v --tb=short --junitxml=test-results/junit-slow.xml
 
-      - name: Upload GPU Test Results
+      - name: Upload Slow Test Results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results-gpu
-          path: test-results/junit-gpu.xml
+          name: test-results-slow
+          path: test-results/junit-slow.xml
 
   frontend-test:
     runs-on: ubuntu-latest

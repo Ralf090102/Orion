@@ -6,11 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "Orion"
 version = "0.1.0"
 description = "A local multi-user Personal Knowledge RAG using Ollama"
-authors = [
-    { name="Ralf Wadee L. Hernandez", email="ralf.hernandez090102@gmail.com" }
-]
+license = "MIT"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
+
 dependencies = [
     # Core RAG & LLM
     "ollama",
@@ -20,17 +19,18 @@ dependencies = [
     "langchain-community", 
     "langchain-ollama",
     "langchain-text-splitters",
-    "sentence_transformers",
-    "faiss-cpu",
+    "sentence-transformers",
+    "chromadb",
+    "transformers",
+    "torch>=2.7.1",
+    "torchvision>=0.22.0",
     
     # Document processing
     "pandas",
     "python-docx",
     "python-pptx",
     "openpyxl",
-    "pypdf",
-    "PyMuPDF",
-    "docx2txt",
+    "pymupdf",
     "pillow",
     
     # FastAPI Backend
@@ -50,6 +50,10 @@ dependencies = [
     "requests"
 ]
 
+[[project.authors]]
+name = "Ralf Hernandez"
+email = "ralf_hernandez@dlsu.edu.ph"
+
 [tool.setuptools]
 packages = ["core", "backend", "system_tray"]
 
@@ -68,25 +72,21 @@ media = [
     "camelot-py[cv]",
     "tabula-py"
 ]
-gpu = [
-    "torch",
-    "pynvml"
-]
-
 
 [tool.black]
 line-length = 128
-target-version = ['py313']
+target-version = ['py312']
 
 [tool.ruff]
 line-length = 128
-target-version = "py313"
+target-version = "py312"
 exclude = [
     ".git",
     "__pycache__",
     "build",
     "dist",
     ".venv",
+    "test/",
     "frontend/"
 ]
 
@@ -95,7 +95,7 @@ select = ["E", "F", "W", "I", "N", "UP"]
 ignore = ["E203"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["test"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -105,15 +105,17 @@ addopts = [
     "-v",
     "--disable-warnings"
 ]
+
 norecursedirs = [".git", ".venv", "__pycache__", "build", "dist", "*.egg", "frontend"]
+
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",
     "ignore:.*Using extra keyword arguments on.*Field.*:DeprecationWarning"
 ]
+
 markers = [
-    "unit: marks tests as unit tests (deselect with '-m \"not unit\"')",
-    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "gpu: marks tests as GPU-dependent (deselect with '-m \"not gpu\"')"
+    "unit: marks tests as unit tests (fast, no external dependencies)",
+    "integration: marks tests that are integrated (slow)",
+    "requires_ollama: marks tests that require Ollama to be running"
 ]
