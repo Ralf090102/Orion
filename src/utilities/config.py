@@ -195,7 +195,7 @@ class RetrievalConfig(BaseConfig):
             enable_mmr=get_env_bool("ORION_RETRIEVAL_ENABLE_MMR", True),
             mmr_diversity_bias=get_env_float("ORION_RETRIEVAL_MMR_DIVERSITY_BIAS", 0.5),
             mmr_fetch_k=get_env_int("ORION_RETRIEVAL_MMR_FETCH_K", 20),
-            mmr_threshold=get_env_float("ORION_RETRIEVAL_MMR_THRESHOLD", 0.6),
+            mmr_threshold=get_env_float("ORION_RETRIEVAL_MMR_THRESHOLD", 0.475),
         )
 
     def validate(self) -> None:
@@ -224,7 +224,7 @@ class RetrievalConfig(BaseConfig):
 class RerankerConfig(BaseConfig):
     """Document reranking configuration"""
 
-    model: str = "BAAI/bge-reranker-v2-m3"
+    model: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
     batch_size: int = 16
     timeout: int = 30
     top_k: int = 10
@@ -238,7 +238,7 @@ class RerankerConfig(BaseConfig):
     def from_env(cls) -> "RerankerConfig":
         """Load reranker configuration from environment variables"""
         return cls(
-            model=get_env_str("ORION_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"),
+            model=get_env_str("ORION_RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L6-v2"),
             batch_size=get_env_int("ORION_RERANKER_BATCH_SIZE", 16),
             timeout=get_env_int("ORION_RERANKER_TIMEOUT", 30),
             top_k=get_env_int("ORION_RERANKER_TOP_K", 10),
@@ -495,10 +495,10 @@ def get_config(from_env: bool = False) -> OrionConfig:
             ORION_LLM_MODEL="mistral:latest"
             ORION_LLM_BASE_URL="http://localhost:11434"
             ORION_LLM_TEMPERATURE=0.7
-            ORION_VECTORSTORE_COLLECTION_NAME="oRION_knowledge_base"
+            ORION_VECTORSTORE_COLLECTION_NAME="Orion_knowledge_base"
             ORION_VECTORSTORE_PERSIST_DIRECTORY="./data/chroma-data"
             ORION_RETRIEVAL_DEFAULT_K=5        System Configuration:
-            ORION_STORAGE_DATA_DIRECTORY="./oRION-data"
+            ORION_STORAGE_DATA_DIRECTORY="./Orion-data"
             ORION_SYSTEM_REQUIRE_OLLAMA=true
             ORION_GPU_ENABLED=true
             ORION_LOGGING_LEVEL="info"

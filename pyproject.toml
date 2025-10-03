@@ -55,7 +55,12 @@ name = "Ralf Hernandez"
 email = "ralf_hernandez@dlsu.edu.ph"
 
 [tool.setuptools]
-packages = ["core", "backend", "system_tray"]
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["*"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [project.optional-dependencies]
 dev = [
