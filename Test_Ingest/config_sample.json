@@ -1,0 +1,44 @@
+{
+  "application": {
+    "name": "OrionRAG",
+    "version": "1.0.0",
+    "environment": "production"
+  },
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "name": "knowledge_base",
+    "pool_size": 10,
+    "timeout": 30
+  },
+  "embedding": {
+    "model": "all-MiniLM-L12-v2",
+    "dimension": 384,
+    "batch_size": 64,
+    "gpu_enabled": true
+  },
+  "retrieval": {
+    "default_k": 5,
+    "max_k": 50,
+    "enable_hybrid_search": true,
+    "enable_reranking": true,
+    "mmr_diversity": 0.5
+  },
+  "supported_formats": [
+    "pdf",
+    "docx",
+    "txt",
+    "md",
+    "csv",
+    "json",
+    "py",
+    "js",
+    "html"
+  ],
+  "features": {
+    "auto_ingestion": true,
+    "deduplication": true,
+    "normalization": true,
+    "caching": true
+  }
+}

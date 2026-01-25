@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<database name="knowledge_base">
+    <description>Schema for RAG system knowledge base</description>
+    
+    <table name="documents">
+        <column name="id" type="UUID" primary_key="true"/>
+        <column name="file_name" type="VARCHAR(255)" nullable="false"/>
+        <column name="file_path" type="TEXT" nullable="false"/>
+        <column name="file_type" type="VARCHAR(50)" nullable="false"/>
+        <column name="file_hash" type="VARCHAR(64)" nullable="false" unique="true"/>
+        <column name="file_size" type="BIGINT" nullable="false"/>
+        <column name="created_at" type="TIMESTAMP" default="CURRENT_TIMESTAMP"/>
+        <column name="updated_at" type="TIMESTAMP" default="CURRENT_TIMESTAMP"/>
+        <column name="metadata" type="JSONB"/>
+        <index name="idx_file_hash" columns="file_hash"/>
+        <index name="idx_file_type" columns="file_type"/>
+        <index name="idx_created_at" columns="created_at"/>
+    </table>
+
+    <table name="chunks">
+        <column name="id" type="UUID" primary_key="true"/>
+        <column name="document_id" type="UUID" nullable="false">
+            <foreign_key references="documents.id" on_delete="CASCADE"/>
+        </column>
+        <column name="chunk_index" type="INTEGER" nullable="false"/>
+        <column name="content" type="TEXT" nullable="false"/>
+        <column name="content_hash" type="VARCHAR(64)" nullable="false"/>
+        <column name="token_count" type="INTEGER"/>
+        <column name="created_at" type="TIMESTAMP" default="CURRENT_TIMESTAMP"/>
+        <index name="idx_document_chunks" columns="document_id,chunk_index"/>
+        <index name="idx_content_hash" columns="content_hash"/>
+    </table>
+
+    <table name="embeddings">
+        <column name="id" type="UUID" primary_key="true"/>
+        <column name="chunk_id" type="UUID" nullable="false" unique="true">
+            <foreign_key references="chunks.id" on_delete="CASCADE"/>
+        </column>
+        <column name="model_name" type="VARCHAR(100)" nullable="false"/>
+        <column name="embedding_vector" type="VECTOR(384)" nullable="false"/>
+        <column name="created_at" type="TIMESTAMP" default="CURRENT_TIMESTAMP"/>
+        <index name="idx_chunk_embedding" columns="chunk_id"/>
+        <vector_index name="idx_embedding_vector" columns="embedding_vector" method="HNSW"/>
+    </table>
+
+    <table name="ingestion_logs">
+        <column name="id" type="UUID" primary_key="true"/>
+        <column name="document_id" type="UUID">
+            <foreign_key references="documents.id" on_delete="SET_NULL"/>
+        </column>
+        <column name="status" type="VARCHAR(20)" nullable="false"/>
+        <column name="error_message" type="TEXT"/>
+        <column name="processing_time_ms" type="INTEGER"/>
+        <column name="chunks_created" type="INTEGER"/>
+        <column name="created_at" type="TIMESTAMP" default="CURRENT_TIMESTAMP"/>
+        <index name="idx_ingestion_status" columns="status"/>
+        <index name="idx_ingestion_date" columns="created_at"/>
+    </table>
+
+    <table name="search_logs">
+        <column name="id" type="UUID" primary_key="true"/>
+        <column name="query" type="TEXT" nullable="false"/>
+        <column name="results_count" type="INTEGER"/>
+        <column name="processing_time_ms" type="INTEGER"/>
+        <column name="user_id" type="VARCHAR(100)"/>
+        <column name="created_at" type="TIMESTAMP" default="CURRENT_TIMESTAMP"/>
+        <index name="idx_search_date" columns="created_at"/>
+        <index name="idx_search_user" columns="user_id"/>
+    </table>
+
+    <views>
+        <view name="document_statistics">
+            <query>
+                SELECT 
+                    file_type,
+                    COUNT(*) as document_count,
+                    SUM(file_size) as total_size,
+                    AVG(file_size) as avg_size,
+                    MAX(created_at) as last_ingested
+                FROM documents
+                GROUP BY file_type
+            </query>
+        </view>
+    </views>
+</database>

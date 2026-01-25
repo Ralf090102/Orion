@@ -1,0 +1,11 @@
+employee_id,name,department,position,years_experience,salary
+E001,Alice Johnson,Engineering,Senior Developer,8,95000
+E002,Bob Smith,Marketing,Marketing Manager,5,72000
+E003,Carol Williams,Engineering,Junior Developer,2,58000
+E004,David Brown,Sales,Sales Representative,3,62000
+E005,Emma Davis,HR,HR Manager,7,78000
+E006,Frank Miller,Engineering,Tech Lead,10,110000
+E007,Grace Wilson,Marketing,Content Strategist,4,65000
+E008,Henry Moore,Sales,Sales Director,12,125000
+E009,Iris Taylor,Engineering,DevOps Engineer,6,88000
+E010,Jack Anderson,Finance,Financial Analyst,3,70000

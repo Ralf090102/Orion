@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG System Overview</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        h1 { color: #2c3e50; }
+        h2 { color: #34495e; }
+        .highlight { background-color: #fff3cd; padding: 10px; border-left: 4px solid #ffc107; }
+        code { background-color: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <h1>Retrieval-Augmented Generation (RAG)</h1>
+    
+    <p>
+        RAG is a powerful technique that combines information retrieval with generative AI to produce 
+        more accurate and contextually relevant responses.
+    </p>
+
+    <h2>How RAG Works</h2>
+    
+    <ol>
+        <li><strong>Indexing Phase:</strong> Documents are chunked, embedded, and stored in a vector database</li>
+        <li><strong>Retrieval Phase:</strong> User queries are embedded and similar documents are retrieved</li>
+        <li><strong>Generation Phase:</strong> Retrieved context is combined with the query and sent to an LLM</li>
+        <li><strong>Response:</strong> The LLM generates an answer grounded in the retrieved information</li>
+    </ol>
+
+    <div class="highlight">
+        <h3>Key Benefits</h3>
+        <ul>
+            <li>Reduces hallucinations by grounding responses in real data</li>
+            <li>Enables domain-specific knowledge without fine-tuning</li>
+            <li>Keeps information up-to-date by refreshing the knowledge base</li>
+            <li>Provides citations and sources for transparency</li>
+        </ul>
+    </div>
+
+    <h2>Common Use Cases</h2>
+    
+    <p>
+        RAG systems excel in scenarios requiring <code>knowledge retrieval</code>, such as:
+    </p>
+
+    <ul>
+        <li>Customer support chatbots with product documentation</li>
+        <li>Research assistants for academic papers</li>
+        <li>Code documentation search and generation</li>
+        <li>Legal document analysis and question answering</li>
+        <li>Internal company knowledge management</li>
+    </ul>
+
+    <h2>Technical Stack</h2>
+    
+    <table border="1" cellpadding="10" style="border-collapse: collapse; width: 100%;">
+        <thead>
+            <tr>
+                <th>Component</th>
+                <th>Technology Options</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Embeddings</td>
+                <td>OpenAI, Sentence Transformers, Cohere</td>
+            </tr>
+            <tr>
+                <td>Vector Store</td>
+                <td>ChromaDB, Pinecone, Weaviate, FAISS</td>
+            </tr>
+            <tr>
+                <td>LLM</td>
+                <td>GPT-4, Claude, Llama, Mistral</td>
+            </tr>
+            <tr>
+                <td>Framework</td>
+                <td>LangChain, LlamaIndex, Haystack</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <footer>
+        <p><em>Learn more about building production-ready RAG systems at your organization.</em></p>
+    </footer>
+</body>
+</html>
