@@ -217,8 +217,11 @@ class PromptBuilder:
             context_parts = []
 
             for result in contexts:
-                source = result.metadata.get("file_name", "document")
-                context_parts.append(f"[From: {source}]\n{result.content}")
+                # Extract metadata (using dict access)
+                metadata = result.get("metadata", {})
+                source = metadata.get("file_name", metadata.get("source_file", "document"))
+                content = result.get("content", result.get("text", ""))
+                context_parts.append(f"[From: {source}]\n{content}")
 
             context_text = "\n\n".join(context_parts)
             formatted_context = f"Relevant information from knowledge base:\n{context_text}"

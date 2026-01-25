@@ -12,6 +12,12 @@ from src.generation.prompt_builder import (
     PromptComponents,
 )
 from src.generation.query_classifier import QueryClassification, QueryClassifier
+from src.generation.session_manager import (
+    ChatSession,
+    SessionManager,
+    get_session_manager,
+    reset_session_manager,
+)
 
 __all__ = [
     # Main generator
@@ -28,4 +34,9 @@ __all__ = [
     # Query classification
     "QueryClassifier",
     "QueryClassification",
+    # Session management
+    "SessionManager",
+    "ChatSession",
+    "get_session_manager",
+    "reset_session_manager",
 ]

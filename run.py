@@ -26,6 +26,7 @@ from src.core.ingest import (
     ingest_with_watchdog,
 )
 from src.generation.generate import AnswerGenerator
+from src.generation.session_manager import get_session_manager
 from src.retrieval.retriever import OrionRetriever
 from src.retrieval.vector_store import create_vector_store
 from src.utilities.config import get_config
@@ -575,6 +576,174 @@ def config(
         check_gpu_status()
         console.print()
         print_config_summary()
+
+
+# ========== CHAT COMMAND (CONVERSATIONAL MODE) ==========
+@app.command()
+def chat(
+    persist: bool = typer.Option(False, "--persist", "-p", help="Save conversation to disk"),
+    session_id: str = typer.Option(None, "--session", "-s", help="Resume existing session"),
+    show_sources: bool = typer.Option(False, "--sources", help="Show sources when RAG is triggered"),
+    rag_mode: str = typer.Option(None, "--rag-mode", help="RAG trigger mode: always/auto/manual/never"),
+    gpu: bool = typer.Option(None, "--gpu/--no-gpu", help="Enable/disable GPU acceleration"),
+):
+    """
+    Start interactive chat mode with conversation memory.
+
+    This mode maintains conversation history and uses RAG intelligently:
+    - Auto mode: Retrieves context when detecting questions
+    - Always mode: Always retrieves context
+    - Manual mode: Use 'search: your query' to trigger RAG
+    - Never mode: Pure chat without retrieval
+
+    Examples:
+        orion chat
+        orion chat --persist --rag-mode auto
+        orion chat --session abc123 --sources
+    """
+    print_banner()
+
+    # Update config
+    config = get_config()
+    if gpu is not None:
+        config.gpu.enabled = gpu
+    if rag_mode:
+        config.rag.generation.rag_trigger_mode = rag_mode
+
+    # Set mode to chat
+    config.rag.generation.mode = "chat"
+
+    check_gpu_status()
+    console.print()
+
+    # Initialize session manager
+    session_manager = get_session_manager(persist_to_disk=persist)
+
+    # Create or resume session
+    if session_id:
+        session = session_manager.get_session(session_id)
+        if session:
+            console.print(f"📝 Resumed session: [cyan]{session_id}[/cyan]", style="green")
+            console.print(f"   Messages: {len(session.messages)}", style="dim")
+        else:
+            console.print(f"⚠️  Session not found: {session_id}", style="yellow")
+            session_id = session_manager.create_session()
+            console.print(f"📝 Created new session: [cyan]{session_id}[/cyan]", style="green")
+    else:
+        session_id = session_manager.create_session()
+        console.print(f"📝 Session: [cyan]{session_id}[/cyan]", style="green")
+
+    # Display mode info
+    console.print(
+        f"🤖 Chat Mode | RAG: [cyan]{config.rag.generation.rag_trigger_mode}[/cyan]",
+        style="bold",
+    )
+    if persist:
+        console.print("💾 Conversation will be saved to disk", style="dim")
+
+    console.print("\n[bold cyan]Commands:[/bold cyan]")
+    console.print("  • Type your message and press Enter")
+    console.print("  • 'clear' - Clear conversation history")
+    console.print("  • 'history' - Show conversation summary")
+    console.print("  • 'sources' - Toggle source display")
+    console.print("  • 'exit' or 'quit' - Exit chat mode")
+    console.print()
+
+    # Initialize generator
+    with console.status("[bold green]Initializing chat..."):
+        try:
+            generator = AnswerGenerator(config=config)
+
+            # Restore conversation history from session
+            messages = session_manager.get_messages(session_id)
+            generator.prompt_builder.conversation_history = messages
+
+            console.print("✅ Ready to chat!\n", style="green")
+        except Exception as e:
+            console.print(f"❌ Failed to initialize: {e}", style="bold red")
+            raise typer.Exit(1)
+
+    # Chat loop
+    while True:
+        try:
+            # Get user input
+            message = console.input("[bold cyan]You:[/bold cyan] ")
+
+            if not message.strip():
+                continue
+
+            message_lower = message.lower().strip()
+
+            # Handle commands
+            if message_lower in ["exit", "quit", "q"]:
+                console.print("\n👋 Goodbye!", style="bold cyan")
+                break
+
+            elif message_lower == "clear":
+                generator.clear_conversation()
+                session_manager.clear_session_messages(session_id)
+                console.print("✅ Conversation cleared\n", style="green")
+                continue
+
+            elif message_lower == "history":
+                summary = generator.get_conversation_summary()
+                console.print("\n📊 Conversation Summary:", style="bold cyan")
+                console.print(f"  • Total messages: {summary['total_messages']}")
+                console.print(f"  • User messages: {summary['user_messages']}")
+                console.print(f"  • Assistant messages: {summary['assistant_messages']}")
+                console.print(f"  • Total tokens: {summary['total_tokens']}\n")
+                continue
+
+            elif message_lower == "sources":
+                show_sources = not show_sources
+                status = "ON" if show_sources else "OFF"
+                console.print(f"✅ Source display: {status}\n", style="green")
+                continue
+
+            # Generate response
+            console.print()
+            with console.status("[bold green]Thinking..."):
+                start_time = time.time()
+
+                result = generator.generate_chat_response(
+                    message=message, include_sources=show_sources
+                )
+
+                elapsed = time.time() - start_time
+
+            # Save to session
+            session_manager.add_message(session_id, "user", message)
+            session_manager.add_message(session_id, "assistant", result.answer)
+
+            # Display response
+            answer_style = "green" if result.metadata.get("rag_retrieval_triggered") else "white"
+            rag_indicator = "🔍 " if result.metadata.get("rag_retrieval_triggered") else ""
+
+            console.print(f"[bold cyan]Orion:[/bold cyan] {rag_indicator}", end="")
+            console.print(result.answer, style=answer_style)
+            console.print()
+
+            # Show sources if requested and RAG was used
+            if show_sources and result.sources:
+                console.print(f"[dim]Sources ({len(result.sources)}):[/dim]")
+                for source in result.sources[:3]:  # Show top 3
+                    citation = source.get("citation", source.get("source_file", "Unknown"))
+                    console.print(f"  • [{source['index']}] {citation}", style="dim")
+                console.print()
+
+            # Show timing in verbose mode
+            if config.logging.verbose:
+                console.print(f"[dim]⏱️  {elapsed:.2f}s[/dim]")
+                console.print()
+
+        except KeyboardInterrupt:
+            console.print("\n\n👋 Goodbye!", style="bold cyan")
+            break
+        except Exception as e:
+            console.print(f"\n❌ Error: {e}\n", style="bold red")
+            import traceback
+
+            traceback.print_exc()
 
 
 # ========== INTERACTIVE MODE ==========
