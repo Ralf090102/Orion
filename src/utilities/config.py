@@ -1,4 +1,5 @@
 import os
+from src.utilities.utils import log_error
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
@@ -82,7 +83,7 @@ class BaseConfig:
 class EmbeddingConfig(BaseConfig):
     """Embedding model configuration"""
 
-    model: str = "BAAI/bge-m3"
+    model: str = "all-MiniLM-L12-v2"
     batch_size: int = 32
     timeout: int = 30
     cache_embeddings: bool = True
@@ -91,7 +92,7 @@ class EmbeddingConfig(BaseConfig):
     def from_env(cls) -> "EmbeddingConfig":
         """Load embedding configuration from environment variables"""
         return cls(
-            model=get_env_str("ORION_EMBEDDING_MODEL", "BAAI/bge-m3"),
+            model=get_env_str("ORION_EMBEDDING_MODEL", "all-MiniLM-L12-v2"),
             batch_size=get_env_int("ORION_EMBEDDING_BATCH_SIZE", 32),
             timeout=get_env_int("ORION_EMBEDDING_TIMEOUT", 30),
             cache_embeddings=get_env_bool("ORION_EMBEDDING_CACHE", True),
@@ -104,7 +105,7 @@ class ChunkingConfig(BaseConfig):
 
     strategy: ChunkerType = ChunkerType.RECURSIVE
     chunk_size: int = 512
-    chunk_overlap: int = 256
+    chunk_overlap: int = 128
     max_chunk_size: int = 512
     min_chunk_size: int = 256
 
@@ -114,7 +115,7 @@ class ChunkingConfig(BaseConfig):
         return cls(
             strategy=get_env_enum("ORION_CHUNKING_STRATEGY", ChunkerType, ChunkerType.RECURSIVE),
             chunk_size=get_env_int("ORION_CHUNK_SIZE", 512),
-            chunk_overlap=get_env_int("ORION_CHUNK_OVERLAP", 256),
+            chunk_overlap=get_env_int("ORION_CHUNK_OVERLAP", 128),
             max_chunk_size=get_env_int("ORION_MAX_CHUNK_SIZE", 512),
             min_chunk_size=get_env_int("ORION_MIN_CHUNK_SIZE", 256),
         )
@@ -172,8 +173,8 @@ class RetrievalConfig(BaseConfig):
     enable_reranking: bool = True
 
     enable_hybrid_search: bool = True
-    semantic_weight: float = 0.7
-    keyword_weight: float = 0.3
+    semantic_weight: float = 0.8
+    keyword_weight: float = 0.2
 
     # MMR (Maximal Marginal Relevance)
     enable_mmr: bool = True
@@ -190,8 +191,8 @@ class RetrievalConfig(BaseConfig):
             similarity_threshold=get_env_float("ORION_RETRIEVAL_SIMILARITY_THRESHOLD", 0.2),
             enable_reranking=get_env_bool("ORION_RETRIEVAL_ENABLE_RERANKING", True),
             enable_hybrid_search=get_env_bool("ORION_RETRIEVAL_ENABLE_HYBRID_SEARCH", True),
-            semantic_weight=get_env_float("ORION_RETRIEVAL_SEMANTIC_WEIGHT", 0.7),
-            keyword_weight=get_env_float("ORION_RETRIEVAL_KEYWORD_WEIGHT", 0.3),
+            semantic_weight=get_env_float("ORION_RETRIEVAL_SEMANTIC_WEIGHT", 0.8),
+            keyword_weight=get_env_float("ORION_RETRIEVAL_KEYWORD_WEIGHT", 0.2),
             enable_mmr=get_env_bool("ORION_RETRIEVAL_ENABLE_MMR", True),
             mmr_diversity_bias=get_env_float("ORION_RETRIEVAL_MMR_DIVERSITY_BIAS", 0.5),
             mmr_fetch_k=get_env_int("ORION_RETRIEVAL_MMR_FETCH_K", 20),
@@ -224,7 +225,7 @@ class RetrievalConfig(BaseConfig):
 class RerankerConfig(BaseConfig):
     """Document reranking configuration"""
 
-    model: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
+    model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     batch_size: int = 16
     timeout: int = 30
     top_k: int = 10
@@ -238,7 +239,7 @@ class RerankerConfig(BaseConfig):
     def from_env(cls) -> "RerankerConfig":
         """Load reranker configuration from environment variables"""
         return cls(
-            model=get_env_str("ORION_RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L6-v2"),
+            model=get_env_str("ORION_RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"),
             batch_size=get_env_int("ORION_RERANKER_BATCH_SIZE", 16),
             timeout=get_env_int("ORION_RERANKER_TIMEOUT", 30),
             top_k=get_env_int("ORION_RERANKER_TOP_K", 10),
@@ -322,6 +323,46 @@ class VectorStoreConfig(BaseConfig):
         )
 
 
+# ========== WATCHDOG / FILE-WATCHER CONFIGURATION ==========
+@dataclass
+class WatchdogConfig(BaseConfig):
+    """Configuration for filesystem watchers (watchdog)."""
+
+    enabled: bool = False
+    paths: list[str] = field(default_factory=lambda: ["./data/knowledge_base"])
+    recursive: bool = True
+    debounce_seconds: float = 1.0
+    ignore_patterns: list[str] = field(default_factory=lambda: ["*.tmp", "*.swp", "__pycache__/*"])
+    max_workers: int = 2
+
+    @classmethod
+    def from_env(cls) -> "WatchdogConfig":
+        """Load watchdog configuration from environment variables."""
+        raw_paths = get_env_str("ORION_WATCHDOG_PATHS", "")
+        paths = [p.strip() for p in raw_paths.split(os.pathsep) if p.strip()] if raw_paths else []
+        if not paths:
+            paths = [get_env_str("ORION_WATCHDOG_DEFAULT_PATH", "./data/knowledge_base")]
+
+        return cls(
+            enabled=get_env_bool("ORION_WATCHDOG_ENABLED", False),
+            paths=paths,
+            recursive=get_env_bool("ORION_WATCHDOG_RECURSIVE", True),
+            debounce_seconds=get_env_float("ORION_WATCHDOG_DEBOUNCE_SECONDS", 1.0),
+            ignore_patterns=[p.strip() for p in get_env_str("ORION_WATCHDOG_IGNORE_PATTERNS", "*.tmp;*.swp;__pycache__/*").split(";") if p.strip()],
+            max_workers=get_env_int("ORION_WATCHDOG_MAX_WORKERS", 2),
+        )
+
+    def validate(self) -> None:
+        """Validate watchdog configuration values."""
+        if self.debounce_seconds < 0:
+            raise ValueError("debounce_seconds must be >= 0")
+        if self.max_workers <= 0:
+            raise ValueError("max_workers must be positive")
+        if not isinstance(self.paths, list) or not all(isinstance(p, str) for p in self.paths):
+            raise ValueError("paths must be a list of strings")
+
+
+
 # ========== MAIN RAG CONFIGURATION ==========
 @dataclass
 class RAGConfig(BaseConfig):
@@ -334,6 +375,7 @@ class RAGConfig(BaseConfig):
     reranker: RerankerConfig = field(default_factory=RerankerConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     vectorstore: VectorStoreConfig = field(default_factory=VectorStoreConfig)
+
 
     @classmethod
     def from_env(cls) -> "RAGConfig":
@@ -356,7 +398,7 @@ class StorageConfig(BaseConfig):
 
     data_directory: str = "./orion-data"
     temp_directory: str = "./temp"
-    knowledge_base_directory: str = "./data/knowledge_base"
+    knowledge_base_directory: str = "D:/Database"
 
     @classmethod
     def from_env(cls) -> "StorageConfig":
@@ -393,7 +435,7 @@ class SystemConfig(BaseConfig):
 class GPUConfig(BaseConfig):
     """GPU acceleration configuration"""
 
-    enabled: bool = True
+    enabled: bool = False
     auto_detect: bool = True
     preferred_device: str = "auto"  # "auto", "cpu", "cuda:0"
     fallback_to_cpu: bool = True
@@ -402,7 +444,7 @@ class GPUConfig(BaseConfig):
     def from_env(cls) -> "GPUConfig":
         """Load GPU configuration from environment variables"""
         return cls(
-            enabled=get_env_bool("ORION_GPU_ENABLED", True),
+            enabled=get_env_bool("ORION_GPU_ENABLED", False),
             auto_detect=get_env_bool("ORION_GPU_AUTO_DETECT", True),
             preferred_device=get_env_str("ORION_GPU_PREFERRED_DEVICE", "auto"),
             fallback_to_cpu=get_env_bool("ORION_GPU_FALLBACK_TO_CPU", True),
@@ -440,6 +482,7 @@ class OrionConfig(BaseConfig):
     rag: RAGConfig = field(default_factory=RAGConfig)
     system: SystemConfig = field(default_factory=SystemConfig)
     gpu: GPUConfig = field(default_factory=GPUConfig)
+    watchdog: WatchdogConfig = field(default_factory=WatchdogConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     version: str = "1.0.0"
 
@@ -450,6 +493,7 @@ class OrionConfig(BaseConfig):
             rag=RAGConfig.from_env(),
             system=SystemConfig.from_env(),
             gpu=GPUConfig.from_env(),
+            watchdog=WatchdogConfig.from_env(),
             logging=LoggingConfig.from_env(),
             version=get_env_str("ORION_VERSION", "1.0.0"),
         )
@@ -461,7 +505,28 @@ class OrionConfig(BaseConfig):
         self.rag.preprocessing.validate()
         self.rag.chunking.validate()
         self.rag.retrieval.validate()
-        # Add more validations as needed
+        try:
+            self.rag.embedding.validate()
+        except Exception as e:
+            log_error(f"Embedding config validation failed: {e}")
+            raise
+
+        try:
+            self.rag.reranker.validate()
+        except Exception as e:
+            log_error(f"Reranker config validation failed: {e}")
+            raise
+        try:
+            self.rag.vectorstore.validate()
+        except Exception as e:
+            log_error(f"Vector store config validation failed: {e}")
+            raise
+        try:
+            self.watchdog.validate()
+        except Exception as e:
+            log_error(f"Watchdog config validation failed: {e}")
+            raise
+        
 
 
 def get_config(from_env: bool = False) -> OrionConfig:

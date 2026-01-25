@@ -29,6 +29,7 @@ langchain-text-splitters
 sentence-transformers
 chromadb
 transformers
+watchdog>=6.0.0
 
 # Document processing
 pandas

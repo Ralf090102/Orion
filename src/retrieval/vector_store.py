@@ -5,6 +5,9 @@ Handles document storage, retrieval, and index management.
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
+from enum import Enum
+from datetime import datetime
+import hashlib
 
 import chromadb
 from chromadb.config import Settings
@@ -22,26 +25,111 @@ if TYPE_CHECKING:
     from src.utilities.config import OrionConfig
 
 
+class FileType(str, Enum):
+    """Supported file types for ingestion."""
+
+    # Text documents
+    TXT = "txt"
+    MD = "md"
+    CSV = "csv"
+    JSON = "json"
+    XML = "xml"
+
+    # Office documents
+    PDF = "pdf"
+    DOCX = "docx"
+    DOC = "doc"
+    PPTX = "pptx"
+    XLSX = "xlsx"
+
+    # Code files
+    PY = "py"
+    JS = "js"
+    TS = "ts"
+    JAVA = "java"
+    CPP = "cpp"
+    C = "c"
+    HTML = "html"
+    CSS = "css"
+
+    # Multimedia (for future support)
+    MP4 = "mp4"
+    MP3 = "mp3"
+    WAV = "wav"
+    WEBM = "webm"
+    JPG = "jpg"
+    PNG = "png"
+    GIF = "gif"
+
+    # Other
+    UNKNOWN = "unknown"
+
+
+# Currently supported file types (text-based)
+SUPPORTED_TEXT_TYPES = {
+    FileType.TXT,
+    FileType.MD,
+    FileType.CSV,
+    FileType.JSON,
+    FileType.XML,
+    FileType.PDF,
+    FileType.DOCX,
+    FileType.DOC,
+    FileType.PPTX,
+    FileType.XLSX,
+    FileType.PY,
+    FileType.JS,
+    FileType.TS,
+    FileType.JAVA,
+    FileType.CPP,
+    FileType.C,
+    FileType.HTML,
+    FileType.CSS,
+}
+
+# Future multimedia types (not yet implemented)
+FUTURE_MULTIMEDIA_TYPES = {
+    FileType.MP4,
+    FileType.MP3,
+    FileType.WAV,
+    FileType.WEBM,
+    FileType.JPG,
+    FileType.PNG,
+    FileType.GIF,
+}
+
+
 class ChromaVectorStore:
     """
     Manages Chroma vector database operations for Orion.
 
-    Handles document storage, retrieval, and persistence with
-    Filipino cultural content optimization.
+    Handles document storage, retrieval, and persistence
     """
 
-    def __init__(self, config: Optional["OrionConfig"] = None):
+    def __init__(self, config: Optional["OrionConfig"] = None, knowledge_base_paths: Optional[list[str]] = None):
         """
         Initialize Chroma vector store.
 
         Args:
             config: Orion configuration object
+            knowledge_base_paths: List of directory paths to monitor for documents.
+                                 If None, uses config.system.storage.knowledge_base_directory
         """
         self.config = ensure_config(config)
         self.vectorstore_config = self.config.rag.vectorstore
         self.client = None
         self.collection = None
         self._collection_name = self.vectorstore_config.collection_name
+
+        # Set up knowledge base paths
+        if knowledge_base_paths is None:
+            kb_dir = self.config.system.storage.knowledge_base_directory
+            self.knowledge_base_paths = [kb_dir] if kb_dir else []
+        else:
+            self.knowledge_base_paths = knowledge_base_paths
+
+        # Normalize paths
+        self.knowledge_base_paths = [str(Path(p).resolve()) for p in self.knowledge_base_paths]
 
         self._initialize_client()
 
@@ -83,9 +171,10 @@ class ChromaVectorStore:
                 self.collection = self.client.create_collection(
                     name=self._collection_name,
                     metadata={
-                        "description": "Orion Filipino cultural knowledge base",
+                        "description": "Orion local knowledge base",
                         "created_by": "Orion",
                         "distance_metric": self.vectorstore_config.distance_metric,
+                        "supports_multimedia": True,  # Future-ready flag
                     },
                 )
                 log_success(f"Created new collection: {self._collection_name}", config=self.config)
@@ -93,6 +182,162 @@ class ChromaVectorStore:
             except Exception as e:
                 log_error(f"Failed to create collection: {e}", config=self.config)
                 raise
+
+    def scan_directories(self, file_types: Optional[set[FileType]] = None) -> list[Path]:
+        """
+        Recursively scan all knowledge base directories for supported files.
+
+        Args:
+            file_types: Set of FileType enums to filter. If None, uses SUPPORTED_TEXT_TYPES.
+
+        Returns:
+            List of Path objects for discovered files
+        """
+        if file_types is None:
+            file_types = SUPPORTED_TEXT_TYPES
+
+        discovered_files = []
+        extensions = {f".{ft.value}" for ft in file_types}
+
+        for base_path in self.knowledge_base_paths:
+            base = Path(base_path)
+            if not base.exists():
+                log_warning(f"Knowledge base path does not exist: {base}", config=self.config)
+                continue
+
+            if not base.is_dir():
+                log_warning(f"Knowledge base path is not a directory: {base}", config=self.config)
+                continue
+
+            log_info(f"Scanning directory: {base}", config=self.config)
+
+            # Recursively find all files with matching extensions
+            for ext in extensions:
+                discovered_files.extend(base.rglob(f"*{ext}"))
+
+        # Remove duplicates and sort
+        discovered_files = sorted(set(discovered_files))
+        log_info(f"Discovered {len(discovered_files)} files across {len(self.knowledge_base_paths)} directories", config=self.config)
+
+        return discovered_files
+
+    @staticmethod
+    def get_file_type(file_path: Path) -> FileType:
+        """
+        Determine file type from path extension.
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            FileType enum value
+        """
+        ext = file_path.suffix.lower().lstrip(".")
+        try:
+            return FileType(ext)
+        except ValueError:
+            return FileType.UNKNOWN
+
+    @staticmethod
+    def compute_file_hash(file_path: Path) -> str:
+        """
+        Compute SHA256 hash of file for change detection.
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            Hexadecimal hash string
+        """
+        sha256 = hashlib.sha256()
+        try:
+            with open(file_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    sha256.update(chunk)
+            return sha256.hexdigest()
+        except Exception:
+            # Fallback to timestamp-based hash if file can't be read
+            return hashlib.sha256(str(file_path.stat().st_mtime).encode()).hexdigest()
+
+    def create_document_metadata(
+        self,
+        file_path: Path,
+        chunk_index: int = 0,
+        total_chunks: int = 1,
+        extra_metadata: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """
+        Create standardized metadata for a document chunk.
+
+        Args:
+            file_path: Path to the source file
+            chunk_index: Index of this chunk (0-based)
+            total_chunks: Total number of chunks from this file
+            extra_metadata: Additional metadata fields (for future multimedia support)
+
+        Returns:
+            Metadata dictionary compatible with Chroma
+        """
+        file_type = self.get_file_type(file_path)
+        file_hash = self.compute_file_hash(file_path)
+        stats = file_path.stat()
+
+        # Base metadata
+        metadata = {
+            # File identification
+            "source_file": str(file_path),
+            "file_name": file_path.name,
+            "file_type": file_type.value,
+            "file_hash": file_hash,
+            "file_size_bytes": stats.st_size,
+
+            # Chunking information
+            "chunk_index": chunk_index,
+            "total_chunks": total_chunks,
+
+            # Timestamps
+            "ingested_at": datetime.now().isoformat(),
+            "modified_at": datetime.fromtimestamp(stats.st_mtime).isoformat(),
+
+            # Directory context
+            "parent_directory": str(file_path.parent),
+            "relative_path": self._get_relative_path(file_path),
+
+            # Content type classification
+            "is_multimedia": file_type in FUTURE_MULTIMEDIA_TYPES,
+            "is_text_based": file_type in SUPPORTED_TEXT_TYPES,
+        }
+
+        # Future-ready: Add multimedia-specific metadata if provided
+        if extra_metadata:
+            # These fields can be used for MP4, MP3, images, etc.
+            # Examples: duration, codec, resolution, artist, album, etc.
+            metadata.update({
+                k: v for k, v in extra_metadata.items()
+                if k not in metadata  # Don't override base fields
+            })
+
+        return metadata
+
+    def _get_relative_path(self, file_path: Path) -> str:
+        """
+        Get file path relative to its knowledge base root.
+
+        Args:
+            file_path: Absolute path to the file
+
+        Returns:
+            Relative path as string, or absolute path if not in any KB directory
+        """
+        file_path = file_path.resolve()
+        for kb_path in self.knowledge_base_paths:
+            kb_path = Path(kb_path).resolve()
+            try:
+                return str(file_path.relative_to(kb_path))
+            except ValueError:
+                continue
+        # Not in any KB path, return full path
+        return str(file_path)
 
     def add_documents(
         self,
@@ -252,18 +497,47 @@ class ChromaVectorStore:
         Get statistics about the collection.
 
         Returns:
-            Dictionary with collection statistics
+            Dictionary with collection statistics including file type breakdown
         """
         if self.collection is None:
             self._get_or_create_collection()
 
         try:
             count = self.collection.count()
+
+            # Get file type distribution
+            all_data = self.collection.get(include=["metadatas"])
+            file_type_counts = {}
+            unique_files = set()
+            knowledge_base_coverage = {kb: 0 for kb in self.knowledge_base_paths}
+
+            if all_data.get("metadatas"):
+                for metadata in all_data["metadatas"]:
+                    if metadata:
+                        # Count by file type
+                        file_type = metadata.get("file_type", "unknown")
+                        file_type_counts[file_type] = file_type_counts.get(file_type, 0) + 1
+
+                        # Track unique files
+                        source = metadata.get("source_file")
+                        if source:
+                            unique_files.add(source)
+
+                            # Count files per KB path
+                            for kb_path in self.knowledge_base_paths:
+                                if source.startswith(kb_path):
+                                    knowledge_base_coverage[kb_path] += 1
+                                    break
+
             return {
                 "document_count": count,
+                "unique_files": len(unique_files),
                 "collection_name": self._collection_name,
                 "persist_directory": self.vectorstore_config.persist_directory,
                 "distance_metric": self.vectorstore_config.distance_metric,
+                "file_type_distribution": file_type_counts,
+                "knowledge_base_paths": self.knowledge_base_paths,
+                "knowledge_base_coverage": knowledge_base_coverage,
             }
 
         except Exception as e:
@@ -417,14 +691,29 @@ class ChromaVectorStore:
                 pass  # Ignore errors during cleanup
 
 
-def create_vector_store(config: Optional["OrionConfig"] = None) -> ChromaVectorStore:
+def create_vector_store(
+    config: Optional["OrionConfig"] = None,
+    knowledge_base_paths: Optional[list[str]] = None,
+) -> ChromaVectorStore:
     """
     Factory function to create a ChromaVectorStore instance.
 
     Args:
         config: Orion configuration object
+        knowledge_base_paths: List of directory paths to monitor.
+                             If None, uses config.system.storage.knowledge_base_directory
 
     Returns:
         Initialized ChromaVectorStore instance
+
+    Example:
+        # Single directory
+        store = create_vector_store(config, ["D:/Documents"])
+
+        # Multiple directories
+        store = create_vector_store(config, ["D:/Documents", "D:/Projects", "C:/Data"])
+
+        # Use config default
+        store = create_vector_store(config)
     """
-    return ChromaVectorStore(config)
+    return ChromaVectorStore(config, knowledge_base_paths)

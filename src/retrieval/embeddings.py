@@ -29,9 +29,6 @@ if TYPE_CHECKING:
 class EmbeddingManager:
     """
     Manages embedding generation using Hugging Face models.
-
-    Supports BGE-M3 and other multilingual models optimized for
-    Filipino cultural content and cross-language understanding.
     """
 
     def __init__(self, config: Optional["OrionConfig"] = None):
