@@ -55,6 +55,12 @@ class EmbeddingManager:
             log_info(f"Using GPU for embeddings: {torch.cuda.get_device_name()}", config=self.config)
         else:
             device = "cpu"
+            if self.config.gpu.enabled and not torch.cuda.is_available():
+                log_warning(
+                    "GPU acceleration requested but CUDA not available. "
+                    "Install PyTorch with CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu128",
+                    config=self.config
+                )
             log_info("Using CPU for embeddings", config=self.config)
 
         return device

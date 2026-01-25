@@ -19,6 +19,10 @@
 # ================================
 # If you prefer traditional pip install, here are the core dependencies:
 
+# For CUDA 12.8 GPU support, install torch first:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+# Core dependencies
 ollama>=0.6.0
 chardet
 rank_bm25
@@ -30,6 +34,11 @@ sentence-transformers
 chromadb
 transformers
 watchdog>=6.0.0
+
+# PyTorch (CPU version - for GPU, see comment above)
+torch>=2.6.0
+torchvision>=0.21.0
+torchaudio>=2.6.0
 
 # Document processing
 pandas
