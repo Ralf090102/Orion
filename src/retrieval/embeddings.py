@@ -1,6 +1,6 @@
 """
-Embedding generation and management for Orion using Hugging Face models.
-Supports BGE-M3 and other multilingual models for Filipino cultural content.
+Embedding generation and management for Orion using sentence-transformers.
+Supports any SentenceTransformer model with configurable batching and caching.
 """
 
 import hashlib
@@ -28,7 +28,8 @@ if TYPE_CHECKING:
 
 class EmbeddingManager:
     """
-    Manages embedding generation using Hugging Face models.
+    Manages embedding generation using sentence-transformers models.
+    Supports caching, batching, and GPU acceleration.
     """
 
     def __init__(self, config: Optional["OrionConfig"] = None):
@@ -79,40 +80,23 @@ class EmbeddingManager:
         try:
             log_info(f"Loading embedding model: {model_name}", config=self.config)
 
-            if "bge-m3" in model_name.lower() or model_name == "BAAI/bge-m3":
-                self._load_bge_m3_model(model_name)
-            else:
-                raise ValueError(
-                    f"""
-                    Unsupported embedding model: {model_name}.
-                    Orion requires BGE-M3 for optimal Filipino cultural content understanding.
-                    """
-                )
-
-            log_success(f"Successfully loaded model: {model_name}", config=self.config)
-
-        except Exception as e:
-            log_error(f"Failed to load embedding model {model_name}: {e}", config=self.config)
-            raise RuntimeError(f"BGE-M3 model failed to load. This is required for Orion functionality: {e}")
-
-    def _load_bge_m3_model(self, model_name: str = "BAAI/bge-m3") -> None:
-        """Load BGE-M3 model with optimized settings."""
-        try:
+            # Load any sentence-transformers model
             self.model = SentenceTransformer(model_name, device=self.device)
-
-            # Set maximum sequence length for BGE-M3 (supports up to 8192 tokens)
-            if hasattr(self.model, "max_seq_length"):
-                self.model.max_seq_length = 8192
-                log_info(f"Set BGE-M3 max sequence length to {self.model.max_seq_length}", config=self.config)
 
             # Set to evaluation mode
             self.model.eval()
 
-            log_info("BGE-M3 model loaded successfully", config=self.config)
+            # Configure max sequence length if model supports it
+            if hasattr(self.model, "max_seq_length"):
+                # Use model's default max length or set reasonable limit
+                max_length = getattr(self.model, "max_seq_length", 512)
+                log_debug(f"Model max sequence length: {max_length}", self.config)
+
+            log_success(f"Successfully loaded model: {model_name} (dim={self.get_embedding_dimension()})", config=self.config)
 
         except Exception as e:
-            log_error(f"Failed to load BGE-M3: {e}", config=self.config)
-            raise
+            log_error(f"Failed to load embedding model {model_name}: {e}", config=self.config)
+            raise RuntimeError(f"Embedding model failed to load: {e}")
 
     def _get_cache_key(self, text: str) -> str:
         """Generate cache key for text."""
@@ -184,9 +168,14 @@ class EmbeddingManager:
             return cached_embedding
 
         try:
-            # Generate embedding using BGE-M3 (SentenceTransformer)
+            # Generate embedding using sentence-transformers
             with torch.no_grad():
-                embedding = self.model.encode(text, convert_to_tensor=False, normalize_embeddings=True, show_progress_bar=False)
+                embedding = self.model.encode(
+                    text,
+                    convert_to_tensor=False,
+                    normalize_embeddings=True,
+                    show_progress_bar=False,
+                )
                 if isinstance(embedding, np.ndarray):
                     embedding = embedding.tolist()
 
@@ -235,7 +224,7 @@ class EmbeddingManager:
 
                 log_debug(f"Processing batch {i//batch_size + 1} with {len(batch_texts)} texts", self.config)
 
-                # Generate embeddings using BGE-M3 (SentenceTransformer)
+                # Generate embeddings using sentence-transformers
                 with torch.no_grad():
                     batch_embeddings = self.model.encode(
                         batch_texts,
@@ -263,17 +252,24 @@ class EmbeddingManager:
 
     def get_embedding_dimension(self) -> int:
         """
-        Get the dimension of embeddings produced by the BGE-M3 model.
+        Get the dimension of embeddings produced by the model.
 
         Returns:
             Embedding dimension
         """
         try:
-            return self.model.get_sentence_embedding_dimension()
+            if hasattr(self.model, "get_sentence_embedding_dimension"):
+                return self.model.get_sentence_embedding_dimension()
+            elif hasattr(self.model, "encode"):
+                # Fallback: encode a test string to determine dimension
+                test_embedding = self.model.encode("test", convert_to_tensor=False)
+                return len(test_embedding) if isinstance(test_embedding, (list, np.ndarray)) else 768
+            else:
+                return 768  # Common default for many models
 
         except Exception as e:
             log_error(f"Failed to get embedding dimension: {e}", config=self.config)
-            return 1024  # BGE-M3 default dimension
+            return 768  # Fallback to common dimension
 
     def clear_cache(self) -> None:
         """Clear embedding cache."""

@@ -84,7 +84,7 @@ class EmbeddingConfig(BaseConfig):
     """Embedding model configuration"""
 
     model: str = "all-MiniLM-L12-v2"
-    batch_size: int = 32
+    batch_size: int = 64
     timeout: int = 30
     cache_embeddings: bool = True
 
@@ -93,7 +93,7 @@ class EmbeddingConfig(BaseConfig):
         """Load embedding configuration from environment variables"""
         return cls(
             model=get_env_str("ORION_EMBEDDING_MODEL", "all-MiniLM-L12-v2"),
-            batch_size=get_env_int("ORION_EMBEDDING_BATCH_SIZE", 32),
+            batch_size=get_env_int("ORION_EMBEDDING_BATCH_SIZE", 64),
             timeout=get_env_int("ORION_EMBEDDING_TIMEOUT", 30),
             cache_embeddings=get_env_bool("ORION_EMBEDDING_CACHE", True),
         )
@@ -553,7 +553,7 @@ def get_config(from_env: bool = False) -> OrionConfig:
         Environment Variables:
         RAG Configuration:
             ORION_EMBEDDING_MODEL="nomic-embed-text"
-            ORION_EMBEDDING_BATCH_SIZE=32
+            ORION_EMBEDDING_BATCH_SIZE=64
             ORION_CHUNK_SIZE=128
             ORION_CHUNK_OVERLAP=0
             ORION_CHUNKING_STRATEGY="recursive"

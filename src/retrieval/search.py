@@ -1,6 +1,6 @@
 """
 Advanced search strategies for Orion retrieval system.
-Implements semantic, hybrid, and MMR search with Filipino cultural content optimization.
+Implements semantic, hybrid, and MMR search
 """
 
 from typing import TYPE_CHECKING, Any, Optional
@@ -133,16 +133,60 @@ class SemanticSearcher:
 class KeywordSearcher:
     """
     BM25-based keyword search for exact term matching.
-    Handles both English and Filipino text effectively.
+    Automatically syncs with vector store when provided.
     """
 
-    def __init__(self, config: Optional["OrionConfig"] = None):
+    def __init__(self, vector_store: Optional["ChromaVectorStore"] = None, config: Optional["OrionConfig"] = None):
         self.config = ensure_config(config)
+        self.vector_store = vector_store
         self.bm25 = None
         self.documents = []
         self.document_metadata = []
         self.document_ids = []
+        self._is_synced = False
 
+    def ensure_synced(self) -> bool:
+        """
+        Ensure keyword index is synced with vector store.
+        
+        Returns:
+            True if synced successfully, False otherwise
+        """
+        if self._is_synced:
+            return True
+            
+        if self.vector_store is None:
+            log_warning("No vector store connected to keyword searcher", config=self.config)
+            return False
+            
+        try:
+            # Get all documents from vector store
+            if self.vector_store.collection is None:
+                self.vector_store._get_or_create_collection()
+                
+            all_data = self.vector_store.collection.get(include=["documents", "metadatas"])
+            
+            if all_data.get("ids") and all_data["ids"]:
+                self.index_documents(
+                    documents=all_data["documents"],
+                    document_ids=all_data["ids"],
+                    metadatas=all_data["metadatas"]
+                )
+                self._is_synced = True
+                log_info(f"Keyword index synced with {len(all_data['ids'])} documents", config=self.config)
+                return True
+            else:
+                log_info("Vector store is empty, keyword index not populated", config=self.config)
+                return False
+                
+        except Exception as e:
+            log_warning(f"Failed to sync keyword index: {e}", config=self.config)
+            return False
+
+    def invalidate_sync(self) -> None:
+        """Mark keyword index as out of sync (call after vector store updates)."""
+        self._is_synced = False
+        
     def index_documents(self, documents: list[str], document_ids: list[str], metadatas: list[dict[str, Any]]) -> None:
         """
         Index documents for keyword search.
@@ -178,7 +222,6 @@ class KeywordSearcher:
     def _tokenize(self, text: str) -> list[str]:
         """
         Tokenize text for BM25 indexing.
-        Handles Filipino and English text.
 
         Args:
             text: Input text
@@ -213,6 +256,10 @@ class KeywordSearcher:
         Returns:
             List of SearchResult objects sorted by BM25 score (highest first)
         """
+        # Auto-sync if needed
+        if self.bm25 is None:
+            self.ensure_synced()
+            
         if not query.strip() or self.bm25 is None:
             log_warning("Empty query or BM25 not initialized", config=self.config)
             return []
@@ -266,7 +313,7 @@ class KeywordSearcher:
 class HybridSearcher:
     """
     Combines semantic and keyword search with configurable weights.
-    Provides comprehensive retrieval for Filipino cultural content.
+    Supports both weighted score fusion and Reciprocal Rank Fusion (RRF).
     """
 
     def __init__(
@@ -284,6 +331,7 @@ class HybridSearcher:
         semantic_weight: float | None = None,
         keyword_weight: float | None = None,
         metadata_filter: dict[str, Any] | None = None,
+        fusion_method: str = "rrf",  # "rrf" or "weighted"
     ) -> list[SearchResult]:
         """
         Perform hybrid search combining semantic and keyword approaches.
@@ -291,9 +339,10 @@ class HybridSearcher:
         Args:
             query: Search query text
             k: Number of results to return
-            semantic_weight: Weight for semantic scores (0.0-1.0)
-            keyword_weight: Weight for keyword scores (0.0-1.0)
+            semantic_weight: Weight for semantic scores (0.0-1.0, used for weighted fusion)
+            keyword_weight: Weight for keyword scores (0.0-1.0, used for weighted fusion)
             metadata_filter: Optional metadata filter
+            fusion_method: "rrf" (Reciprocal Rank Fusion, recommended) or "weighted" (score combination)
 
         Returns:
             List of SearchResult objects sorted by combined score (highest first)
@@ -307,7 +356,7 @@ class HybridSearcher:
         if keyword_weight is None:
             keyword_weight = self.config.rag.retrieval.keyword_weight
 
-        # Normalize weights
+        # Normalize weights for weighted fusion
         total_weight = semantic_weight + keyword_weight
         if total_weight > 0:
             semantic_weight /= total_weight
@@ -316,21 +365,34 @@ class HybridSearcher:
             semantic_weight = keyword_weight = 0.5
 
         try:
-            semantic_results = self.semantic_searcher.search(query=query, k=k * 2, metadata_filter=metadata_filter)
+            # Use mmr_fetch_k from config (default 20) to fetch more candidates
+            fetch_k = self.config.rag.retrieval.mmr_fetch_k
+            
+            semantic_results = self.semantic_searcher.search(query=query, k=fetch_k, metadata_filter=metadata_filter)
 
-            keyword_results = self.keyword_searcher.search(query=query, k=k * 2, metadata_filter=metadata_filter)
+            keyword_results = self.keyword_searcher.search(query=query, k=fetch_k, metadata_filter=metadata_filter)
 
-            combined_results = self._fuse_results(
-                semantic_results=semantic_results,
-                keyword_results=keyword_results,
-                semantic_weight=semantic_weight,
-                keyword_weight=keyword_weight,
-            )
+            # Choose fusion method
+            if fusion_method == "rrf":
+                combined_results = self._reciprocal_rank_fusion(
+                    semantic_results=semantic_results,
+                    keyword_results=keyword_results,
+                    semantic_weight=semantic_weight,
+                    keyword_weight=keyword_weight,
+                )
+            else:  # weighted
+                combined_results = self._weighted_score_fusion(
+                    semantic_results=semantic_results,
+                    keyword_results=keyword_results,
+                    semantic_weight=semantic_weight,
+                    keyword_weight=keyword_weight,
+                )
 
             final_results = combined_results[:k]
 
             log_debug(
-                f"Hybrid search combined {len(semantic_results)} semantic + {len(keyword_results)} keyword results", self.config
+                f"Hybrid search ({fusion_method}) combined {len(semantic_results)} semantic + {len(keyword_results)} keyword results",
+                self.config
             )
             return final_results
 
@@ -338,7 +400,87 @@ class HybridSearcher:
             log_warning(f"Hybrid search failed: {e}", config=self.config)
             return []
 
-    def _fuse_results(
+    def _reciprocal_rank_fusion(
+        self,
+        semantic_results: list[SearchResult],
+        keyword_results: list[SearchResult],
+        semantic_weight: float = 0.8,
+        keyword_weight: float = 0.2,
+        k: int = 60,  # RRF constant (typical value: 60)
+    ) -> list[SearchResult]:
+        """
+        Fuse results using Reciprocal Rank Fusion (RRF).
+        
+        RRF is more robust than weighted score combination because:
+        - No score normalization needed
+        - Handles different score scales naturally
+        - Less sensitive to outliers
+        - Industry standard for hybrid search
+
+        Args:
+            semantic_results: Results from semantic search (assumed sorted by score)
+            keyword_results: Results from keyword search (assumed sorted by score)
+            semantic_weight: Weight for semantic rankings
+            keyword_weight: Weight for keyword rankings
+            k: RRF constant (default 60, typical range: 10-100)
+
+        Returns:
+            Fused and ranked results
+        """
+        # Build document ID to result mapping with RRF scores
+        combined_docs = {}
+        
+        # Process semantic results
+        for rank, result in enumerate(semantic_results, start=1):
+            doc_id = result.document_id
+            rrf_score = semantic_weight / (k + rank)
+            
+            combined_docs[doc_id] = {
+                "document_id": doc_id,
+                "content": result.content,
+                "metadata": result.metadata,
+                "rrf_score": rrf_score,
+                "semantic_rank": rank,
+                "keyword_rank": None,
+            }
+        
+        # Process keyword results
+        for rank, result in enumerate(keyword_results, start=1):
+            doc_id = result.document_id
+            rrf_score = keyword_weight / (k + rank)
+            
+            if doc_id in combined_docs:
+                # Document appears in both - add RRF scores
+                combined_docs[doc_id]["rrf_score"] += rrf_score
+                combined_docs[doc_id]["keyword_rank"] = rank
+            else:
+                combined_docs[doc_id] = {
+                    "document_id": doc_id,
+                    "content": result.content,
+                    "metadata": result.metadata,
+                    "rrf_score": rrf_score,
+                    "semantic_rank": None,
+                    "keyword_rank": rank,
+                }
+        
+        # Create fused results
+        fused_results = []
+        for doc_data in combined_docs.values():
+            search_result = SearchResult(
+                document_id=doc_data["document_id"],
+                content=doc_data["content"],
+                metadata=doc_data["metadata"],
+                score=doc_data["rrf_score"],
+                search_type="hybrid-rrf",
+            )
+            fused_results.append(search_result)
+        
+        # Sort by RRF score (highest first)
+        fused_results.sort(key=lambda x: x.score, reverse=True)
+        
+        return fused_results
+    
+    def _weighted_score_fusion(
         self,
         semantic_results: list[SearchResult],
         keyword_results: list[SearchResult],
@@ -347,6 +489,8 @@ class HybridSearcher:
     ) -> list[SearchResult]:
         """
         Fuse semantic and keyword results using weighted score combination.
+        
+        Note: RRF (_reciprocal_rank_fusion) is generally preferred over this method.
 
         Args:
             semantic_results: Results from semantic search
@@ -398,7 +542,7 @@ class HybridSearcher:
                 content=doc_data["content"],
                 metadata=doc_data["metadata"],
                 score=combined_score,
-                search_type="hybrid",
+                search_type="hybrid-weighted",
             )
             fused_results.append(search_result)
 
@@ -603,9 +747,9 @@ def create_semantic_searcher(
     return SemanticSearcher(embedding_manager, vector_store, config)
 
 
-def create_keyword_searcher(config: Optional["OrionConfig"] = None) -> KeywordSearcher:
-    """Factory function for KeywordSearcher."""
-    return KeywordSearcher(config)
+def create_keyword_searcher(vector_store: Optional["ChromaVectorStore"] = None, config: Optional["OrionConfig"] = None) -> KeywordSearcher:
+    """Factory function for KeywordSearcher with optional vector store for auto-sync."""
+    return KeywordSearcher(vector_store, config)
 
 
 def create_hybrid_searcher(

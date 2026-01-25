@@ -1,25 +1,26 @@
 """
 Orion Document Retriever
 
-A simple, high-level interface for document retrieval that encapsulates
-the entire Orion search pipeline into a single query method.
+High-level interface for the complete Orion retrieval pipeline:
+semantic/hybrid search → reranking → MMR diversity → formatted results
 
 Usage:
     from src.retrieval.retriever import OrionRetriever
 
     retriever = OrionRetriever()
-    results = retriever.query("What is bayanihan?")
+    results = retriever.query("What is machine learning?")
     print(results)
 """
 
 import logging
+from typing import Optional
 
 from src.retrieval.embeddings import EmbeddingManager
 from src.retrieval.reranker import Document, RerankerManager
 from src.retrieval.search import HybridSearcher, KeywordSearcher, MMRSearcher, SearchResult, SemanticSearcher
 from src.retrieval.vector_store import ChromaVectorStore
 from src.utilities.config import OrionConfig
-from src.utilities.utils import log_error, log_info, log_warning
+from src.utilities.utils import ensure_config, log_error, log_info, log_warning
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -33,14 +34,14 @@ class OrionRetriever:
     Orion retrieval pipeline: search → rerank → MMR → format results.
     """
 
-    def __init__(self, config: OrionConfig | None = None):
+    def __init__(self, config: Optional[OrionConfig] = None):
         """
         Initialize the Orion retriever.
 
         Args:
             config: Optional Orion configuration. If None, loads default config.
         """
-        self.config = config or OrionConfig()
+        self.config = ensure_config(config)
         self._vector_store = None
         self._embedding_manager = None
         self._reranker = None
@@ -53,23 +54,23 @@ class OrionRetriever:
             return
 
         try:
-            log_info("Initializing Orion retriever components...")
+            log_info("Initializing Orion retriever components...", config=self.config)
 
             # Initialize core components
             self._vector_store = ChromaVectorStore(self.config)
             self._embedding_manager = EmbeddingManager(self.config)
 
             # Initialize reranker
-            self._reranker = RerankerManager(self.config.rag.reranker)
+            self._reranker = RerankerManager(self.config)
 
             # Initialize MMR searcher
             self._mmr_searcher = MMRSearcher(self._embedding_manager, self.config)
 
             self._initialized = True
-            log_info("Orion retriever components initialized successfully")
+            log_info("Orion retriever components initialized successfully", config=self.config)
 
         except Exception as e:
-            log_error(f"Failed to initialize retriever components: {e}")
+            log_error(f"Failed to initialize retriever components: {e}", config=self.config)
             raise
 
     def _check_knowledge_base(self) -> int:
@@ -88,10 +89,10 @@ class OrionRetriever:
         if doc_count == 0:
             raise ValueError(
                 "No documents found in knowledge base. "
-                "Please run ingestion first using 'python run_retrieval.py ingest <path>'"
+                "Please run ingestion first."
             )
 
-        log_info(f"Found {doc_count} documents in knowledge base")
+        log_info(f"Found {doc_count} documents in knowledge base", config=self.config)
         return doc_count
 
     def _perform_search(self, query: str, k: int, search_type: str) -> list[SearchResult]:
@@ -113,23 +114,15 @@ class OrionRetriever:
         elif search_type == "hybrid":
             # Create semantic and keyword searchers
             semantic_searcher = SemanticSearcher(self._embedding_manager, self._vector_store, self.config)
-            keyword_searcher = KeywordSearcher(self.config)
-
-            # Get documents from vector store for keyword indexing
-            doc_count = self._check_knowledge_base()
-            all_results = semantic_searcher.search(query, k=doc_count)
-
-            # Prepare data for keyword search
-            documents = [r.content for r in all_results]
-            document_ids = [r.document_id for r in all_results]
-            metadatas = [r.metadata for r in all_results]
-
-            # Index documents for keyword search
-            keyword_searcher.index_documents(documents, document_ids, metadatas)
-
-            # Create hybrid searcher and search
+            
+            # Keyword searcher with auto-sync
+            keyword_searcher = KeywordSearcher(self._vector_store, self.config)
+            
+            # Create hybrid searcher with RRF fusion (default)
             hybrid_searcher = HybridSearcher(semantic_searcher, keyword_searcher, self.config)
-            return hybrid_searcher.search(query, k=k)
+            
+            # Use RRF fusion by default (more robust than weighted)
+            return hybrid_searcher.search(query, k=k, fusion_method="rrf")
 
         else:
             raise ValueError(f"Unsupported search type: {search_type}. Use 'semantic' or 'hybrid'.")
@@ -151,16 +144,19 @@ class OrionRetriever:
         if not results:
             return results
 
-        reranker = self._reranker
-        
         # Convert SearchResult objects to Document objects for reranking
         docs_to_rerank = []
         for result in results:
-            doc = Document(content=result.content, metadata=result.metadata, score=result.score, doc_id=result.document_id)
+            doc = Document(
+                content=result.content,
+                metadata=result.metadata,
+                score=result.score,
+                doc_id=result.document_id
+            )
             docs_to_rerank.append(doc)
 
         # Rerank documents
-        reranked_docs = reranker.rerank_documents(query, docs_to_rerank, top_k=k)
+        reranked_docs = self._reranker.rerank_documents(query, docs_to_rerank, top_k=k)
 
         # Convert back to SearchResult objects
         reranked_results = []
@@ -277,46 +273,46 @@ class OrionRetriever:
             # Check knowledge base
             doc_count = self._check_knowledge_base()
 
-            log_info(f"Knowledge base contains {doc_count} documents")
-            log_info(f"Querying: '{query_text}' (type: {search_type}, k: {k})")
+            log_info(f"Knowledge base contains {doc_count} documents", config=self.config)
+            log_info(f"Querying: '{query_text}' (type: {search_type}, k: {k})", config=self.config)
 
             # Perform initial search
             results = self._perform_search(query_text, k=k, search_type=search_type)
 
             if not results:
-                log_warning(f"No initial results found for query: {query_text}")
+                log_warning(f"No initial results found for query: {query_text}", config=self.config)
                 return "No results found for your query."
 
-            log_info(f"Initial search returned {len(results)} results")
+            log_info(f"Initial search returned {len(results)} results", config=self.config)
 
             # Apply reranking if enabled
             if enable_reranking and results:
-                log_info("Applying reranking...")
+                log_info("Applying reranking...", config=self.config)
                 results = self._apply_reranking(query_text, results, k=k)
-                log_info(f"Reranking returned {len(results)} results")
+                log_info(f"Reranking returned {len(results)} results", config=self.config)
 
             # Apply MMR diversity if enabled
             if enable_mmr and results and len(results) > 1:
-                log_info("Applying MMR diversity...")
+                log_info("Applying MMR diversity...", config=self.config)
                 results = self._apply_mmr(query_text, results, k=k)
-                log_info(f"MMR returned {len(results)} diverse results")
+                log_info(f"MMR returned {len(results)} diverse results", config=self.config)
 
             if formatted:
                 # Format and return results
                 return self._format_results(results)
             
-            log_info(f"Query completed successfully, returning {len(results)} results")
+            log_info(f"Query completed successfully, returning {len(results)} results", config=self.config)
             
             return results
 
         except ValueError as e:
             # User-facing errors (empty knowledge base, invalid search type)
-            log_warning(f"Query failed: {e}")
+            log_warning(f"Query failed: {e}", config=self.config)
             return f"Error: {e}"
 
         except Exception as e:
             # System errors
-            log_error(f"Unexpected error during query: {e}")
+            log_error(f"Unexpected error during query: {e}", config=self.config)
             return f"An error occurred while processing your query: {e}"
 
     def get_status(self) -> dict:
