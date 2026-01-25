@@ -4,6 +4,9 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
+# Disable HuggingFace symlink warnings on Windows
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+
 
 # ========== ENVIRONMENT VARIABLE HELPERS ==========
 def get_env_bool(key: str, default: bool = False) -> bool:
@@ -323,6 +326,62 @@ class VectorStoreConfig(BaseConfig):
         )
 
 
+@dataclass
+class GenerationConfig(BaseConfig):
+    """Text generation and prompt configuration"""
+
+    # Generation mode
+    mode: str = "rag"  # "rag" or "chat"
+
+    # RAG mode settings
+    enable_citations: bool = True
+    citation_format: str = "[{index}]"  # or "({source})" or "[{source}]"
+    max_context_chunks: int = 5
+
+    # Chat mode settings
+    max_history_messages: int = 10  # Number of conversation turns to keep
+    enable_rag_augmentation: bool = True  # Use RAG in chat mode
+    rag_trigger_mode: str = "auto"  # "always", "auto", "manual", "never"
+
+    # Context window management
+    max_total_tokens: int = 4096  # Model context limit
+    reserve_tokens_for_response: int = 1024  # Reserve for LLM response
+    chars_per_token: int = 4  # Rough estimation: 4 chars ≈ 1 token
+
+    @classmethod
+    def from_env(cls) -> "GenerationConfig":
+        """Load generation configuration from environment variables"""
+        return cls(
+            mode=get_env_str("ORION_GENERATION_MODE", "rag"),
+            enable_citations=get_env_bool("ORION_GENERATION_CITATIONS", True),
+            citation_format=get_env_str("ORION_GENERATION_CITATION_FORMAT", "[{index}]"),
+            max_context_chunks=get_env_int("ORION_GENERATION_MAX_CONTEXT_CHUNKS", 5),
+            max_history_messages=get_env_int("ORION_GENERATION_MAX_HISTORY", 10),
+            enable_rag_augmentation=get_env_bool("ORION_GENERATION_RAG_AUGMENTATION", True),
+            rag_trigger_mode=get_env_str("ORION_GENERATION_RAG_TRIGGER", "auto"),
+            max_total_tokens=get_env_int("ORION_GENERATION_MAX_TOKENS", 4096),
+            reserve_tokens_for_response=get_env_int("ORION_GENERATION_RESERVE_TOKENS", 1024),
+            chars_per_token=get_env_int("ORION_GENERATION_CHARS_PER_TOKEN", 4),
+        )
+
+    def validate(self) -> None:
+        """Validate generation configuration"""
+        if self.mode not in ("rag", "chat"):
+            raise ValueError("mode must be 'rag' or 'chat'")
+        if self.max_context_chunks <= 0:
+            raise ValueError("max_context_chunks must be positive")
+        if self.max_history_messages <= 0:
+            raise ValueError("max_history_messages must be positive")
+        if self.rag_trigger_mode not in ("always", "auto", "manual", "never"):
+            raise ValueError("rag_trigger_mode must be 'always', 'auto', 'manual', or 'never'")
+        if self.max_total_tokens <= 0:
+            raise ValueError("max_total_tokens must be positive")
+        if self.reserve_tokens_for_response <= 0:
+            raise ValueError("reserve_tokens_for_response must be positive")
+        if self.reserve_tokens_for_response >= self.max_total_tokens:
+            raise ValueError("reserve_tokens_for_response must be less than max_total_tokens")
+
+
 # ========== WATCHDOG / FILE-WATCHER CONFIGURATION ==========
 @dataclass
 class WatchdogConfig(BaseConfig):
@@ -375,7 +434,7 @@ class RAGConfig(BaseConfig):
     reranker: RerankerConfig = field(default_factory=RerankerConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     vectorstore: VectorStoreConfig = field(default_factory=VectorStoreConfig)
-
+    generation: GenerationConfig = field(default_factory=GenerationConfig)
 
     @classmethod
     def from_env(cls) -> "RAGConfig":
@@ -388,6 +447,7 @@ class RAGConfig(BaseConfig):
             reranker=RerankerConfig.from_env(),
             llm=LLMConfig.from_env(),
             vectorstore=VectorStoreConfig.from_env(),
+            generation=GenerationConfig.from_env(),
         )
 
 
@@ -520,6 +580,11 @@ class OrionConfig(BaseConfig):
             self.rag.vectorstore.validate()
         except Exception as e:
             log_error(f"Vector store config validation failed: {e}")
+            raise
+        try:
+            self.rag.generation.validate()
+        except Exception as e:
+            log_error(f"Generation config validation failed: {e}")
             raise
         try:
             self.watchdog.validate()
