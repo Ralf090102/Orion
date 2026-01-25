@@ -704,6 +704,7 @@ class DocumentIngestor:
         self.processor = DocumentProcessor(config)
         self.preprocessor = TextPreprocessor(config)
         self.chunker = TextChunker(config)
+        self.embedding_manager = EmbeddingManager(config=config)
         self.vector_store = vector_store or create_vector_store(config=config)
 
     def ingest_file(self, file_path: str | Path) -> tuple[bool, DocumentMetadata, list[str]]:
@@ -744,14 +745,44 @@ class DocumentIngestor:
                 errors.append(f"No chunks created for {file_path}")
                 return False, metadata, errors
 
+            # Extract text content from chunks
+            chunk_texts = [chunk.page_content for chunk in chunks]
+
+            # Generate embeddings
+            log_debug(f"Generating embeddings for {len(chunk_texts)} chunks", self.config)
+            embeddings = self.embedding_manager.encode_batch(chunk_texts)
+
+            # Create metadata for each chunk
+            chunk_metadatas = []
+            for i, chunk in enumerate(chunks):
+                chunk_metadata = self.vector_store.create_document_metadata(
+                    file_path=file_path,
+                    chunk_index=i,
+                    total_chunks=len(chunks),
+                    extra_metadata=chunk.metadata,  # Include any metadata from the Document object
+                )
+                chunk_metadatas.append(chunk_metadata)
+
+            # Generate document IDs
+            doc_ids = [f"{metadata.file_hash}_chunk_{i}" for i in range(len(chunks))]
+
             # Add to vector store
-            added_count = self.vector_store.add_documents(chunks)
+            success = self.vector_store.add_documents(
+                documents=chunk_texts,
+                embeddings=embeddings,
+                metadatas=chunk_metadatas,
+                ids=doc_ids,
+            )
+
+            if not success:
+                errors.append("Failed to add documents to vector store")
+                return False, metadata, errors
 
             # Update metadata
-            metadata.chunk_count = added_count
+            metadata.chunk_count = len(chunks)
             metadata.ingestion_timestamp = datetime.now().isoformat()
 
-            log_info(f"Successfully ingested {file_path}: {added_count} chunks", self.config)
+            log_info(f"Successfully ingested {file_path}: {len(chunks)} chunks", self.config)
             return True, metadata, errors
 
         except Exception as e:
