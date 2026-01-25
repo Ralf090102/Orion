@@ -128,14 +128,15 @@ async def root():
 
 # ========== ROUTE REGISTRATION ==========
 # Import and include routers
-from backend.api import health, ingestion
+from backend.api import health, ingestion, rag, settings
 
 app.include_router(health.router)
 app.include_router(ingestion.router)
+app.include_router(rag.router)
+app.include_router(settings.router)
 
 # Uncomment as you create each router
-# from backend.api import rag, chat
-# app.include_router(rag.router, prefix="/api", tags=["RAG"])
+# from backend.api import chat
 # app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 
 # WebSocket routes
