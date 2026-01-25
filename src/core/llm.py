@@ -270,3 +270,76 @@ def generate_response(
     except Exception as e:
         log_error(f"LLM generation failed: {e}", config=config)
         return "[Error: Failed to generate response]"
+
+
+class OllamaClient:
+    """
+    Client wrapper for Ollama LLM interactions.
+    
+    Provides a consistent interface for generating responses using Ollama models.
+    """
+    
+    def __init__(self, base_url: Optional[str] = None, timeout: Optional[int] = None):
+        """
+        Initialize the Ollama client.
+        
+        Args:
+            base_url: Base URL for Ollama service (currently unused, kept for compatibility)
+            timeout: Request timeout in seconds
+        """
+        self.base_url = base_url
+        self.timeout = timeout
+        
+    def generate(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        max_tokens: Optional[int] = None,
+        stream: bool = False,
+    ) -> dict:
+        """
+        Generate a response using the Ollama API.
+        
+        Args:
+            messages: List of message dicts with 'role' and 'content' keys
+            model: Model name to use
+            temperature: Sampling temperature (0.0 to 1.0)
+            top_p: Nucleus sampling parameter
+            max_tokens: Maximum tokens to generate
+            stream: Whether to stream the response (not currently implemented)
+            
+        Returns:
+            Dict with 'message' key containing response with 'content' key
+            
+        Raises:
+            Exception: If generation fails
+        """
+        try:
+            # Prepare options
+            options = {
+                "temperature": temperature,
+                "top_p": top_p,
+            }
+            
+            if max_tokens:
+                options["num_predict"] = max_tokens
+                
+            if self.timeout:
+                options["timeout"] = self.timeout
+            
+            # Call Ollama API
+            response = ollama.chat(
+                model=model,
+                messages=messages,
+                options=options,
+                stream=False,
+            )
+            
+            return response
+            
+        except ollama.ResponseError as e:
+            raise Exception(f"Ollama API error: {e}")
+        except Exception as e:
+            raise Exception(f"LLM generation failed: {e}")

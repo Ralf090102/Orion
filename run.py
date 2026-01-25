@@ -391,6 +391,17 @@ def ask(
 
                 console.print(meta_table)
                 console.print()
+                
+                # Display timing breakdown if available
+                if result.timing:
+                    timing_summary = result.timing.format_timing_summary()
+                    console.print(Panel(
+                        timing_summary,
+                        title="⏱️  Performance Breakdown",
+                        border_style="blue",
+                        padding=(1, 2)
+                    ))
+                    console.print()
 
         except Exception as e:
             console.print(f"\n❌ Failed to generate answer: {e}", style="bold red")

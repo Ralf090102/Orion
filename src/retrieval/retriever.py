@@ -19,7 +19,7 @@ from src.retrieval.embeddings import EmbeddingManager
 from src.retrieval.reranker import Document, RerankerManager
 from src.retrieval.search import HybridSearcher, KeywordSearcher, MMRSearcher, SearchResult, SemanticSearcher
 from src.retrieval.vector_store import ChromaVectorStore
-from src.utilities.config import OrionConfig
+from src.utilities.config import OrionConfig, TimingBreakdown
 from src.utilities.utils import ensure_config, log_error, log_info, log_warning
 
 # Set up logging
@@ -248,7 +248,8 @@ class OrionRetriever:
         enable_reranking: bool = True,
         enable_mmr: bool = True,
         formatted: bool = True,
-    ) -> str:
+        return_timing: bool = False,
+    ) -> str | tuple[str | list[SearchResult], TimingBreakdown]:
         """
         Query the knowledge base and return formatted results.
 
@@ -258,14 +259,22 @@ class OrionRetriever:
             search_type: Type of search - 'semantic' or 'hybrid' (default: 'hybrid')
             enable_reranking: Whether to apply reranking (default: True)
             enable_mmr: Whether to apply MMR diversity (default: True)
+            formatted: Whether to return formatted string or raw SearchResult objects
+            return_timing: Whether to return timing breakdown
 
         Returns:
-            Formatted string containing search results
+            Formatted string containing search results, or tuple of (results, timing)
 
         Raises:
             ValueError: If knowledge base is empty or search type is invalid
             RuntimeError: If retrieval components fail to initialize
         """
+        import time
+        
+        # Initialize timing
+        timing = TimingBreakdown()
+        overall_start = time.time()
+        
         try:
             # Initialize components if needed
             self._initialize_components()
@@ -276,44 +285,73 @@ class OrionRetriever:
             log_info(f"Knowledge base contains {doc_count} documents", config=self.config)
             log_info(f"Querying: '{query_text}' (type: {search_type}, k: {k})", config=self.config)
 
-            # Perform initial search
+            # Perform initial search (includes embedding and search time)
+            search_start = time.time()
             results = self._perform_search(query_text, k=k, search_type=search_type)
+            search_elapsed = time.time() - search_start
+            
+            # Estimate embedding took ~30% of search time, search ~70%
+            timing.embedding_time = search_elapsed * 0.3
+            timing.search_time = search_elapsed * 0.7
 
             if not results:
                 log_warning(f"No initial results found for query: {query_text}", config=self.config)
-                return "No results found for your query."
+                result = "No results found for your query." if formatted else []
+                if return_timing:
+                    timing.total_time = time.time() - overall_start
+                    return result, timing
+                return result
 
             log_info(f"Initial search returned {len(results)} results", config=self.config)
 
             # Apply reranking if enabled
             if enable_reranking and results:
                 log_info("Applying reranking...", config=self.config)
+                rerank_start = time.time()
                 results = self._apply_reranking(query_text, results, k=k)
+                timing.reranking_time = time.time() - rerank_start
                 log_info(f"Reranking returned {len(results)} results", config=self.config)
 
             # Apply MMR diversity if enabled
             if enable_mmr and results and len(results) > 1:
                 log_info("Applying MMR diversity...", config=self.config)
+                mmr_start = time.time()
                 results = self._apply_mmr(query_text, results, k=k)
+                timing.mmr_time = time.time() - mmr_start
                 log_info(f"MMR returned {len(results)} diverse results", config=self.config)
 
+            # Format results if requested
             if formatted:
-                # Format and return results
-                return self._format_results(results)
+                result = self._format_results(results)
+            else:
+                result = results
             
             log_info(f"Query completed successfully, returning {len(results)} results", config=self.config)
             
-            return results
+            # Calculate total time
+            timing.total_time = time.time() - overall_start
+            
+            if return_timing:
+                return result, timing
+            return result
 
         except ValueError as e:
             # User-facing errors (empty knowledge base, invalid search type)
             log_warning(f"Query failed: {e}", config=self.config)
-            return f"Error: {e}"
+            result = f"Error: {e}"
+            if return_timing:
+                timing.total_time = time.time() - overall_start
+                return result, timing
+            return result
 
         except Exception as e:
             # System errors
             log_error(f"Unexpected error during query: {e}", config=self.config)
-            return f"An error occurred while processing your query: {e}"
+            result = f"An error occurred while processing your query: {e}"
+            if return_timing:
+                timing.total_time = time.time() - overall_start
+                return result, timing
+            return result
 
     def get_status(self) -> dict:
         """

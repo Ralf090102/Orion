@@ -101,14 +101,14 @@ class PromptBuilder:
     # ========== RAG MODE ==========
 
     def build_rag_prompt(
-        self, query: str, contexts: List["SearchResult"], include_citations: Optional[bool] = None
+        self, query: str, contexts: list[dict], include_citations: Optional[bool] = None
     ) -> PromptComponents:
         """
         Build a stateless RAG prompt with citations.
 
         Args:
             query: User's question
-            contexts: Retrieved search results
+            contexts: Retrieved and prepared context dicts
             include_citations: Override citation setting (uses config if None)
 
         Returns:
@@ -127,27 +127,30 @@ class PromptBuilder:
         citations = []
 
         for idx, result in enumerate(contexts, start=1):
-            # Extract metadata
-            source = result.metadata.get("file_name", result.metadata.get("source_file", "Unknown"))
-            file_type = result.metadata.get("file_type", "Unknown")
+            # Extract metadata (using dict access)
+            metadata = result.get("metadata", {})
+            source = metadata.get("file_name", metadata.get("source_file", "Unknown"))
+            file_type = metadata.get("file_type", "Unknown")
+            content = result.get("content", result.get("text", ""))
+            score = result.get("score", result.get("final_score", 0.0))
 
             # Format citation
             if include_citations:
                 citation_marker = self.generation_config.citation_format.format(index=idx, source=source)
-                context_parts.append(f"{citation_marker} {result.content}")
+                context_parts.append(f"{citation_marker} {content}")
 
                 # Store citation info
                 citations.append(
                     {
                         "index": idx,
-                        "source": result.metadata.get("source_file", "Unknown"),
+                        "source": metadata.get("source_file", "Unknown"),
                         "file_name": source,
                         "file_type": file_type,
-                        "score": result.score,
+                        "score": score,
                     }
                 )
             else:
-                context_parts.append(result.content)
+                context_parts.append(content)
 
         # Combine context
         context_text = "\n\n".join(context_parts)

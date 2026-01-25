@@ -1,4 +1,5 @@
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -7,7 +8,7 @@ from src.generation.context_preparer import ContextPreparer
 from src.generation.prompt_builder import PromptBuilder
 from src.generation.query_classifier import QueryClassifier
 from src.retrieval.retriever import OrionRetriever
-from src.utilities.config import OrionConfig
+from src.utilities.config import OrionConfig, TimingBreakdown
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class GenerationResult:
     query_type: str
     mode: str
     metadata: dict[str, Any]
+    timing: TimingBreakdown | None = None
 
 
 class AnswerGenerator:
@@ -80,7 +82,13 @@ class AnswerGenerator:
         Returns:
             GenerationResult with answer and sources
         """
+        import time
+        
         logger.info(f"Generating RAG response for query: {query[:100]}...")
+        
+        # Initialize timing
+        timing = TimingBreakdown()
+        overall_start = time.time()
 
         # Classify query type for better prompt adaptation
         classification = self.query_classifier.classify(query)
@@ -94,38 +102,52 @@ class AnswerGenerator:
         logger.debug(f"Retrieving top {k} documents")
 
         try:
-            search_results = self.retriever.query(
-                query=query, k=k, formatted=False, include_metadata=True
+            search_results, retrieval_timing = self.retriever.query(
+                query_text=query, k=k, formatted=False, return_timing=True
             )
+            # Merge retrieval timing
+            timing.embedding_time = retrieval_timing.embedding_time
+            timing.search_time = retrieval_timing.search_time
+            timing.reranking_time = retrieval_timing.reranking_time
+            timing.mmr_time = retrieval_timing.mmr_time
         except Exception as e:
             logger.error(f"Retrieval failed: {e}")
+            timing.total_time = time.time() - overall_start
             return GenerationResult(
                 answer=f"I apologize, but I encountered an error while searching the knowledge base: {str(e)}",
                 sources=[],
                 query_type=classification.query_type,
                 mode="rag",
                 metadata={"error": str(e), "retrieval_failed": True},
+                timing=timing,
             )
 
         if not search_results:
             logger.warning("No documents retrieved")
+            timing.total_time = time.time() - overall_start
             return GenerationResult(
                 answer="I couldn't find any relevant information in the knowledge base to answer your question.",
                 sources=[],
                 query_type=classification.query_type,
                 mode="rag",
                 metadata={"no_results": True},
+                timing=timing,
             )
 
         logger.info(f"Retrieved {len(search_results)} documents")
 
+        # Convert SearchResult objects to dicts for context_preparer
+        search_results_dicts = [r.to_dict() for r in search_results]
+
         # Prepare contexts (clean, deduplicate, format citations)
+        prep_start = time.time()
         prepared_contexts = self.context_preparer.prepare(
-            contexts=search_results,
+            contexts=search_results_dicts,
             return_full=True,
             include_citations=False,  # We'll handle citations in prompt builder
             sort_by_score=True,
         )
+        timing.context_preparation_time = time.time() - prep_start
 
         # Limit to max_context_chunks
         max_chunks = self.generation_config.max_context_chunks
@@ -134,25 +156,30 @@ class AnswerGenerator:
 
         # Build RAG prompt with citations
         try:
+            prompt_start = time.time()
             prompt_components = self.prompt_builder.build_rag_prompt(
-                query=query, contexts=prepared_contexts, query_type=classification.query_type
+                query=query, contexts=prepared_contexts
             )
+            timing.prompt_building_time = time.time() - prompt_start
         except Exception as e:
             logger.error(f"Prompt building failed: {e}")
+            timing.total_time = time.time() - overall_start
             return GenerationResult(
                 answer=f"I encountered an error while preparing the response: {str(e)}",
                 sources=[],
                 query_type=classification.query_type,
                 mode="rag",
                 metadata={"error": str(e), "prompt_building_failed": True},
+                timing=timing,
             )
 
         # Convert to Ollama message format
-        messages = self.prompt_builder.to_messages(prompt_components)
+        messages = prompt_components.to_messages()
 
         # Generate answer using LLM
         logger.debug("Calling LLM for generation")
         try:
+            llm_start = time.time()
             response = self.llm_client.generate(
                 messages=messages,
                 model=self.config.rag.llm.model,
@@ -160,14 +187,18 @@ class AnswerGenerator:
                 top_p=self.config.rag.llm.top_p,
                 max_tokens=self.config.rag.llm.max_tokens,
             )
+            timing.llm_generation_time = time.time() - llm_start
         except Exception as e:
             logger.error(f"LLM generation failed: {e}")
+            timing.llm_generation_time = time.time() - llm_start
+            timing.total_time = time.time() - overall_start
             return GenerationResult(
                 answer=f"I encountered an error while generating the response: {str(e)}",
                 sources=prepared_contexts if include_sources else [],
                 query_type=classification.query_type,
                 mode="rag",
                 metadata={"error": str(e), "llm_generation_failed": True},
+                timing=timing,
             )
 
         answer = response.get("message", {}).get("content", "").strip()
@@ -180,6 +211,9 @@ class AnswerGenerator:
         if include_sources:
             sources = self._format_sources(prepared_contexts)
 
+        # Calculate total timing
+        timing.total_time = time.time() - overall_start
+        
         # Build metadata
         metadata = {
             "query_type": classification.query_type,
@@ -196,6 +230,7 @@ class AnswerGenerator:
             query_type=classification.query_type,
             mode="rag",
             metadata=metadata,
+            timing=timing,
         )
 
     def generate_chat_response(
@@ -215,6 +250,8 @@ class AnswerGenerator:
             GenerationResult with answer and optional sources
         """
         logger.info(f"Generating chat response for message: {message[:100]}...")
+        overall_start = time.time()
+        timing = TimingBreakdown()
 
         # Classify query type
         classification = self.query_classifier.classify(message)
@@ -231,17 +268,27 @@ class AnswerGenerator:
             logger.debug("Triggering RAG retrieval in chat mode")
             try:
                 k = self.config.rag.retrieval.default_k
-                search_results = self.retriever.query(
-                    query=message, k=k, formatted=False, include_metadata=True
+                search_results, retrieval_timing = self.retriever.query(
+                    query_text=message, k=k, formatted=False, return_timing=True
                 )
+                
+                # Copy retrieval timing
+                timing.embedding_time = retrieval_timing.embedding_time
+                timing.search_time = retrieval_timing.search_time
+                timing.reranking_time = retrieval_timing.reranking_time
+                timing.mmr_time = retrieval_timing.mmr_time
 
                 if search_results:
+                    context_start = time.time()
+                    # Convert SearchResult objects to dicts
+                    search_results_dicts = [r.to_dict() for r in search_results]
                     prepared_contexts = self.context_preparer.prepare(
-                        contexts=search_results,
+                        contexts=search_results_dicts,
                         return_full=True,
                         include_citations=False,
                         sort_by_score=True,
                     )
+                    timing.context_preparation_time = time.time() - context_start
                     max_chunks = self.generation_config.max_context_chunks
                     prepared_contexts = prepared_contexts[:max_chunks]
                     logger.info(f"Retrieved and prepared {len(prepared_contexts)} contexts for chat")
@@ -251,26 +298,31 @@ class AnswerGenerator:
 
         # Build chat prompt (with or without RAG context)
         try:
+            prompt_start = time.time()
             prompt_components = self.prompt_builder.build_chat_prompt(
                 query=message,
                 contexts=prepared_contexts if prepared_contexts else None,
             )
+            timing.prompt_building_time = time.time() - prompt_start
         except Exception as e:
             logger.error(f"Chat prompt building failed: {e}")
+            timing.total_time = time.time() - overall_start
             return GenerationResult(
                 answer=f"I encountered an error while preparing the response: {str(e)}",
                 sources=[],
                 query_type=classification.query_type,
                 mode="chat",
                 metadata={"error": str(e), "prompt_building_failed": True},
+                timing=timing,
             )
 
         # Convert to Ollama message format
-        messages = self.prompt_builder.to_messages(prompt_components)
+        messages = prompt_components.to_messages()
 
         # Generate answer using LLM
         logger.debug("Calling LLM for chat generation")
         try:
+            llm_start = time.time()
             response = self.llm_client.generate(
                 messages=messages,
                 model=self.config.rag.llm.model,
@@ -278,14 +330,18 @@ class AnswerGenerator:
                 top_p=self.config.rag.llm.top_p,
                 max_tokens=self.config.rag.llm.max_tokens,
             )
+            timing.llm_generation_time = time.time() - llm_start
         except Exception as e:
             logger.error(f"LLM generation failed: {e}")
+            timing.llm_generation_time = time.time() - llm_start
+            timing.total_time = time.time() - overall_start
             return GenerationResult(
                 answer=f"I encountered an error while generating the response: {str(e)}",
                 sources=[],
                 query_type=classification.query_type,
                 mode="chat",
                 metadata={"error": str(e), "llm_generation_failed": True},
+                timing=timing,
             )
 
         answer = response.get("message", {}).get("content", "").strip()
@@ -298,6 +354,9 @@ class AnswerGenerator:
         sources = []
         if include_sources and prepared_contexts:
             sources = self._format_sources(prepared_contexts)
+
+        # Calculate total timing
+        timing.total_time = time.time() - overall_start
 
         # Build metadata
         metadata = {
@@ -316,6 +375,7 @@ class AnswerGenerator:
             query_type=classification.query_type,
             mode="chat",
             metadata=metadata,
+            timing=timing,
         )
 
     def generate(
