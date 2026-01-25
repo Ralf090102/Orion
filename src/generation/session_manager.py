@@ -194,6 +194,39 @@ class SessionManager:
         logger.info(f"Deleted session: {session_id}")
         return True
 
+    def delete_all_sessions(self) -> int:
+        """
+        Delete all sessions.
+
+        Returns:
+            Number of sessions deleted
+        """
+        count = len(self.sessions)
+
+        if count == 0:
+            return 0
+
+        # Clear in-memory sessions
+        self.sessions.clear()
+
+        # Clear database if persisting
+        if self.persist_to_disk:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute("DELETE FROM sessions")
+                cursor.execute("DELETE FROM messages")
+                
+                conn.commit()
+                conn.close()
+                logger.info(f"Deleted all {count} sessions from database")
+            except Exception as e:
+                logger.error(f"Failed to delete all sessions from database: {e}")
+
+        logger.info(f"Deleted all {count} session(s)")
+        return count
+
     def add_message(
         self, session_id: str, role: str, content: str, tokens: int = 0
     ) -> bool:
@@ -275,6 +308,25 @@ class SessionManager:
 
         logger.info(f"Cleared messages in session: {session_id}")
         return True
+
+    def get_most_recent_session(self) -> Optional[ChatSession]:
+        """
+        Get the most recently updated session.
+
+        Returns:
+            Most recent ChatSession or None if no sessions exist
+        """
+        if not self.sessions:
+            return None
+
+        # Sort sessions by updated_at timestamp (most recent first)
+        sorted_sessions = sorted(
+            self.sessions.values(),
+            key=lambda s: datetime.fromisoformat(s.updated_at),
+            reverse=True
+        )
+
+        return sorted_sessions[0] if sorted_sessions else None
 
     def list_sessions(self) -> list[dict[str, Any]]:
         """

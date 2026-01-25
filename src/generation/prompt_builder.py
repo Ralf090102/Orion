@@ -232,15 +232,29 @@ class PromptBuilder:
         if use_rag:
             system_prompt = (
                 f"{self.llm_config.system_prompt}\n\n"
-                "You are in conversational mode. Use the conversation history to maintain context. "
-                "When relevant information is provided from the knowledge base, incorporate it naturally "
-                "into your responses. Be helpful, natural, and conversational."
+                "CHAT MODE INSTRUCTIONS:\n"
+                "• You're having a casual, friendly conversation with the user\n"
+                "• Use the conversation history to remember what you've discussed\n"
+                "• When you have information from the knowledge base, weave it naturally into your responses\n"
+                "• Be conversational, warm, and approachable - like talking to a friend\n"
+                "• Use contractions (it's, you're, that's) and casual language\n"
+                "• Keep responses concise unless the user asks for details\n"
+                "• It's okay to use phrases like 'Yeah', 'Actually', 'So basically', etc.\n"
+                "• Avoid overly formal language, jargon, or academic tone unless specifically requested\n"
+                "• Feel free to acknowledge connections to previous messages ('Like we discussed earlier...')"
             )
         else:
             system_prompt = (
                 f"{self.llm_config.system_prompt}\n\n"
-                "You are in conversational mode. Use the conversation history to maintain context "
-                "and provide helpful, natural responses."
+                "CHAT MODE INSTRUCTIONS:\n"
+                "• You're having a casual, friendly conversation with the user\n"
+                "• Use the conversation history to maintain context and build on previous messages\n"
+                "• Be warm, approachable, and natural - like chatting with a knowledgeable friend\n"
+                "• Use contractions and casual language (it's, you're, that's)\n"
+                "• Keep it conversational - avoid formal or academic tone\n"
+                "• Phrases like 'Yeah', 'Actually', 'So', 'Basically' are totally fine\n"
+                "• Be concise unless the user wants more depth\n"
+                "• Feel free to acknowledge previous conversation ('As I mentioned before...')"
             )
 
         # Trim history to fit token budget

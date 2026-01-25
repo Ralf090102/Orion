@@ -8,6 +8,7 @@ personal knowledge base.
 
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -578,6 +579,200 @@ def config(
         print_config_summary()
 
 
+# ========== SESSIONS COMMAND ==========
+@app.command()
+def sessions(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed session info"),
+):
+    """
+    List all saved chat sessions.
+
+    Shows session IDs, message counts, and timestamps.
+    Use the session ID with 'chat --session <id>' to resume.
+
+    Examples:
+        orion sessions
+        orion sessions --verbose
+    """
+    print_banner()
+
+    # Initialize session manager with persistence
+    session_manager = get_session_manager(persist_to_disk=True)
+
+    sessions_list = session_manager.list_sessions()
+
+    if not sessions_list:
+        console.print("📭 No saved sessions found.", style="yellow")
+        console.print("\nUse [cyan]orion chat --persist[/cyan] to save conversations.", style="dim")
+        return
+
+    # Sort by updated_at (most recent first)
+    sessions_list = sorted(
+        sessions_list,
+        key=lambda s: datetime.fromisoformat(s["updated_at"]),
+        reverse=True
+    )
+
+    console.print(f"📋 [bold cyan]Saved Chat Sessions ({len(sessions_list)}):[/bold cyan]\n")
+
+    # Create table
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Session ID", style="cyan", no_wrap=True)
+    table.add_column("Messages", justify="right", style="green", width=10)
+    table.add_column("Last Updated", style="yellow", width=14)
+    
+    if verbose:
+        table.add_column("Created", style="dim", width=16)
+
+    for i, session in enumerate(sessions_list, 1):
+        session_id = session["session_id"]
+        
+        # Parse timestamp
+        updated_at = datetime.fromisoformat(session["updated_at"])
+        time_ago = _format_time_ago(updated_at)
+        
+        row = [
+            str(i),
+            session_id,
+            str(session["message_count"]),
+            time_ago
+        ]
+        
+        if verbose:
+            created_at = datetime.fromisoformat(session["created_at"])
+            row.append(created_at.strftime("%Y-%m-%d %H:%M"))
+        
+        table.add_row(*row)
+
+    console.print(table)
+    
+    # Show most recent session info
+    if sessions_list:
+        most_recent = sessions_list[0]
+        console.print(f"\n💡 [dim]To resume most recent session:[/dim]")
+        console.print(f"   [cyan]python run.py chat --persist[/cyan]  (auto-resumes)")
+        console.print(f"   [cyan]python run.py chat --session {most_recent['session_id']}[/cyan]")
+
+
+def _format_time_ago(dt: datetime) -> str:
+    """Format datetime as human-readable time ago."""
+    from datetime import datetime, timedelta
+    
+    now = datetime.now()
+    diff = now - dt
+    
+    if diff < timedelta(minutes=1):
+        return "just now"
+    elif diff < timedelta(hours=1):
+        mins = int(diff.total_seconds() / 60)
+        return f"{mins}m ago"
+    elif diff < timedelta(days=1):
+        hours = int(diff.total_seconds() / 3600)
+        return f"{hours}h ago"
+    elif diff < timedelta(days=7):
+        days = diff.days
+        return f"{days}d ago"
+    else:
+        return dt.strftime("%Y-%m-%d")
+
+
+# ========== DELETE-SESSION COMMAND ==========
+@app.command("delete-session")
+def delete_session(
+    session_id: str = typer.Argument(..., help="Session ID to delete"),
+    confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """
+    Delete a specific chat session.
+
+    This will permanently delete the session and all its messages.
+
+    Examples:
+        orion delete-session abc123-def456-...
+        orion delete-session <session-id> --yes
+    """
+    print_banner()
+
+    # Initialize session manager with persistence
+    session_manager = get_session_manager(persist_to_disk=True)
+
+    # Check if session exists
+    session = session_manager.get_session(session_id)
+    if not session:
+        console.print(f"❌ Session not found: [cyan]{session_id}[/cyan]", style="bold red")
+        console.print("\nUse [cyan]orion sessions[/cyan] to see available sessions.", style="dim")
+        raise typer.Exit(1)
+
+    # Show session info
+    console.print(f"📝 Session: [cyan]{session_id}[/cyan]")
+    console.print(f"   Messages: {len(session.messages)}")
+    console.print(f"   Created: {session.created_at}")
+    console.print()
+
+    # Confirm deletion
+    if not confirm:
+        console.print("⚠️  [bold yellow]WARNING:[/bold yellow] This will permanently delete this session!")
+        response = typer.confirm("Are you sure you want to continue?")
+        if not response:
+            console.print("Cancelled.", style="yellow")
+            raise typer.Exit(0)
+
+    # Delete session
+    success = session_manager.delete_session(session_id)
+
+    if success:
+        console.print(f"\n✅ Deleted session: [cyan]{session_id}[/cyan]", style="bold green")
+    else:
+        console.print(f"\n❌ Failed to delete session", style="bold red")
+        raise typer.Exit(1)
+
+
+# ========== CLEAR-SESSIONS COMMAND ==========
+@app.command("clear-sessions")
+def clear_sessions(
+    confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """
+    Delete all chat sessions.
+
+    WARNING: This will permanently delete all saved conversations.
+
+    Examples:
+        orion clear-sessions
+        orion clear-sessions --yes
+    """
+    print_banner()
+
+    # Initialize session manager with persistence
+    session_manager = get_session_manager(persist_to_disk=True)
+
+    sessions_list = session_manager.list_sessions()
+
+    if not sessions_list:
+        console.print("📭 No sessions found.", style="yellow")
+        return
+
+    # Show count
+    console.print(f"📋 Found [cyan]{len(sessions_list)}[/cyan] session(s)\n")
+
+    # Confirm deletion
+    if not confirm:
+        console.print(
+            "⚠️  [bold yellow]WARNING:[/bold yellow] This will permanently delete ALL chat sessions and messages!"
+        )
+        response = typer.confirm("Are you sure you want to continue?")
+        if not response:
+            console.print("Cancelled.", style="yellow")
+            raise typer.Exit(0)
+
+    # Delete all sessions
+    with console.status("[bold yellow]Deleting sessions..."):
+        count = session_manager.delete_all_sessions()
+
+    console.print(f"\n✅ Deleted {count} session(s)", style="bold green")
+
+
 # ========== CHAT COMMAND (CONVERSATIONAL MODE) ==========
 @app.command()
 def chat(
@@ -621,6 +816,7 @@ def chat(
 
     # Create or resume session
     if session_id:
+        # User explicitly provided a session ID
         session = session_manager.get_session(session_id)
         if session:
             console.print(f"📝 Resumed session: [cyan]{session_id}[/cyan]", style="green")
@@ -630,16 +826,28 @@ def chat(
             session_id = session_manager.create_session()
             console.print(f"📝 Created new session: [cyan]{session_id}[/cyan]", style="green")
     else:
-        session_id = session_manager.create_session()
-        console.print(f"📝 Session: [cyan]{session_id}[/cyan]", style="green")
+        # No session ID provided - try to auto-resume most recent session if persist is enabled
+        if persist:
+            recent_session = session_manager.get_most_recent_session()
+            if recent_session and len(recent_session.messages) > 0:
+                session_id = recent_session.session_id
+                console.print(f"📝 Auto-resumed recent session: [cyan]{session_id[:8]}...[/cyan]", style="green")
+                console.print(f"   Messages: {len(recent_session.messages)}", style="dim")
+                console.print(f"   [dim]Tip: Use --session {session_id} to explicitly resume this session[/dim]\n")
+            else:
+                session_id = session_manager.create_session()
+                console.print(f"📝 New session: [cyan]{session_id[:8]}...[/cyan]", style="green")
+                console.print(f"   [dim]Tip: Use --session {session_id} to resume later[/dim]\n")
+        else:
+            # In-memory session
+            session_id = session_manager.create_session()
+            console.print(f"📝 Session: [cyan]{session_id[:8]}...[/cyan] (in-memory)", style="green")
 
     # Display mode info
     console.print(
         f"🤖 Chat Mode | RAG: [cyan]{config.rag.generation.rag_trigger_mode}[/cyan]",
         style="bold",
     )
-    if persist:
-        console.print("💾 Conversation will be saved to disk", style="dim")
 
     console.print("\n[bold cyan]Commands:[/bold cyan]")
     console.print("  • Type your message and press Enter")

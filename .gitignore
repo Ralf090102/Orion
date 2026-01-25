@@ -159,4 +159,4 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-temp_*.pkl
+temp/
