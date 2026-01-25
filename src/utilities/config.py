@@ -586,13 +586,12 @@ class OrionConfig(BaseConfig):
         except Exception as e:
             log_error(f"Generation config validation failed: {e}")
             raise
-        try:
+        try:    
             self.watchdog.validate()
         except Exception as e:
             log_error(f"Watchdog config validation failed: {e}")
             raise
         
-
 
 def get_config(from_env: bool = False) -> OrionConfig:
     """
