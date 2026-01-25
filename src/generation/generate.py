@@ -214,11 +214,16 @@ class AnswerGenerator:
         # Calculate total timing
         timing.total_time = time.time() - overall_start
         
+        # Extract citation statistics
+        citations_used = self._extract_citations(answer)
+        
         # Build metadata
         metadata = {
             "query_type": classification.query_type,
             "num_contexts_used": len(prepared_contexts),
             "num_contexts_retrieved": len(search_results),
+            "citations_in_answer": len(citations_used),
+            "citation_numbers": citations_used,
             "total_tokens": prompt_components.total_tokens,
             "llm_model": self.config.rag.llm.model,
         }
@@ -415,6 +420,112 @@ class AnswerGenerator:
         """
         return self.prompt_builder.get_history_summary()
 
+    def _extract_citations(self, text: str) -> list[int]:
+        """
+        Extract citation numbers from text.
+        
+        Finds all citations in format [1], [2], etc.
+        
+        Args:
+            text: Text containing citations
+            
+        Returns:
+            List of citation indices (as integers)
+        """
+        import re
+        
+        # Match [1], [2], [3], etc.
+        pattern = r'\[(\d+)\]'
+        matches = re.findall(pattern, text)
+        
+        # Convert to integers and deduplicate while preserving order
+        seen = set()
+        citations = []
+        for match in matches:
+            num = int(match)
+            if num not in seen:
+                citations.append(num)
+                seen.add(num)
+        
+        return citations
+    
+    def _validate_citations(
+        self, answer: str, num_sources: int
+    ) -> tuple[str, list[int]]:
+        """
+        Validate and clean citations in the answer.
+        
+        Removes citations that reference non-existent sources.
+        
+        Args:
+            answer: Answer text with citations
+            num_sources: Number of available sources
+            
+        Returns:
+            Tuple of (cleaned_answer, list_of_invalid_citations)
+        """
+        import re
+        
+        # Extract all citations
+        citations = self._extract_citations(answer)
+        
+        # Find invalid citations (beyond available sources)
+        invalid = [c for c in citations if c > num_sources or c < 1]
+        
+        if not invalid:
+            return answer, []
+        
+        # Remove invalid citations
+        cleaned = answer
+        for citation_num in invalid:
+            # Remove [N] where N is invalid
+            pattern = rf'\[{citation_num}\]'
+            cleaned = re.sub(pattern, '', cleaned)
+        
+        # Clean up any double spaces created by removal
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+        cleaned = cleaned.strip()
+        
+        logger.warning(
+            f"Removed {len(invalid)} invalid citation(s): {invalid}. "
+            f"Only {num_sources} source(s) available."
+        )
+        
+        return cleaned, invalid
+    
+    def _expand_citations(
+        self, answer: str, contexts: list[dict[str, Any]]
+    ) -> str:
+        """
+        Replace numeric citations with full citation text.
+        
+        Converts [1] to (Source Title, p. 42) format.
+        
+        Args:
+            answer: Answer with numeric citations [1], [2]
+            contexts: List of context dicts with citation_text
+            
+        Returns:
+            Answer with expanded citations
+        """
+        import re
+        
+        expanded = answer
+        
+        # Process each context
+        for idx, ctx in enumerate(contexts, 1):
+            citation_text = ctx.get('citation_text')
+            if not citation_text:
+                # Fallback to source file if no citation
+                citation_text = ctx.get('normalized_source_file') or ctx.get('source_file', 'Unknown')
+            
+            # Replace [N] with (citation text)
+            pattern = rf'\[{idx}\]'
+            replacement = f'({citation_text})'
+            expanded = re.sub(pattern, replacement, expanded)
+        
+        return expanded
+    
     def _post_process_answer(
         self, answer: str, contexts: list[dict[str, Any]]
     ) -> str:
@@ -433,9 +544,19 @@ class AnswerGenerator:
         Returns:
             Cleaned answer
         """
-        # For now, just basic cleanup
-        # TODO: Add citation validation once we implement citation extraction
         answer = answer.strip()
+        
+        # Validate citations if enabled
+        if self.generation_config.validate_citations:
+            answer, invalid_citations = self._validate_citations(answer, len(contexts))
+            
+            # Log invalid citations in metadata if any were found
+            if invalid_citations:
+                logger.debug(f"Removed invalid citations: {invalid_citations}")
+        
+        # Expand citations if enabled
+        if self.generation_config.expand_citations:
+            answer = self._expand_citations(answer, contexts)
 
         # Remove any trailing incomplete sentences
         if answer and not answer[-1] in ".!?\"'":

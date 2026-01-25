@@ -337,6 +337,10 @@ class GenerationConfig(BaseConfig):
     enable_citations: bool = True
     citation_format: str = "[{index}]"  # or "({source})" or "[{source}]"
     max_context_chunks: int = 5
+    
+    # Citation validation
+    validate_citations: bool = True  # Remove hallucinated citations
+    expand_citations: bool = False  # Replace [1] with full citation text
 
     # Chat mode settings
     max_history_messages: int = 10  # Number of conversation turns to keep
@@ -356,6 +360,8 @@ class GenerationConfig(BaseConfig):
             enable_citations=get_env_bool("ORION_GENERATION_CITATIONS", True),
             citation_format=get_env_str("ORION_GENERATION_CITATION_FORMAT", "[{index}]"),
             max_context_chunks=get_env_int("ORION_GENERATION_MAX_CONTEXT_CHUNKS", 5),
+            validate_citations=get_env_bool("ORION_GENERATION_VALIDATE_CITATIONS", True),
+            expand_citations=get_env_bool("ORION_GENERATION_EXPAND_CITATIONS", False),
             max_history_messages=get_env_int("ORION_GENERATION_MAX_HISTORY", 10),
             enable_rag_augmentation=get_env_bool("ORION_GENERATION_RAG_AUGMENTATION", True),
             rag_trigger_mode=get_env_str("ORION_GENERATION_RAG_TRIGGER", "auto"),
