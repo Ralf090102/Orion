@@ -25,6 +25,7 @@ from src.core.ingest import (
     ingest_documents,
     ingest_with_watchdog,
 )
+from src.generation.generate import AnswerGenerator
 from src.retrieval.retriever import OrionRetriever
 from src.retrieval.vector_store import create_vector_store
 from src.utilities.config import get_config
@@ -281,6 +282,118 @@ def query(
 
         except Exception as e:
             console.print(f"\n❌ Query failed: {e}", style="bold red")
+            import traceback
+
+            traceback.print_exc()
+            raise typer.Exit(1)
+
+
+# ========== ASK COMMAND (RAG MODE WITH LLM) ==========
+@app.command()
+def ask(
+    question: str = typer.Argument(..., help="Your question"),
+    k: int = typer.Option(5, "--top-k", "-k", help="Number of contexts to use"),
+    show_sources: bool = typer.Option(True, "--sources/--no-sources", help="Show source citations"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed information"),
+    gpu: bool = typer.Option(None, "--gpu/--no-gpu", help="Enable/disable GPU acceleration"),
+):
+    """
+    Ask a question and get an AI-generated answer with citations (RAG mode).
+
+    This uses the full RAG pipeline: retrieval → context preparation → 
+    prompt building → LLM generation.
+
+    Examples:
+        orion ask "What is machine learning?"
+        orion ask "Explain RAG" --top-k 10
+        orion ask "How does retrieval work?" --no-sources
+    """
+    print_banner()
+
+    # Update GPU setting if specified
+    config = get_config()
+    if gpu is not None:
+        config.gpu.enabled = gpu
+
+    # Check GPU
+    check_gpu_status()
+    console.print()
+
+    console.print(f"💬 Question: [bold cyan]{question}[/bold cyan]\n")
+
+    with console.status("[bold green]Generating answer...") as status:
+        try:
+            start_time = time.time()
+
+            # Initialize generator
+            generator = AnswerGenerator(config=config)
+
+            # Generate answer
+            result = generator.generate_rag_response(
+                query=question, k=k, include_sources=show_sources
+            )
+
+            elapsed = time.time() - start_time
+
+            # Display answer
+            console.print()
+            answer_panel = Panel(
+                result.answer,
+                title=f"✨ Answer ({result.query_type} query)",
+                border_style="green",
+                padding=(1, 2),
+            )
+            console.print(answer_panel)
+            console.print()
+
+            # Display sources if requested
+            if show_sources and result.sources:
+                console.print(f"📚 [bold cyan]Sources ({len(result.sources)}):[/bold cyan]\n")
+
+                for source in result.sources:
+                    # Format source info
+                    source_title = f"[{source['index']}] Score: {source['score']:.4f}"
+
+                    if source.get('citation'):
+                        source_title += f" | {source['citation']}"
+                    elif source.get('source_file'):
+                        source_title += f" | {source['source_file']}"
+
+                    if verbose:
+                        # Detailed view with preview
+                        source_text = source.get('text', '')
+                        console.print(
+                            Panel(
+                                source_text,
+                                title=source_title,
+                                border_style="cyan",
+                            )
+                        )
+                    else:
+                        # Compact view
+                        console.print(f"  {source_title}")
+
+                    console.print()
+
+            # Show metadata if verbose
+            if verbose:
+                meta_table = Table(
+                    title="Metadata", show_header=False, box=None, padding=(0, 1)
+                )
+                meta_table.add_column("Key", style="dim")
+                meta_table.add_column("Value", style="green")
+
+                meta_table.add_row("Query Type", result.metadata.get("query_type", "Unknown"))
+                meta_table.add_row("Contexts Used", str(result.metadata.get("num_contexts_used", 0)))
+                meta_table.add_row("Total Tokens", str(result.metadata.get("total_tokens", 0)))
+                meta_table.add_row("LLM Model", result.metadata.get("llm_model", "Unknown"))
+                meta_table.add_row("Processing Time", f"{elapsed:.2f}s")
+
+                console.print(meta_table)
+                console.print()
+
+        except Exception as e:
+            console.print(f"\n❌ Failed to generate answer: {e}", style="bold red")
             import traceback
 
             traceback.print_exc()
