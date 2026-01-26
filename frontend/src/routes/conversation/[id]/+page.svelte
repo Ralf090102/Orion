@@ -40,6 +40,8 @@
 			files: msgFiles,
 			createdAt: new Date(),
 			updatedAt: new Date(),
+			children: [],
+			ancestors: [],
 		} as Message;
 	}
 
@@ -73,32 +75,58 @@
 			wsChat.disconnect();
 		}
 
+		console.log('[WebSocket] Initializing connection for session:', page.params.id);
+
 		wsChat = new WebSocketChat({
 			sessionId: page.params.id,
 			onMessage: (content, done) => {
+				console.log('[WebSocket] Received message:', { content, done });
+				
 				if (done) {
+					console.log('[WebSocket] Generation complete');
 					$loading = false;
 					pending = false;
 					return;
 				}
 
-				// Update the last assistant message
-				const lastMsg = messages[messages.length - 1];
+				// Update the last assistant message with proper reactivity
+				const lastIndex = messages.length - 1;
+				const lastMsg = messages[lastIndex];
+				
 				if (lastMsg && lastMsg.from === 'assistant') {
-					lastMsg.content += content;
-					messages = [...messages]; // Trigger reactivity
+					// Create a new message object to trigger reactivity
+					const updatedMessage = {
+						...lastMsg,
+						content: lastMsg.content + content,
+						updatedAt: new Date(),
+					};
+					
+					// Create new array with updated message
+					messages = [
+						...messages.slice(0, lastIndex),
+						updatedMessage
+					];
+					
+					console.log('[WebSocket] Updated assistant message:', {
+						length: updatedMessage.content.length,
+						preview: updatedMessage.content.substring(0, 50),
+						totalMessages: messages.length
+					});
+				} else {
+					console.warn('[WebSocket] No assistant message to update, messages:', messages);
 				}
 			},
 			onError: (errorMsg) => {
+				console.error('[WebSocket] Error:', errorMsg);
 				$error = errorMsg;
 				$loading = false;
 				pending = false;
 			},
 			onConnect: () => {
-				console.log('Connected to chat');
+				console.log('[WebSocket] Connected to chat server');
 			},
 			onDisconnect: () => {
-				console.log('Disconnected from chat');
+				console.log('[WebSocket] Disconnected from chat server');
 			}
 		});
 
@@ -107,7 +135,13 @@
 
 	// Send a message through WebSocket
 	async function writeMessage({ prompt }: { prompt?: string }): Promise<void> {
-		if (!prompt || !wsChat) return;
+		if (!prompt || !wsChat) {
+			console.warn('[WriteMessage] Missing prompt or WebSocket not initialized');
+			return;
+		}
+
+		console.log('[WriteMessage] Sending message:', prompt);
+		console.log('[WriteMessage] WebSocket connected:', wsChat?.isConnected());
 
 		try {
 			$isAborted = false;
@@ -117,10 +151,12 @@
 			// Add user message
 			const userMessage = createMessage('user', prompt, files.length > 0 ? files : undefined);
 			messages = [...messages, userMessage];
+			console.log('[WriteMessage] Added user message, total messages:', messages.length);
 
 			// Add empty assistant message
 			const assistantMessage = createMessage('assistant', '');
 			messages = [...messages, assistantMessage];
+			console.log('[WriteMessage] Added empty assistant message, total messages:', messages.length);
 
 			// Convert files to base64 if present
 			const base64Files = await Promise.all(
@@ -134,13 +170,19 @@
 				)
 			);
 
+			if (base64Files.length > 0) {
+				console.log('[WriteMessage] Converted files to base64:', base64Files.length);
+			}
+
 			// Send via WebSocket
+			console.log('[WriteMessage] Sending to WebSocket...');
 			wsChat.sendMessage(prompt, base64Files);
 			files = [];
+			console.log('[WriteMessage] Message sent successfully');
 
 		} catch (err) {
+			console.error('[WriteMessage] Error:', err);
 			$error = (err as Error).message || ERROR_MESSAGES.default;
-			console.error(err);
 			$loading = false;
 			pending = false;
 		}
@@ -174,6 +216,24 @@
 			await writeMessage({ prompt: $pendingMessage.content });
 			$pendingMessage = undefined;
 		}
+	});
+
+	// Reload messages and reconnect WebSocket when session ID changes
+	$effect(() => {
+		const sessionId = page.params.id;
+		if (!browser || !sessionId) return;
+
+		console.log('[Effect] Session ID changed to:', sessionId);
+		
+		// Reset state
+		messages = [];
+		files = [];
+		$loading = false;
+		pending = false;
+
+		// Reload for new session
+		loadMessages();
+		initializeWebSocket();
 	});
 
 	onDestroy(() => {
@@ -243,328 +303,3 @@
 	models={data.models}
 	{currentModel}
 />
-				page.params.id,
-				{
-					base,
-					inputs: prompt,
-					messageId,
-					isRetry,
-					files: isRetry ? userMessage?.files : base64Files,
-					selectedMcpServerNames: $enabledServers.map((s) => s.name),
-					selectedMcpServers: $enabledServers.map((s) => ({
-						name: s.name,
-						url: s.url,
-						headers: s.headers,
-					})),
-				},
-				messageUpdatesAbortController.signal
-			).catch((err) => {
-				error.set(err.message);
-			});
-			if (messageUpdatesIterator === undefined) return;
-
-			files = [];
-			let buffer = "";
-			// Initialize lastUpdateTime outside the loop to persist between updates
-			let lastUpdateTime = new Date();
-
-			for await (const update of messageUpdatesIterator) {
-				if ($isAborted) {
-					messageUpdatesAbortController.abort();
-					return;
-				}
-
-				// Remove null characters added due to remote keylogging prevention
-				// See server code for more details
-				if (update.type === MessageUpdateType.Stream) {
-					update.token = update.token.replaceAll("\0", "");
-				}
-
-				const isKeepAlive =
-					update.type === MessageUpdateType.Status &&
-					update.status === MessageUpdateStatus.KeepAlive;
-
-				if (!isKeepAlive) {
-					if (update.type === MessageUpdateType.Stream) {
-						const existingUpdates = messageToWriteTo.updates ?? [];
-						const lastUpdate = existingUpdates.at(-1);
-						if (lastUpdate?.type === MessageUpdateType.Stream) {
-							// Create fresh objects/arrays so the UI reacts to merged tokens
-							const merged = {
-								...lastUpdate,
-								token: (lastUpdate.token ?? "") + (update.token ?? ""),
-							};
-							messageToWriteTo.updates = [...existingUpdates.slice(0, -1), merged];
-						} else {
-							messageToWriteTo.updates = [...existingUpdates, update];
-						}
-					} else {
-						messageToWriteTo.updates = [...(messageToWriteTo.updates ?? []), update];
-					}
-				}
-				const currentTime = new Date();
-
-				// If we receive a non-stream update (e.g. tool/status/final answer),
-				// flush any buffered stream tokens so the UI doesn't appear to cut
-				// mid-sentence while tools are running or the final answer arrives.
-				if (
-					update.type !== MessageUpdateType.Stream &&
-					!$settings.disableStream &&
-					buffer.length > 0
-				) {
-					messageToWriteTo.content += buffer;
-					buffer = "";
-					lastUpdateTime = currentTime;
-				}
-
-				if (update.type === MessageUpdateType.Stream && !$settings.disableStream) {
-					buffer += update.token;
-					// Check if this is the first update or if enough time has passed
-					if (currentTime.getTime() - lastUpdateTime.getTime() > updateDebouncer.maxUpdateTime) {
-						messageToWriteTo.content += buffer;
-						buffer = "";
-						lastUpdateTime = currentTime;
-					}
-					pending = false;
-				} else if (update.type === MessageUpdateType.FinalAnswer) {
-					// Mirror server-side merge behavior so the UI reflects the
-					// final text once tools complete, while preserving any
-					// pre‑tool streamed content when appropriate.
-					const hadTools =
-						messageToWriteTo.updates?.some((u) => u.type === MessageUpdateType.Tool) ?? false;
-
-					if (hadTools) {
-						const existing = messageToWriteTo.content;
-						const finalText = update.text ?? "";
-						const trimmedExistingSuffix = existing.replace(/\s+$/, "");
-						const trimmedFinalPrefix = finalText.replace(/^\s+/, "");
-						const alreadyStreamed =
-							finalText &&
-							(existing.endsWith(finalText) ||
-								(trimmedFinalPrefix.length > 0 &&
-									trimmedExistingSuffix.endsWith(trimmedFinalPrefix)));
-
-						if (existing && existing.length > 0) {
-							if (alreadyStreamed) {
-								// A. Already streamed the same final text; keep as-is.
-								messageToWriteTo.content = existing;
-							} else if (
-								finalText &&
-								(finalText.startsWith(existing) ||
-									(trimmedExistingSuffix.length > 0 &&
-										trimmedFinalPrefix.startsWith(trimmedExistingSuffix)))
-							) {
-								// B. Final text already includes streamed prefix; use it verbatim.
-								messageToWriteTo.content = finalText;
-							} else {
-								// C. Merge with a paragraph break for readability.
-								const needsGap = !/\n\n$/.test(existing) && !/^\n/.test(finalText ?? "");
-								messageToWriteTo.content = existing + (needsGap ? "\n\n" : "") + finalText;
-							}
-						} else {
-							messageToWriteTo.content = finalText;
-						}
-					} else {
-						// No tools: final answer replaces streamed content so
-						// the provider's final text is authoritative.
-						messageToWriteTo.content = update.text ?? "";
-					}
-				} else if (
-					update.type === MessageUpdateType.Status &&
-					update.status === MessageUpdateStatus.Error
-				) {
-					// Check if this is a 402 payment required error
-					if (update.statusCode === 402) {
-						showSubscribeModal = true;
-					} else {
-						$error = update.message ?? "An error has occurred";
-					}
-				} else if (update.type === MessageUpdateType.Title) {
-					const convInData = conversations.find(({ id }) => id === page.params.id);
-					if (convInData) {
-						convInData.title = update.title;
-
-						$titleUpdate = {
-							title: update.title,
-							convId: page.params.id,
-						};
-					}
-				} else if (update.type === MessageUpdateType.File) {
-					messageToWriteTo.files = [
-						...(messageToWriteTo.files ?? []),
-						{ type: "hash", value: update.sha, mime: update.mime, name: update.name },
-					];
-				} else if (update.type === MessageUpdateType.RouterMetadata) {
-					// Update router metadata immediately when received
-					messageToWriteTo.routerMetadata = {
-						route: update.route,
-						model: update.model,
-					};
-				}
-			}
-		} catch (err) {
-			if (err instanceof Error && err.message.includes("overloaded")) {
-				$error = "Too much traffic, please try again.";
-			} else if (err instanceof Error && err.message.includes("429")) {
-				$error = ERROR_MESSAGES.rateLimited;
-			} else if (err instanceof Error) {
-				$error = err.message;
-			} else {
-				$error = ERROR_MESSAGES.default;
-			}
-			console.error(err);
-		} finally {
-			$loading = false;
-			pending = false;
-			await invalidateAll();
-		}
-	}
-
-	async function stopGeneration() {
-		await fetch(`${base}/conversation/${page.params.id}/stop-generating`, {
-			method: "POST",
-		}).then((r) => {
-			if (r.ok) {
-				setTimeout(() => {
-					$isAborted = true;
-					$loading = false;
-				}, 500);
-			} else {
-				$isAborted = true;
-				$loading = false;
-			}
-		});
-	}
-
-	function handleKeydown(event: KeyboardEvent) {
-		// Stop generation on ESC key when loading
-		if (event.key === "Escape" && $loading) {
-			event.preventDefault();
-			stopGeneration();
-		}
-	}
-
-	onMount(async () => {
-		if ($pendingMessage) {
-			files = $pendingMessage.files;
-			await writeMessage({ prompt: $pendingMessage.content });
-			$pendingMessage = undefined;
-		}
-
-		const streaming = isConversationStreaming(messages);
-		if (streaming) {
-			addBackgroundGeneration({ id: page.params.id, startedAt: Date.now() });
-			$loading = true;
-		}
-	});
-
-	async function onMessage(content: string) {
-		await writeMessage({ prompt: content });
-	}
-
-	async function onRetry(payload: { id: Message["id"]; content?: string }) {
-		if (requireAuthUser()) return;
-
-		const lastMsgId = payload.id;
-		messagesPath = createMessagesPath(messages, lastMsgId);
-
-		await writeMessage({
-			prompt: payload.content,
-			messageId: payload.id,
-			isRetry: true,
-		});
-	}
-
-	async function onShowAlternateMsg(payload: { id: Message["id"] }) {
-		const msgId = payload.id;
-		messagesPath = createMessagesPath(messages, msgId);
-	}
-
-	const settings = useSettingsStore();
-	let messages = $state(data.messages);
-	$effect(() => {
-		messages = data.messages;
-	});
-
-	function isConversationStreaming(msgs: Message[]): boolean {
-		const lastAssistant = [...msgs].reverse().find((msg) => msg.from === "assistant");
-		if (!lastAssistant) return false;
-		const hasFinalAnswer =
-			lastAssistant.updates?.some((update) => update.type === MessageUpdateType.FinalAnswer) ??
-			false;
-		const hasError =
-			lastAssistant.updates?.some(
-				(update) =>
-					update.type === MessageUpdateType.Status && update.status === MessageUpdateStatus.Error
-			) ?? false;
-		return !hasFinalAnswer && !hasError;
-	}
-
-	$effect(() => {
-		const streaming = isConversationStreaming(messages);
-		if (streaming) {
-			$loading = true;
-		} else if (!pending) {
-			$loading = false;
-		}
-
-		if (!streaming && browser) {
-			removeBackgroundGeneration(page.params.id);
-		}
-	});
-
-	// create a linear list of `messagesPath` from `messages` that is a tree of threaded messages
-	let messagesPath = $derived(createMessagesPath(messages));
-	let messagesAlternatives = $derived(createMessagesAlternatives(messages));
-
-	$effect(() => {
-		if (browser && messagesPath.at(-1)?.id) {
-			localStorage.setItem("leafId", messagesPath.at(-1)?.id as string);
-		}
-	});
-
-	beforeNavigate((navigation) => {
-		if (!page.params.id) return;
-
-		const navigatingAway =
-			navigation.to?.route.id !== page.route.id || navigation.to?.params?.id !== page.params.id;
-
-		if ($loading && navigatingAway) {
-			addBackgroundGeneration({ id: page.params.id, startedAt: Date.now() });
-		}
-
-		$isAborted = true;
-		$loading = false;
-	});
-
-	let title = $derived.by(() => {
-		const rawTitle = conversations.find((conv) => conv.id === page.params.id)?.title ?? data.title;
-		return rawTitle ? rawTitle.charAt(0).toUpperCase() + rawTitle.slice(1) : rawTitle;
-	});
-</script>
-
-<svelte:window onkeydown={handleKeydown} />
-
-<svelte:head>
-	<title>{title}</title>
-</svelte:head>
-
-<ChatWindow
-	loading={$loading}
-	{pending}
-	messages={messagesPath as Message[]}
-	{messagesAlternatives}
-	shared={data.shared}
-	preprompt={data.preprompt}
-	bind:files
-	onmessage={onMessage}
-	onretry={onRetry}
-	onshowAlternateMsg={onShowAlternateMsg}
-	onstop={stopGeneration}
-	models={data.models}
-	currentModel={findCurrentModel(data.models, data.oldModels, data.model)}
-/>
-
-{#if showSubscribeModal}
-	<SubscribeModal close={() => (showSubscribeModal = false)} />
-{/if}

@@ -39,20 +39,35 @@ export class WebSocketChat {
 			this.ws.onmessage = (event) => {
 				try {
 					const data = JSON.parse(event.data);
+					console.log('[WebSocket] Received:', data);
 					
 					// Handle different message types from backend
-					if (data.type === 'message') {
-						// Streaming content
+					if (data.type === 'token') {
+						// Streaming content token by token
 						this.options.onMessage(data.content || '', false);
 					} else if (data.type === 'done') {
 						// Generation complete
 						this.options.onMessage('', true);
 					} else if (data.type === 'error') {
 						// Error from backend
-						this.options.onError?.(data.error || 'Unknown error');
+						this.options.onError?.(data.content || data.data?.message || 'Unknown error');
+					} else if (data.type === 'connected') {
+						// Connection acknowledged
+						console.log('[WebSocket] Server acknowledged connection:', data.data);
+					} else if (data.type === 'sources') {
+						// RAG sources received
+						console.log('[WebSocket] Sources received:', data.data?.sources?.length || 0);
+					} else if (data.type === 'metadata') {
+						// Metadata received
+						console.log('[WebSocket] Metadata:', data.data);
+					} else if (data.type === 'pong') {
+						// Pong response to ping
+						console.log('[WebSocket] Pong received');
+					} else {
+						console.warn('[WebSocket] Unknown message type:', data.type);
 					}
 				} catch (err) {
-					console.error('Failed to parse WebSocket message:', err);
+					console.error('Failed to parse WebSocket message:', err, event.data);
 					this.options.onError?.('Failed to parse server response');
 				}
 			};
@@ -82,19 +97,26 @@ export class WebSocketChat {
 
 	sendMessage(message: string, files?: File[]) {
 		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-			console.error('WebSocket not connected');
+			console.error('[WebSocket] Not connected, readyState:', this.ws?.readyState);
 			this.options.onError?.('Not connected to server');
 			return;
 		}
 
 		try {
-			this.ws.send(JSON.stringify({
+			const payload = {
 				type: 'message',
 				content: message,
-				files: files || []
-			}));
+				data: {
+					files: files || [],
+					rag_mode: 'auto',
+					include_sources: true
+				}
+			};
+			
+			console.log('[WebSocket] Sending:', payload);
+			this.ws.send(JSON.stringify(payload));
 		} catch (err) {
-			console.error('Failed to send message:', err);
+			console.error('[WebSocket] Failed to send message:', err);
 			this.options.onError?.('Failed to send message');
 		}
 	}

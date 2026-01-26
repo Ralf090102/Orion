@@ -77,12 +77,16 @@
 	const nModels: number = page.data.models.filter((el: Model) => !el.unlisted).length;
 
 	async function handleVisible() {
+		// Don't fetch if we already know there's no more data
+		if (!hasMore) return;
+		
 		p++;
 		try {
 			const response = await fetch(`${BACKEND_URL}/api/chat/sessions?limit=${CONV_NUM_PER_PAGE}&offset=${p * CONV_NUM_PER_PAGE}`);
 			
 			if (!response.ok) {
 				console.error('Failed to fetch sessions');
+				hasMore = false;
 				return;
 			}
 
@@ -95,13 +99,24 @@
 				model: session.metadata?.model || 'default'
 			})) || [];
 			
-			if (newConvs.length === 0) {
+			// If we got fewer results than requested, there's no more data
+			if (newConvs.length < CONV_NUM_PER_PAGE) {
 				hasMore = false;
 			}
 
-			conversations = [...conversations, ...newConvs];
+			// Filter out duplicates based on session ID
+			const existingIds = new Set(conversations.map(c => c.id));
+			const uniqueNewConvs = newConvs.filter(conv => !existingIds.has(conv.id));
+			
+			if (uniqueNewConvs.length === 0) {
+				// No new conversations, we've reached the end
+				hasMore = false;
+			} else {
+				conversations = [...conversations, ...uniqueNewConvs];
+			}
 		} catch (error) {
 			console.error('Error fetching conversations:', error);
+			hasMore = false;
 		}
 	}
 
