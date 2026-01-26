@@ -12,29 +12,39 @@ from pydantic import BaseModel, Field, field_validator
 
 # ========== SEARCH/QUERY MODELS ==========
 class QueryRequest(BaseModel):
-    """Request model for semantic query (retrieval only, no LLM)."""
+    """Request model for semantic query (retrieval only, no LLM).
+    
+    Separates required argument from optional settings (matches run.py query command).
+    """
 
+    # ===== REQUIRED ARGUMENT =====
     query: str = Field(
         ...,
         min_length=1,
-        description="Search query string",
+        description="Search query string (required)",
         examples=["What is machine learning?"],
     )
-    k: int = Field(
-        default=5,
+    
+    # ===== OPTIONAL SETTINGS (override config defaults) =====
+    k: Optional[int] = Field(
+        default=None,
         ge=1,
-        le=20,
-        description="Number of results to return (1-20)",
+        le=50,
+        description="Number of results to return (uses config default if None)",
     )
     enable_reranking: Optional[bool] = Field(
         default=None,
-        description="Override reranking setting (uses config default if None)",
+        description="Enable cross-encoder reranking (uses config default if None)",
     )
     similarity_threshold: Optional[float] = Field(
         default=None,
         ge=0.0,
         le=1.0,
-        description="Minimum similarity score threshold (0.0-1.0)",
+        description="Minimum similarity score threshold (uses config default if None)",
+    )
+    verbose: Optional[bool] = Field(
+        default=False,
+        description="Return detailed timing and metadata",
     )
 
     @field_validator("query")
@@ -50,9 +60,10 @@ class QueryRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "query": "What is machine learning?",
-                "k": 5,
-                "enable_reranking": True,
-                "similarity_threshold": 0.2,
+                "k": None,  # Uses config default
+                "enable_reranking": None,  # Uses config default
+                "similarity_threshold": None,  # Uses config default
+                "verbose": False,
             }
         }
 
@@ -114,40 +125,74 @@ class QueryResponse(BaseModel):
         }
 
 
+# ========== TIMING/PERFORMANCE MODELS ==========
+class TimingBreakdown(BaseModel):
+    """Model for detailed timing breakdown."""
+
+    embedding_time: float = Field(default=0.0, description="Embedding generation time")
+    search_time: float = Field(default=0.0, description="Vector search time")
+    reranking_time: float = Field(default=0.0, description="Reranking time")
+    mmr_time: float = Field(default=0.0, description="MMR selection time")
+    context_preparation_time: float = Field(default=0.0, description="Context prep time")
+    prompt_building_time: float = Field(default=0.0, description="Prompt building time")
+    llm_generation_time: float = Field(default=0.0, description="LLM generation time")
+    total_time: float = Field(default=0.0, description="Total processing time")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "embedding_time": 0.123,
+                "search_time": 0.045,
+                "reranking_time": 0.234,
+                "mmr_time": 0.012,
+                "context_preparation_time": 0.008,
+                "prompt_building_time": 0.015,
+                "llm_generation_time": 1.904,
+                "total_time": 2.341,
+            }
+        }
+
+
 # ========== RAG ASK MODELS ==========
 class AskRequest(BaseModel):
-    """Request model for RAG ask (retrieval + LLM generation)."""
+    """Request model for RAG ask (retrieval + LLM generation).
+    
+    Separates required argument from optional settings (matches run.py ask command).
+    """
 
+    # ===== REQUIRED ARGUMENT =====
     query: str = Field(
         ...,
         min_length=1,
-        description="Question to answer using RAG",
+        description="Question to answer using RAG (required)",
         examples=["Explain machine learning in simple terms"],
     )
-    k: int = Field(
-        default=5,
+    
+    # ===== OPTIONAL SETTINGS (override config defaults) =====
+    k: Optional[int] = Field(
+        default=None,
         ge=1,
-        le=20,
-        description="Number of context chunks to retrieve (1-20)",
+        le=50,
+        description="Number of context chunks to retrieve (uses config default if None)",
     )
-    include_sources: bool = Field(
+    include_sources: Optional[bool] = Field(
         default=True,
         description="Include source citations in response",
-    )
-    stream: bool = Field(
-        default=False,
-        description="Stream response tokens (use /ask/stream endpoint)",
     )
     temperature: Optional[float] = Field(
         default=None,
         ge=0.0,
         le=2.0,
-        description="LLM temperature (0.0-2.0, uses config default if None)",
+        description="LLM temperature (uses config default if None)",
     )
     max_tokens: Optional[int] = Field(
         default=None,
         ge=1,
         description="Maximum tokens in response (uses config default if None)",
+    )
+    verbose: Optional[bool] = Field(
+        default=False,
+        description="Include detailed timing breakdown (matches run.py --verbose flag)",
     )
 
     @field_validator("query")
@@ -163,11 +208,11 @@ class AskRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "query": "Explain machine learning in simple terms",
-                "k": 5,
+                "k": None,  # Uses config default
                 "include_sources": True,
-                "stream": False,
-                "temperature": 0.7,
-                "max_tokens": 500,
+                "temperature": None,  # Uses config default
+                "max_tokens": None,  # Uses config default
+                "verbose": False,
             }
         }
 
@@ -216,6 +261,10 @@ class AskResponse(BaseModel):
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional metadata (num_contexts_used, rag_triggered, etc.)",
+    )
+    timing: Optional[TimingBreakdown] = Field(
+        default=None,
+        description="Detailed timing breakdown (only included when verbose=True)",
     )
     timestamp: datetime = Field(default_factory=datetime.now)
 
@@ -285,34 +334,6 @@ class StreamChunk(BaseModel):
                     "data": {"processing_time": 2.34},
                 },
             ]
-        }
-
-
-# ========== TIMING/PERFORMANCE MODELS ==========
-class TimingBreakdown(BaseModel):
-    """Model for detailed timing breakdown."""
-
-    embedding_time: float = Field(default=0.0, description="Embedding generation time")
-    search_time: float = Field(default=0.0, description="Vector search time")
-    reranking_time: float = Field(default=0.0, description="Reranking time")
-    mmr_time: float = Field(default=0.0, description="MMR selection time")
-    context_preparation_time: float = Field(default=0.0, description="Context prep time")
-    prompt_building_time: float = Field(default=0.0, description="Prompt building time")
-    llm_generation_time: float = Field(default=0.0, description="LLM generation time")
-    total_time: float = Field(default=0.0, description="Total processing time")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "embedding_time": 0.123,
-                "search_time": 0.045,
-                "reranking_time": 0.234,
-                "mmr_time": 0.012,
-                "context_preparation_time": 0.008,
-                "prompt_building_time": 0.015,
-                "llm_generation_time": 1.904,
-                "total_time": 2.341,
-            }
         }
 
 

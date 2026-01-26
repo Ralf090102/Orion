@@ -158,10 +158,6 @@ class ChatRequest(BaseModel):
         description="User message content",
         examples=["What is machine learning?"],
     )
-    stream: bool = Field(
-        default=False,
-        description="Enable streaming response (use /stream endpoint)",
-    )
     rag_mode: Optional[str] = Field(
         default=None,
         description="RAG trigger mode: always/auto/manual/never (uses config default if None)",
@@ -191,7 +187,6 @@ class ChatRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "message": "What is machine learning?",
-                "stream": False,
                 "rag_mode": "auto",
                 "include_sources": True,
                 "temperature": 0.7,

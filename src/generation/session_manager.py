@@ -131,12 +131,21 @@ class SessionManager:
         conn.close()
         logger.debug("SQLite database schema initialized")
 
-    def create_session(self, session_id: Optional[str] = None) -> str:
+    def create_session(
+        self,
+        session_id: Optional[str] = None,
+        user: Optional[str] = None,
+        topic: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> str:
         """
         Create a new chat session.
 
         Args:
             session_id: Optional custom session ID (generates UUID if None)
+            user: Optional user identifier
+            topic: Optional topic/category for the session
+            metadata: Optional additional metadata dictionary
 
         Returns:
             Session ID
@@ -145,12 +154,20 @@ class SessionManager:
             session_id = str(uuid.uuid4())
 
         now = datetime.now().isoformat()
+        
+        # Build metadata from parameters
+        session_metadata = metadata.copy() if metadata else {}
+        if user:
+            session_metadata["user"] = user
+        if topic:
+            session_metadata["topic"] = topic
+        
         session = ChatSession(
             session_id=session_id,
             created_at=now,
             updated_at=now,
             messages=[],
-            metadata={},
+            metadata=session_metadata,
         )
 
         self.sessions[session_id] = session
@@ -158,7 +175,7 @@ class SessionManager:
         if self.persist_to_disk:
             self._save_session_to_db(session)
 
-        logger.info(f"Created session: {session_id}")
+        logger.info(f"Created session: {session_id} (user={user}, topic={topic})")
         return session_id
 
     def get_session(self, session_id: str) -> Optional[ChatSession]:

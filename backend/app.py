@@ -128,20 +128,67 @@ async def root():
 
 # ========== ROUTE REGISTRATION ==========
 # Import and include routers
-from backend.api import health, ingestion, rag, settings
+from backend.api import chat, health, ingestion, rag, settings
 
-app.include_router(health.router)
+app.include_router(settings.router)
 app.include_router(ingestion.router)
 app.include_router(rag.router)
-app.include_router(settings.router)
+app.include_router(chat.router)
+app.include_router(health.router)
 
-# Uncomment as you create each router
-# from backend.api import chat
-# app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 
-# WebSocket routes
-# from backend.websockets import chat as ws_chat
-# app.include_router(ws_chat.router)
+# ========== WEBSOCKET ROUTES ==========
+from fastapi import WebSocket
+
+from backend.dependencies import (
+    get_config_dependency,
+    get_generator_dependency,
+    get_session_manager_dependency,
+)
+from backend.websockets.chat import chat_websocket_endpoint
+
+
+@app.websocket("/ws/chat/{session_id}")
+async def websocket_chat(websocket: WebSocket, session_id: str):
+    """
+    WebSocket endpoint for real-time chat.
+    
+    Compatible with HuggingFace chat-ui and standard WebSocket clients.
+    
+    Args:
+        websocket: WebSocket connection
+        session_id: Chat session identifier
+    
+    Example usage (JavaScript):
+        const ws = new WebSocket('ws://localhost:8000/ws/chat/abc123');
+        
+        ws.onopen = () => {
+            ws.send(JSON.stringify({
+                type: 'message',
+                content: 'What is machine learning?',
+                data: { rag_mode: 'auto', include_sources: true }
+            }));
+        };
+        
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'token') {
+                console.log(msg.content);
+            }
+        };
+    """
+    # Get dependencies manually (WebSocket doesn't support Depends)
+    session_manager = get_session_manager_dependency()
+    generator = get_generator_dependency(get_config_dependency())
+    config = get_config_dependency()
+    
+    await chat_websocket_endpoint(
+        websocket=websocket,
+        session_id=session_id,
+        session_manager=session_manager,
+        generator=generator,
+        config=config,
+    )
 
 
 # ========== STARTUP MESSAGE ==========

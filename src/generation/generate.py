@@ -239,17 +239,31 @@ class AnswerGenerator:
         )
 
     def generate_chat_response(
-        self, message: str, include_sources: bool = False
+        self,
+        message: str,
+        session_id: str | None = None,
+        session_manager: Any | None = None,
+        rag_mode: str | None = None,
+        include_sources: bool = False,
+        on_token: Any | None = None,
+        stream: bool = False,
+        temperature: float | None = None,
     ) -> GenerationResult:
         """
         Generate a conversational chat response.
 
         This is the stateful mode with conversation history.
-        RAG retrieval is triggered based on rag_trigger_mode setting.
+        RAG retrieval is triggered based on rag_trigger_mode setting or rag_mode parameter.
 
         Args:
             message: User message
+            session_id: Optional session ID for session-based history
+            session_manager: Optional SessionManager instance for persistence
+            rag_mode: RAG trigger mode override (always/auto/manual/never)
             include_sources: Include source information if RAG was used
+            on_token: Optional callback for streaming tokens
+            stream: Enable streaming mode
+            temperature: LLM temperature override
 
         Returns:
             GenerationResult with answer and optional sources
@@ -258,12 +272,28 @@ class AnswerGenerator:
         overall_start = time.time()
         timing = TimingBreakdown()
 
+        # Load conversation history from session if provided
+        if session_manager and session_id:
+            conversation_messages = session_manager.get_messages(session_id)
+            # Update prompt builder with session history
+            self.prompt_builder.conversation_history = conversation_messages
+            logger.debug(f"Loaded {len(conversation_messages)} messages from session {session_id}")
+
         # Classify query type
         classification = self.query_classifier.classify(message)
 
         # Determine if RAG retrieval is needed
-        should_retrieve = self.prompt_builder.should_retrieve_rag(message)
-        logger.debug(f"RAG retrieval needed: {should_retrieve}")
+        # Use rag_mode parameter if provided, otherwise use config setting
+        if rag_mode:
+            # Temporarily override config for this request
+            original_rag_mode = self.generation_config.rag_trigger_mode
+            self.generation_config.rag_trigger_mode = rag_mode
+            should_retrieve = self.prompt_builder.should_retrieve_rag(message)
+            self.generation_config.rag_trigger_mode = original_rag_mode
+        else:
+            should_retrieve = self.prompt_builder.should_retrieve_rag(message)
+        
+        logger.debug(f"RAG retrieval needed: {should_retrieve} (mode={rag_mode or self.generation_config.rag_trigger_mode})")
 
         prepared_contexts = []
         search_results = []
@@ -328,10 +358,14 @@ class AnswerGenerator:
         logger.debug("Calling LLM for chat generation")
         try:
             llm_start = time.time()
+            
+            # Use temperature override if provided
+            llm_temperature = temperature if temperature is not None else self.config.rag.llm.temperature
+            
             response = self.llm_client.generate(
                 messages=messages,
                 model=self.config.rag.llm.model,
-                temperature=self.config.rag.llm.temperature,
+                temperature=llm_temperature,
                 top_p=self.config.rag.llm.top_p,
                 max_tokens=self.config.rag.llm.max_tokens,
             )
@@ -351,9 +385,29 @@ class AnswerGenerator:
 
         answer = response.get("message", {}).get("content", "").strip()
 
-        # Add to conversation history
-        self.prompt_builder.add_to_history(role="user", content=message)
-        self.prompt_builder.add_to_history(role="assistant", content=answer)
+        # Estimate token counts (simple approximation: ~4 chars per token)
+        user_tokens = len(message) // 4
+        assistant_tokens = len(answer) // 4
+
+        # Store messages in session if session_manager provided
+        if session_manager and session_id:
+            session_manager.add_message(
+                session_id=session_id,
+                role="user",
+                content=message,
+                tokens=user_tokens,
+            )
+            session_manager.add_message(
+                session_id=session_id,
+                role="assistant",
+                content=answer,
+                tokens=assistant_tokens,
+            )
+            logger.debug(f"Stored messages in session {session_id}")
+        else:
+            # Fallback to prompt builder history (old behavior)
+            self.prompt_builder.add_to_history(role="user", content=message)
+            self.prompt_builder.add_to_history(role="assistant", content=answer)
 
         # Format sources if RAG was used
         sources = []
@@ -374,7 +428,9 @@ class AnswerGenerator:
         }
 
         logger.info("Chat response generated successfully")
-        return GenerationResult(
+        
+        # Add rag_triggered attribute for API compatibility
+        result = GenerationResult(
             answer=answer,
             sources=sources,
             query_type=classification.query_type,
@@ -382,6 +438,9 @@ class AnswerGenerator:
             metadata=metadata,
             timing=timing,
         )
+        result.rag_triggered = should_retrieve  # Add as dynamic attribute
+        
+        return result
 
     def generate(
         self, query: str, mode: str | None = None, **kwargs
