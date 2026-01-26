@@ -361,3 +361,127 @@ class ErrorResponse(BaseModel):
                 "timestamp": "2026-01-25T14:40:00",
             }
         }
+
+
+# ========== WATCHDOG MODELS ==========
+class WatchdogStartRequest(BaseModel):
+    """Request model for starting file watcher."""
+
+    paths: list[str] = Field(
+        ...,
+        min_length=1,
+        description="List of directory paths to watch",
+        examples=[["D:/Documents/Books", "./data/knowledge_base"]],
+    )
+    recursive: bool = Field(
+        default=True,
+        description="Watch subdirectories recursively",
+    )
+    debounce_seconds: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=60.0,
+        description="Delay before processing file events (seconds)",
+    )
+
+    @field_validator("paths")
+    @classmethod
+    def validate_paths(cls, v: list[str]) -> list[str]:
+        """Validate paths are not empty."""
+        if not v:
+            raise ValueError("paths cannot be empty")
+        cleaned = [p.strip() for p in v if p.strip()]
+        if not cleaned:
+            raise ValueError("paths cannot contain only whitespace")
+        return cleaned
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "paths": ["D:/Documents/Books", "./data/knowledge_base"],
+                "recursive": True,
+                "debounce_seconds": 1.0,
+            }
+        }
+
+
+class WatchdogStopRequest(BaseModel):
+    """Request model for stopping file watcher."""
+
+    path: Optional[str] = Field(
+        default=None,
+        description="Specific path to stop watching (use 'all' or omit to stop all)",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "examples": [
+                {
+                    "description": "Stop watching all paths explicitly",
+                    "value": {"path": "all"}
+                },
+                {
+                    "description": "Stop watching specific path",
+                    "value": {"path": "D:/Documents/Books"}
+                }
+            ]
+        }
+
+
+class WatchdogStatusResponse(BaseModel):
+    """Response model for watchdog status."""
+
+    is_watching: bool = Field(..., description="Whether watcher is currently active")
+    watched_paths: list[str] = Field(
+        default_factory=list,
+        description="List of currently watched paths",
+    )
+    path_count: int = Field(default=0, description="Number of watched paths")
+    debounce_seconds: float = Field(default=1.0, description="Debounce delay in seconds")
+    recursive: bool = Field(default=True, description="Watching recursively")
+    ignore_patterns: list[str] = Field(
+        default_factory=list,
+        description="File patterns to ignore",
+    )
+    max_workers: int = Field(default=2, description="Max concurrent file processors")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "is_watching": True,
+                "watched_paths": ["D:/Documents/Books"],
+                "path_count": 1,
+                "debounce_seconds": 1.0,
+                "recursive": True,
+                "ignore_patterns": ["*.tmp", "*.swp"],
+                "max_workers": 2,
+            }
+        }
+
+
+class WatchdogResponse(BaseModel):
+    """Response model for watchdog start/stop operations."""
+
+    status: str = Field(..., description="Operation status")
+    message: str = Field(..., description="Status message")
+    watcher_status: Optional[WatchdogStatusResponse] = Field(
+        default=None,
+        description="Current watcher status (if applicable)",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "message": "File watcher started successfully",
+                "watcher_status": {
+                    "is_watching": True,
+                    "watched_paths": ["D:/Documents/Books"],
+                    "path_count": 1,
+                    "debounce_seconds": 1.0,
+                    "recursive": True,
+                    "ignore_patterns": ["*.tmp"],
+                    "max_workers": 2,
+                },
+            }
+        }

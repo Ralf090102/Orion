@@ -22,8 +22,13 @@ from backend.models.ingestion import (
     IngestTaskResponse,
     IngestionStats,
     IngestionTask,
+    WatchdogResponse,
+    WatchdogStartRequest,
+    WatchdogStatusResponse,
+    WatchdogStopRequest,
 )
 from src.core.ingest import clear_knowledge_base, ingest_documents
+from src.retrieval.watchdog import FileWatcher
 from src.utilities.config import OrionConfig
 
 logger = logging.getLogger(__name__)
@@ -34,6 +39,9 @@ router = APIRouter()
 # ========== TASK TRACKER (IN-MEMORY) ==========
 # In production, use Redis or database for persistence
 _ingestion_tasks: Dict[str, IngestionTask] = {}
+
+# ========== WATCHDOG MANAGER (SINGLETON) ==========
+_file_watcher: Optional[FileWatcher] = None
 
 
 def _create_task(path: str) -> str:
@@ -421,3 +429,327 @@ async def delete_task(task_id: str):
         "status": "success",
         "message": f"Task {task_id} deleted",
     }
+
+
+# ========== WATCHDOG ENDPOINTS ==========
+@router.post(
+    "/api/watchdog/start",
+    response_model=WatchdogResponse,
+    summary="Start file watcher",
+    description="Start watching directories for file changes and auto-ingest",
+    tags=["Watchdog"],
+)
+async def start_watchdog(
+    request: WatchdogStartRequest,
+    config: OrionConfig = Depends(get_config_dependency),
+):
+    """
+    Start the file watcher for automatic ingestion.
+    
+    The watcher monitors specified directories and automatically ingests
+    new or modified files into the knowledge base.
+    
+    Args:
+        request: Watchdog start request with paths and options
+        config: Configuration instance (injected)
+        
+    Returns:
+        WatchdogResponse with status and watcher info
+        
+    Raises:
+        HTTPException: If watcher is already running or start fails
+    """
+    global _file_watcher
+    
+    # Check if already watching
+    if _file_watcher and _file_watcher.is_watching():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="File watcher is already running. Stop it first before starting a new one.",
+        )
+    
+    # Validate paths exist
+    valid_paths = []
+    for path_str in request.paths:
+        path = Path(path_str)
+        if not path.exists():
+            logger.warning(f"Path does not exist: {path_str}")
+            continue
+        if not path.is_dir():
+            logger.warning(f"Path is not a directory: {path_str}")
+            continue
+        valid_paths.append(str(path.resolve()))
+    
+    if not valid_paths:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid directories to watch. All paths must exist and be directories.",
+        )
+    
+    try:
+        from src.core.ingest import DocumentIngestor
+        from src.retrieval.watchdog import create_file_watcher
+        
+        logger.info(f"Starting file watcher for {len(valid_paths)} paths")
+        
+        # Create document ingestor
+        ingestor = DocumentIngestor(config=config)
+        
+        # Create callbacks for file events
+        def handle_file_change(file_path: str):
+            """Handle file addition or modification"""
+            logger.info(f"Ingesting file from watchdog: {file_path}")
+            try:
+                success, metadata, errors = ingestor.ingest_file(file_path)
+                if success:
+                    logger.info(f"Watchdog ingestion successful: {file_path}")
+                    # Reset retriever to pick up new documents
+                    reset_retriever()
+                else:
+                    logger.error(f"Watchdog ingestion failed: {file_path} - {errors}")
+            except Exception as e:
+                logger.error(f"Error during watchdog ingestion: {e}", exc_info=True)
+        
+        # Update watchdog config with request parameters
+        config.watchdog.paths = valid_paths
+        config.watchdog.recursive = request.recursive
+        config.watchdog.debounce_seconds = request.debounce_seconds
+        
+        # Create and start watcher
+        _file_watcher = create_file_watcher(
+            vector_store=ingestor.vector_store,
+            on_file_added=handle_file_change,
+            on_file_modified=handle_file_change,
+            config=config,
+        )
+        
+        success = _file_watcher.start(paths=valid_paths)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to start file watcher",
+            )
+        
+        # Get watcher status
+        watcher_info = _file_watcher.get_status()
+        status_response = WatchdogStatusResponse(**watcher_info)
+        
+        logger.info(f"File watcher started successfully for {len(valid_paths)} paths")
+        
+        return WatchdogResponse(
+            status="success",
+            message=f"File watcher started for {len(valid_paths)} directory(ies)",
+            watcher_status=status_response,
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to start watchdog: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start file watcher: {str(e)}",
+        )
+
+
+@router.post(
+    "/api/watchdog/stop",
+    response_model=WatchdogResponse,
+    summary="Stop file watcher",
+    description="Stop watching all paths or a specific path",
+    tags=["Watchdog"],
+)
+async def stop_watchdog(
+    request: WatchdogStopRequest = WatchdogStopRequest(),
+    config: OrionConfig = Depends(get_config_dependency),
+):
+    """
+    Stop the file watcher.
+    
+    Can stop watching all paths or just a specific path:
+    - No path or path="all": Stop entire watcher
+    - path="<specific_path>": Stop watching that path only
+    
+    Args:
+        request: Stop request with optional path
+        config: Configuration instance (injected)
+        
+    Returns:
+        WatchdogResponse with status
+        
+    Raises:
+        HTTPException: If watcher is not running or stop fails
+    """
+    global _file_watcher
+    
+    if not _file_watcher or not _file_watcher.is_watching():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File watcher is not running",
+        )
+    
+    try:
+        stop_path = request.path
+        
+        # Stop all paths or entire watcher
+        if not stop_path or stop_path.lower() == "all":
+            logger.info("Stopping file watcher for all paths")
+            
+            success = _file_watcher.stop()
+            
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to stop file watcher",
+                )
+            
+            logger.info("File watcher stopped successfully")
+            
+            return WatchdogResponse(
+                status="success",
+                message="File watcher stopped for all paths",
+                watcher_status=None,
+            )
+        
+        # Stop watching a specific path
+        else:
+            # Normalize the path
+            path_to_remove = str(Path(stop_path).resolve())
+            
+            # Get current watched paths
+            current_paths = _file_watcher.get_watched_paths()
+            
+            # Check if path is being watched
+            if path_to_remove not in current_paths:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Path is not being watched: {stop_path}",
+                )
+            
+            # Remove the path from watched paths
+            remaining_paths = [p for p in current_paths if p != path_to_remove]
+            
+            logger.info(f"Stopping watcher for path: {path_to_remove}")
+            
+            # If no paths remain, stop the entire watcher
+            if not remaining_paths:
+                success = _file_watcher.stop()
+                
+                if not success:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to stop file watcher",
+                    )
+                
+                logger.info("Stopped watcher for last path - watcher fully stopped")
+                
+                return WatchdogResponse(
+                    status="success",
+                    message=f"Stopped watching {stop_path} (last path - watcher stopped)",
+                    watcher_status=None,
+                )
+            
+            # Restart watcher with remaining paths
+            # Get current config
+            current_status = _file_watcher.get_status()
+            debounce = current_status["debounce_seconds"]
+            recursive = current_status["recursive"]
+            
+            # Stop current watcher
+            _file_watcher.stop()
+            
+            # Recreate watcher with remaining paths
+            from src.core.ingest import DocumentIngestor
+            from src.retrieval.watchdog import create_file_watcher
+            
+            ingestor = DocumentIngestor(config=config)
+            
+            def handle_file_change(file_path: str):
+                """Handle file addition or modification"""
+                logger.info(f"Ingesting file from watchdog: {file_path}")
+                try:
+                    success, metadata, errors = ingestor.ingest_file(file_path)
+                    if success:
+                        logger.info(f"Watchdog ingestion successful: {file_path}")
+                        reset_retriever()
+                    else:
+                        logger.error(f"Watchdog ingestion failed: {file_path} - {errors}")
+                except Exception as e:
+                    logger.error(f"Error during watchdog ingestion: {e}", exc_info=True)
+            
+            # Update config
+            config.watchdog.paths = remaining_paths
+            config.watchdog.recursive = recursive
+            config.watchdog.debounce_seconds = debounce
+            
+            # Create new watcher
+            _file_watcher = create_file_watcher(
+                vector_store=ingestor.vector_store,
+                on_file_added=handle_file_change,
+                on_file_modified=handle_file_change,
+                config=config,
+            )
+            
+            # Start with remaining paths
+            success = _file_watcher.start(paths=remaining_paths)
+            
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to restart watcher with remaining paths",
+                )
+            
+            # Get updated status
+            watcher_info = _file_watcher.get_status()
+            status_response = WatchdogStatusResponse(**watcher_info)
+            
+            logger.info(f"Stopped watching {path_to_remove}, now watching {len(remaining_paths)} path(s)")
+            
+            return WatchdogResponse(
+                status="success",
+                message=f"Stopped watching {stop_path}. Still watching {len(remaining_paths)} path(s).",
+                watcher_status=status_response,
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to stop watchdog: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to stop file watcher: {str(e)}",
+        )
+
+
+@router.get(
+    "/api/watchdog/status",
+    response_model=WatchdogStatusResponse,
+    summary="Get watchdog status",
+    description="Check if file watcher is running and get configuration",
+    tags=["Watchdog"],
+)
+async def get_watchdog_status():
+    """
+    Get file watcher status.
+    
+    Returns:
+        WatchdogStatusResponse with current status and configuration
+    """
+    global _file_watcher
+    
+    if not _file_watcher:
+        # Watcher never created
+        return WatchdogStatusResponse(
+            is_watching=False,
+            watched_paths=[],
+            path_count=0,
+            debounce_seconds=1.0,
+            recursive=True,
+            ignore_patterns=[],
+            max_workers=2,
+        )
+    
+    # Get status from watcher
+    watcher_info = _file_watcher.get_status()
+    return WatchdogStatusResponse(**watcher_info)
