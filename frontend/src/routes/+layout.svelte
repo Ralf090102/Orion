@@ -14,23 +14,19 @@
 	import NavMenu from "$lib/components/NavMenu.svelte";
 	import MobileNav from "$lib/components/MobileNav.svelte";
 	import titleUpdate from "$lib/stores/titleUpdate";
-	import WelcomeModal from "$lib/components/WelcomeModal.svelte";
 	import ExpandNavigation from "$lib/components/ExpandNavigation.svelte";
 	import { setContext } from "svelte";
-	import { handleResponse, useAPIClient } from "$lib/APIClient";
 	import { isAborted } from "$lib/stores/isAborted";
 	import { isPro } from "$lib/stores/isPro";
 	import IconShare from "$lib/components/icons/IconShare.svelte";
 	import { shareModal } from "$lib/stores/shareModal";
-	import BackgroundGenerationPoller from "$lib/components/BackgroundGenerationPoller.svelte";
-	import { requireAuthUser } from "$lib/utils/auth";
 
 	let { data = $bindable(), children } = $props();
 
 	setContext("publicConfig", data.publicConfig);
 
 	const publicConfig = data.publicConfig;
-	const client = useAPIClient();
+	const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
 	let conversations = $state(data.conversations);
 	$effect(() => {
@@ -65,40 +61,31 @@
 	);
 
 	async function deleteConversation(id: string) {
-		client
-			.conversations({ id })
-			.delete()
-			.then(handleResponse)
-			.then(async () => {
-				conversations = conversations.filter((conv) => conv.id !== id);
-
-				if (page.params.id === id) {
-					await goto(`${base}/`, { invalidateAll: true });
-				}
-			})
-			.catch((err) => {
-				console.error(err);
-				$error = String(err);
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/chat/sessions/${id}`, {
+				method: 'DELETE',
 			});
+
+			if (!response.ok) {
+				throw new Error(`Failed to delete session: ${response.statusText}`);
+			}
+
+			conversations = conversations.filter((conv) => conv.id !== id);
+
+			if (page.params.id === id) {
+				await goto(`${base}/`, { invalidateAll: true });
+			}
+		} catch (err) {
+			console.error(err);
+			$error = String(err);
+		}
 	}
 
 	async function editConversationTitle(id: string, title: string) {
-		client
-			.conversations({ id })
-			.patch({ title })
-			.then(handleResponse)
-			.then(async () => {
-				conversations = conversations.map((conv) => (conv.id === id ? { ...conv, title } : conv));
-			})
-			.catch((err) => {
-				console.error(err);
-				$error = String(err);
-			});
-	}
-
-	function closeWelcomeModal() {
-		if (requireAuthUser()) return;
-		settings.set({ welcomeModalSeen: true });
+		// Note: Your backend doesn't support title editing yet
+		// This is a placeholder for future implementation
+		conversations = conversations.map((conv) => (conv.id === id ? { ...conv, title } : conv));
+		console.log('Title editing not yet implemented in backend');
 	}
 
 	onDestroy(() => {
@@ -124,17 +111,6 @@
 	const settings = createSettingsStore(data.settings);
 
 	onMount(async () => {
-		if (publicConfig.isHuggingChat && data.user?.username) {
-			fetch(`https://huggingface.co/api/users/${data.user.username}/overview`)
-				.then((res) => res.json())
-				.then((userData) => {
-					isPro.set(userData.isPro ?? false);
-				})
-				.catch(() => {
-					// Keep isPro as null on error - don't show any badge if status is unknown
-				});
-		}
-
 		if (page.url.searchParams.has("model")) {
 			await settings
 				.instantSet({
@@ -149,17 +125,6 @@
 				});
 		}
 
-		if (page.url.searchParams.has("token")) {
-			const token = page.url.searchParams.get("token");
-
-			await fetch(`${base}/api/user/validate-token`, {
-				method: "POST",
-				body: JSON.stringify({ token }),
-			}).then(() => {
-				goto(`${base}/`, { invalidateAll: true });
-			});
-		}
-
 		// Global keyboard shortcut: New Chat (Ctrl/Cmd + Shift + O)
 		const onKeydown = (e: KeyboardEvent) => {
 			// Ignore when a modal has focus (app is inert)
@@ -171,7 +136,6 @@
 			if (oPressed && e.shiftKey && metaOrCtrl) {
 				e.preventDefault();
 				isAborted.set(true);
-				if (requireAuthUser()) return;
 				goto(`${base}/`, { invalidateAll: true });
 			}
 		};
@@ -184,12 +148,6 @@
 		["/models", "/privacy"].includes(page.route.id ?? "")
 			? ""
 			: conversations.find((conv) => conv.id === page.params.id)?.title
-	);
-
-	// Show the welcome modal once on first app load
-	let showWelcome = $derived(
-		!$settings.welcomeModalSeen &&
-			!(page.data.shared === true && page.route.id?.startsWith("/conversation/"))
 	);
 </script>
 
@@ -246,12 +204,6 @@
 	{/if}
 </svelte:head>
 
-{#if showWelcome}
-	<WelcomeModal close={closeWelcomeModal} />
-{/if}
-
-<BackgroundGenerationPoller />
-
 <div
 	class="fixed grid h-full w-screen grid-cols-1 grid-rows-[auto,1fr] overflow-hidden text-smd {!isNavCollapsed
 		? 'md:grid-cols-[290px,1fr]'
@@ -299,7 +251,7 @@
 	{#if currentError}
 		<Toast message={currentError} />
 	{/if}
-	{@render children?.()}
+	{@render children()}
 
 	{#if publicConfig.PUBLIC_PLAUSIBLE_SCRIPT_URL}
 		<script>

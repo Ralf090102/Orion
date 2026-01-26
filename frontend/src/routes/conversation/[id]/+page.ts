@@ -1,47 +1,45 @@
-import { useAPIClient, handleResponse } from "$lib/APIClient";
 import { UrlDependency } from "$lib/types/UrlDependency";
 import { redirect } from "@sveltejs/kit";
 import { base } from "$app/paths";
 import type { PageLoad } from "./$types";
 
-export const load: PageLoad = async ({ params, depends, fetch, url, parent }) => {
+const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
+
+export const load: PageLoad = async ({ params, depends, fetch, parent }) => {
 	depends(UrlDependency.Conversation);
 
-	const client = useAPIClient({ fetch, origin: url.origin });
+	const parentData = await parent();
 
-	// Handle share import for logged-in users (7-char IDs are share IDs)
-	if (params.id.length === 7) {
-		const parentData = await parent();
-
-		if (parentData.loginEnabled && parentData.user) {
-			const leafId = url.searchParams.get("leafId");
-
-			let importedConversationId: string | undefined;
-			try {
-				const result = await client.conversations["import-share"]
-					.post({ shareId: params.id })
-					.then(handleResponse);
-				importedConversationId = result.conversationId;
-			} catch {
-				// Import failed, continue to load shared conversation for viewing
-			}
-
-			if (importedConversationId) {
-				redirect(
-					302,
-					`${base}/conversation/${importedConversationId}?leafId=${leafId ?? ""}&fromShare=${params.id}`
-				);
-			}
-		}
-	}
-
-	// Load conversation (works for both owned and shared conversations)
+	// Load conversation from FastAPI backend
 	try {
-		return await client
-			.conversations({ id: params.id })
-			.get({ query: { fromShare: url.searchParams.get("fromShare") ?? undefined } })
-			.then(handleResponse);
-	} catch {
+		const response = await fetch(`${BACKEND_URL}/api/chat/sessions/${params.id}`);
+		
+		if (!response.ok) {
+			throw new Error('Session not found');
+		}
+
+		const sessionData = await response.json();
+
+		// Convert to expected format
+		return {
+			messages: sessionData.messages?.map((msg: any) => ({
+				id: crypto.randomUUID(),
+				from: msg.role === 'user' ? 'user' : 'assistant',
+				content: msg.content,
+				createdAt: new Date(msg.timestamp),
+				updatedAt: new Date(msg.timestamp),
+			})) || [],
+			conversations: parentData.conversations,
+			models: parentData.models,
+			oldModels: parentData.oldModels || [],
+			model: parentData.models[0]?.id || 'default',
+			title: sessionData.metadata?.title || sessionData.metadata?.topic || 'Chat',
+			preprompt: '',
+			rootMessageId: null,
+			shared: false,
+		};
+	} catch (err) {
+		console.error('Failed to load conversation:', err);
 		redirect(302, `${base}/`);
 	}
 };

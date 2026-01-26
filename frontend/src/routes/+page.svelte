@@ -15,7 +15,6 @@
 	import { onMount, tick } from "svelte";
 	import { loading } from "$lib/stores/loading.js";
 	import { loadAttachmentsFromUrls } from "$lib/utils/loadAttachmentsFromUrls";
-	import { requireAuthUser } from "$lib/utils/auth";
 
 	let { data } = $props();
 
@@ -24,60 +23,40 @@
 	let draft = $state("");
 
 	const settings = useSettingsStore();
+	const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
 	async function createConversation(message: string) {
 		try {
 			$loading = true;
 
-			// check if $settings.activeModel is a valid model
-			// else check if it's an assistant, and use that model
-			// else use the first model
-
-			const validModels = data.models.map((model) => model.id);
-
-			let model;
-			if (validModels.includes($settings.activeModel)) {
-				model = $settings.activeModel;
-			} else {
-				model = data.models[0].id;
-			}
-			const res = await fetch(`${base}/conversation`, {
+			// Create a new session using FastAPI backend
+			const createSessionRes = await fetch(`${BACKEND_URL}/api/chat/sessions`, {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
 				},
 				body: JSON.stringify({
-					model,
-					preprompt: $settings.customPrompts[$settings.activeModel],
+					metadata: {
+						model: $settings.activeModel || 'default',
+					}
 				}),
 			});
 
-			if (!res.ok) {
-				let errorMessage = ERROR_MESSAGES.default;
-				try {
-					const json = await res.json();
-					errorMessage = json.message || errorMessage;
-				} catch {
-					// Response wasn't JSON (e.g., HTML error page)
-					if (res.status === 401) {
-						errorMessage = "Authentication required";
-					}
-				}
-				error.set(errorMessage);
-				console.error("Error while creating conversation: ", errorMessage);
-				return;
+			if (!createSessionRes.ok) {
+				const errorText = await createSessionRes.text();
+				throw new Error(`Failed to create session: ${errorText}`);
 			}
 
-			const { conversationId } = await res.json();
+			const { session_id } = await createSessionRes.json();
 
-			// Ugly hack to use a store as temp storage, feel free to improve ^^
+			// Store the pending message for the conversation page
 			pendingMessage.set({
 				content: message,
 				files,
 			});
 
-			// invalidateAll to update list of conversations
-			await goto(`${base}/conversation/${conversationId}`, { invalidateAll: true });
+			// Navigate to the conversation page
+			await goto(`${base}/conversation/${session_id}`, { invalidateAll: true });
 		} catch (err) {
 			error.set((err as Error).message || ERROR_MESSAGES.default);
 			console.error(err);
@@ -88,14 +67,10 @@
 
 	onMount(async () => {
 		try {
-			// Check if auth is required before processing any query params
+			// Check URL parameters
 			const hasQ = page.url.searchParams.has("q");
 			const hasPrompt = page.url.searchParams.has("prompt");
 			const hasAttachments = page.url.searchParams.has("attachments");
-
-			if ((hasQ || hasPrompt || hasAttachments) && requireAuthUser()) {
-				return; // Redirecting to login, will return to this URL after
-			}
 
 			// Handle attachments parameter first
 			if (hasAttachments) {

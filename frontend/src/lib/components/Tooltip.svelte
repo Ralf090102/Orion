@@ -20,8 +20,10 @@
 	"
 >
 	<div
-		class="absolute bottom-full left-1/2 h-0 w-0 -translate-x-1/2 transform border-4 border-t-0 border-black"
+		class="absolute bottom-full left-1/2 h-0 w-0 -translate-x-1/2 transform border-4 border-t-0"
 		style="
+				border-color: black;
+				border-top-color: transparent;
 				border-left-color: transparent;
 				border-right-color: transparent;
 			"

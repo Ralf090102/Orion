@@ -12,7 +12,7 @@
 		healthCheckServer,
 	} from "$lib/stores/mcpServers";
 	import type { KeyValuePair } from "$lib/types/Tool";
-	import IconAddLarge from "~icons/carbon/add-large";
+	import IconAdd from "~icons/carbon/add";
 	import IconRefresh from "~icons/carbon/renew";
 	import LucideHammer from "~icons/lucide/hammer";
 	import IconMCP from "$lib/components/icons/IconMCP.svelte";
@@ -114,7 +114,7 @@
 						onclick={() => (currentView = "add")}
 						class="btn flex items-center gap-0.5 rounded-lg bg-blue-600 py-1.5 pl-2 pr-3 text-sm font-medium text-white hover:bg-blue-600"
 					>
-						<IconAddLarge class="size-4" />
+						<IconAdd class="size-4" />
 						Add Server
 					</button>
 				</div>
@@ -154,7 +154,7 @@
 								onclick={() => (currentView = "add")}
 								class="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600"
 							>
-								<IconAddLarge class="size-4" />
+								<IconAdd class="size-4" />
 								Add Your First Server
 							</button>
 						</div>

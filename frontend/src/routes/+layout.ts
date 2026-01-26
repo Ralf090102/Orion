@@ -1,52 +1,83 @@
 import { UrlDependency } from "$lib/types/UrlDependency";
 import type { ConvSidebar } from "$lib/types/ConvSidebar";
-import { useAPIClient, handleResponse } from "$lib/APIClient";
-import { getConfigManager } from "$lib/utils/PublicConfig.svelte";
 
-export const load = async ({ depends, fetch, url }) => {
+const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
+
+export const load = async ({ depends, fetch }) => {
 	depends(UrlDependency.ConversationList);
 
-	const client = useAPIClient({ fetch, origin: url.origin });
+	// Load conversations from FastAPI backend
+	let conversations: ConvSidebar[] = [];
+	try {
+		const response = await fetch(`${BACKEND_URL}/api/chat/sessions`);
+		if (response.ok) {
+			const data = await response.json();
+			conversations = data.sessions?.map((session: any) => ({
+				id: session.session_id,
+				title: session.metadata?.title || session.metadata?.topic || 'New Chat',
+				model: session.metadata?.model || 'default',
+				updatedAt: new Date(session.updated_at),
+				createdAt: new Date(session.created_at),
+			})) || [];
+		}
+	} catch (err) {
+		console.error('Failed to load conversations:', err);
+	}
 
-	const [settings, models, user, publicConfig, featureFlags, conversationsData] = await Promise.all(
-		[
-			client.user.settings.get().then(handleResponse),
-			client.models.get().then(handleResponse),
-			client.user.get().then(handleResponse),
-			client["public-config"].get().then(handleResponse),
-			client["feature-flags"].get().then(handleResponse),
-			client.conversations.get({ query: { p: 0 } }).then(handleResponse),
-		]
-	);
+	// Mock models - replace with actual model from your backend if needed
+	const models = [
+		{
+			id: 'default',
+			name: 'Local LLM',
+			displayName: 'Local LLM',
+			description: 'Local language model',
+			websiteUrl: '',
+			modelUrl: '',
+			datasetName: '',
+			datasetUrl: '',
+			preprompt: '',
+			chatPromptTemplate: '',
+			parameters: {
+				temperature: 0.7,
+				top_p: 0.95,
+				max_new_tokens: 2048,
+			},
+		},
+	];
 
-	const defaultModel = models[0];
+	// Mock public config
+	const publicConfig = {
+		PUBLIC_APP_NAME: import.meta.env.PUBLIC_APP_NAME || 'Orion',
+		PUBLIC_APP_DESCRIPTION: import.meta.env.PUBLIC_APP_DESCRIPTION || 'Local RAG Chat',
+		PUBLIC_ORIGIN: import.meta.env.PUBLIC_ORIGIN || 'http://localhost:5173',
+		isHuggingChat: false,
+		assetPath: '/chatui',
+		PUBLIC_PLAUSIBLE_SCRIPT_URL: undefined,
+		PUBLIC_APPLE_APP_ID: undefined,
+	};
 
-	const { conversations: rawConversations } = conversationsData;
-	const conversations = rawConversations.map((conv) => {
-		const trimmedTitle = conv.title.trim();
-
-		conv.title = trimmedTitle;
-
-		return {
-			id: conv._id.toString(),
-			title: conv.title,
-			model: conv.model ?? defaultModel,
-			updatedAt: new Date(conv.updatedAt),
-		} satisfies ConvSidebar;
-	});
+	// Mock settings
+	const settings = {
+		activeModel: 'default',
+		customPrompts: {},
+		hidePromptExamples: {},
+		multimodalOverrides: {},
+		toolsOverrides: {},
+		welcomeModalSeen: true,
+		welcomeModalSeenAt: null,
+		directPaste: false,
+		disableStream: false,
+		shareConversationsWithModelAuthors: false,
+	};
 
 	return {
 		conversations,
 		models,
 		oldModels: [],
-		user,
-		settings: {
-			...settings,
-			welcomeModalSeenAt: settings.welcomeModalSeenAt
-				? new Date(settings.welcomeModalSeenAt)
-				: null,
-		},
-		publicConfig: getConfigManager(publicConfig),
-		...featureFlags,
+		user: null, // No authentication for local use
+		settings,
+		publicConfig,
+		transcriptionEnabled: false,
+		tools: [],
 	};
 };

@@ -17,26 +17,65 @@ body {
 
 	.active-model {
 		/* Ensure active border wins over defaults/utilities in both themes */
-		@apply !border-black dark:!border-white/60;
+		border-color: black !important;
 	}
 
-	.file-hoverable {
-		@apply hover:bg-gray-500/10;
+	.dark .active-model {
+		border-color: rgba(255, 255, 255, 0.6) !important;
+	}
+
+	.file-hoverable:hover {
+		background-color: rgba(107, 114, 128, 0.1);
 	}
 
 	.base-tool {
-		@apply flex h-[1.6rem] items-center gap-[.2rem] whitespace-nowrap border border-transparent text-xs outline-none transition-all focus:outline-none active:outline-none dark:hover:text-gray-300 sm:hover:text-purple-600;
+		@apply flex items-center gap-1 whitespace-nowrap border border-transparent text-xs outline-none transition-all focus:outline-none active:outline-none;
+		height: 1.6rem;
+	}
+
+	.base-tool:hover {
+		color: rgb(147, 51, 234); /* purple-600 */
+	}
+
+	.dark .base-tool:hover {
+		color: rgb(209, 213, 219); /* gray-300 */
 	}
 
 	.active-tool {
-		@apply rounded-full !border-purple-200 bg-purple-100 pl-1 pr-2 text-purple-600 hover:text-purple-600 dark:!border-purple-700 dark:bg-purple-600/40 dark:text-purple-200;
+		@apply rounded-full pl-1 pr-2;
+		border-color: rgb(233, 213, 255) !important; /* purple-200 */
+		background-color: rgb(243, 232, 255); /* purple-100 */
+		color: rgb(147, 51, 234); /* purple-600 */
+	}
+
+	.active-tool:hover {
+		color: rgb(147, 51, 234); /* purple-600 */
+	}
+
+	.dark .active-tool {
+		border-color: rgb(107, 33, 168) !important; /* purple-700 */
+		background-color: rgba(147, 51, 234, 0.4); /* purple-600/40 */
+		color: rgb(233, 213, 255); /* purple-200 */
 	}
 }
 
 @layer utilities {
-	/* your existing utilities */
+	/* Custom scrollbar styling */
 	.scrollbar-custom {
-		@apply scrollbar-thin scrollbar-track-transparent scrollbar-thumb-black/10 scrollbar-thumb-rounded-full scrollbar-w-1 hover:scrollbar-thumb-black/20 dark:scrollbar-thumb-white/10 dark:hover:scrollbar-thumb-white/20;
+		scrollbar-width: thin;
+		scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
+	}
+
+	.scrollbar-custom:hover {
+		scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+	}
+
+	.dark .scrollbar-custom {
+		scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+	}
+
+	.dark .scrollbar-custom:hover {
+		scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 	}
 
 	.scrollbar-custom::-webkit-scrollbar {
@@ -45,38 +84,76 @@ body {
 		height: 8px;
 	}
 
+	.scrollbar-custom::-webkit-scrollbar-thumb {
+		background-color: rgba(0, 0, 0, 0.1);
+		border-radius: 9999px;
+	}
+
+	.scrollbar-custom::-webkit-scrollbar-thumb:hover {
+		background-color: rgba(0, 0, 0, 0.2);
+	}
+
 	.dark .scrollbar-custom::-webkit-scrollbar {
 		background-color: rgba(17, 17, 17, 0.85);
 	}
 
+	.dark .scrollbar-custom::-webkit-scrollbar-thumb {
+		background-color: rgba(255, 255, 255, 0.1);
+	}
+
+	.dark .scrollbar-custom::-webkit-scrollbar-thumb:hover {
+		background-color: rgba(255, 255, 255, 0.2);
+	}
+
 	/* Rounded top/bottom caps for vertical scrollbars (Chrome/Edge/Safari) */
 	.scrollbar-custom::-webkit-scrollbar-track {
-		@apply rounded-full bg-clip-padding; /* clip bg to padding so caps look round */
-		/* space for the end caps — tweak with Tailwind spacing */
-		border-top: theme("spacing.2") solid transparent; /* 0.5rem */
-		border-bottom: theme("spacing.2") solid transparent; /* 0.5rem */
+		@apply rounded-full;
+		background-clip: padding-box;
+		border-top: 0.5rem solid transparent;
+		border-bottom: 0.5rem solid transparent;
 	}
 
 	/* Rounded left/right caps for horizontal scrollbars */
 	.scrollbar-custom::-webkit-scrollbar-track:horizontal {
-		@apply rounded-full bg-clip-padding;
-		border-left: theme("spacing.2") solid transparent;
-		border-right: theme("spacing.2") solid transparent;
+		@apply rounded-full;
+		background-clip: padding-box;
+		border-left: 0.5rem solid transparent;
+		border-right: 0.5rem solid transparent;
 		border-top-width: 0;
 		border-bottom-width: 0;
 	}
 
 	.no-scrollbar {
-		@apply [-ms-overflow-style:none] [scrollbar-width:none] [&::-ms-scrollbar]:hidden [&::-webkit-scrollbar]:hidden;
+		-ms-overflow-style: none;
+		scrollbar-width: none;
+	}
+
+	.no-scrollbar::-webkit-scrollbar {
+		display: none;
+	}
+
+	.no-scrollbar::-ms-scrollbar {
+		display: none;
 	}
 
 	.prose table {
-		@apply block max-w-full overflow-x-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-black/10 scrollbar-thumb-rounded-full scrollbar-w-1 hover:scrollbar-thumb-black/20 dark:scrollbar-thumb-white/10 dark:hover:scrollbar-thumb-white/20;
+		@apply block max-w-full overflow-x-auto;
+		scrollbar-width: thin;
+		scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
 	}
 
-	/* .scrollbar-custom {
-		@apply scrollbar-thin scrollbar-track-transparent scrollbar-thumb-black/10 scrollbar-thumb-rounded-full scrollbar-w-1 hover:scrollbar-thumb-black/20 dark:scrollbar-thumb-white/10 dark:hover:scrollbar-thumb-white/20;
-	} */
+	.prose table:hover {
+		scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+	}
+
+	.dark .prose table {
+		scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+	}
+
+	.dark .prose table:hover {
+		scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+	}
+
 	.prose hr {
 		@apply my-4;
 	}
@@ -86,7 +163,17 @@ body {
 	}
 
 	.prose pre {
-		@apply border-[0.5px] bg-white text-gray-600 dark:border-gray-700 dark:!bg-gray-900 dark:bg-inherit dark:text-inherit;
+		@apply bg-white;
+		border: 0.5px solid;
+		border-color: currentColor;
+		color: rgb(75, 85, 99); /* gray-600 */
+	}
+
+	.dark .prose pre {
+		border-color: rgb(55, 65, 81); /* gray-700 */
+		background-color: rgb(17, 24, 39) !important; /* gray-900 */
+		background: inherit;
+		color: inherit;
 	}
 
 	/* Override prose-sm title sizes - 75% of original */

@@ -2,114 +2,127 @@
 	import ChatWindow from "$lib/components/chat/ChatWindow.svelte";
 	import { pendingMessage } from "$lib/stores/pendingMessage";
 	import { isAborted } from "$lib/stores/isAborted";
-	import { onMount } from "svelte";
+	import { onMount, onDestroy } from "svelte";
 	import { page } from "$app/state";
-	import { beforeNavigate, invalidateAll } from "$app/navigation";
+	import { beforeNavigate } from "$app/navigation";
 	import { base } from "$app/paths";
 	import { ERROR_MESSAGES, error } from "$lib/stores/errors";
 	import { findCurrentModel } from "$lib/utils/models";
 	import type { Message } from "$lib/types/Message";
-	import { MessageUpdateStatus, MessageUpdateType } from "$lib/types/MessageUpdate";
-	import titleUpdate from "$lib/stores/titleUpdate";
 	import file2base64 from "$lib/utils/file2base64";
-	import { addChildren } from "$lib/utils/tree/addChildren";
-	import { addSibling } from "$lib/utils/tree/addSibling";
-	import { fetchMessageUpdates } from "$lib/utils/messageUpdates";
-	import type { v4 } from "uuid";
 	import { useSettingsStore } from "$lib/stores/settings.js";
-	import { enabledServers } from "$lib/stores/mcpServers";
 	import { browser } from "$app/environment";
-	import {
-		addBackgroundGeneration,
-		removeBackgroundGeneration,
-	} from "$lib/stores/backgroundGenerations";
-	import type { TreeNode, TreeId } from "$lib/utils/tree/tree";
 	import "katex/dist/katex.min.css";
-	import { updateDebouncer } from "$lib/utils/updates.js";
-	import SubscribeModal from "$lib/components/SubscribeModal.svelte";
 	import { loading } from "$lib/stores/loading.js";
-	import { requireAuthUser } from "$lib/utils/auth.js";
+	import { WebSocketChat } from "$lib/utils/websocketChat";
 
 	let { data = $bindable() } = $props();
 
+	const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
+	const settings = useSettingsStore();
+	
 	let pending = $state(false);
-	let initialRun = true;
-	let showSubscribeModal = $state(false);
-
 	let files: File[] = $state([]);
-
+	let messages = $state<Message[]>([]);
 	let conversations = $state(data.conversations);
+	let wsChat: WebSocketChat | null = null;
+
 	$effect(() => {
 		conversations = data.conversations;
 	});
 
-	function createMessagesPath<T>(messages: TreeNode<T>[], msgId?: TreeId): TreeNode<T>[] {
-		if (initialRun) {
-			if (!msgId && page.url.searchParams.get("leafId")) {
-				msgId = page.url.searchParams.get("leafId") as string;
-				page.url.searchParams.delete("leafId");
+	// Simple message structure for local use
+	function createMessage(from: 'user' | 'assistant', content: string, msgFiles?: any[]): Message {
+		return {
+			id: crypto.randomUUID(),
+			from,
+			content,
+			files: msgFiles,
+			createdAt: new Date(),
+			updatedAt: new Date(),
+		} as Message;
+	}
+
+	// Fetch existing messages for this session
+	async function loadMessages() {
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/chat/sessions/${page.params.id}`);
+			if (!response.ok) {
+				throw new Error('Failed to load session');
 			}
-			if (!msgId && browser && localStorage.getItem("leafId")) {
-				msgId = localStorage.getItem("leafId") as string;
-			}
-			initialRun = false;
+
+			const sessionData = await response.json();
+			
+			// Convert backend messages to frontend format
+			messages = sessionData.messages?.map((msg: any) => ({
+				id: crypto.randomUUID(),
+				from: msg.role === 'user' ? 'user' : 'assistant',
+				content: msg.content,
+				createdAt: new Date(msg.timestamp),
+				updatedAt: new Date(msg.timestamp),
+			})) || [];
+		} catch (err) {
+			console.error('Failed to load messages:', err);
+			$error = 'Failed to load conversation';
+		}
+	}
+
+	// Initialize WebSocket connection
+	function initializeWebSocket() {
+		if (wsChat) {
+			wsChat.disconnect();
 		}
 
-		const msg = messages.find((msg) => msg.id === msgId) ?? messages.at(-1);
-		if (!msg) return [];
-		// ancestor path
-		const { ancestors } = msg;
-		const path = [];
-		if (ancestors?.length) {
-			for (const ancestorId of ancestors) {
-				const ancestor = messages.find((msg) => msg.id === ancestorId);
-				if (ancestor) {
-					path.push(ancestor);
+		wsChat = new WebSocketChat({
+			sessionId: page.params.id,
+			onMessage: (content, done) => {
+				if (done) {
+					$loading = false;
+					pending = false;
+					return;
 				}
+
+				// Update the last assistant message
+				const lastMsg = messages[messages.length - 1];
+				if (lastMsg && lastMsg.from === 'assistant') {
+					lastMsg.content += content;
+					messages = [...messages]; // Trigger reactivity
+				}
+			},
+			onError: (errorMsg) => {
+				$error = errorMsg;
+				$loading = false;
+				pending = false;
+			},
+			onConnect: () => {
+				console.log('Connected to chat');
+			},
+			onDisconnect: () => {
+				console.log('Disconnected from chat');
 			}
-		}
+		});
 
-		// push the node itself in the middle
-		path.push(msg);
-
-		// children path
-		let childrenIds = msg.children;
-		while (childrenIds?.length) {
-			let lastChildId = childrenIds.at(-1);
-			const lastChild = messages.find((msg) => msg.id === lastChildId);
-			if (lastChild) {
-				path.push(lastChild);
-			}
-			childrenIds = lastChild?.children;
-		}
-
-		return path;
+		wsChat.connect();
 	}
 
-	function createMessagesAlternatives<T>(messages: TreeNode<T>[]): TreeId[][] {
-		const alternatives = [];
-		for (const message of messages) {
-			if (message.children?.length) {
-				alternatives.push(message.children);
-			}
-		}
-		return alternatives;
-	}
+	// Send a message through WebSocket
+	async function writeMessage({ prompt }: { prompt?: string }): Promise<void> {
+		if (!prompt || !wsChat) return;
 
-	// this function is used to send new message to the backends
-	async function writeMessage({
-		prompt,
-		messageId = messagesPath.at(-1)?.id ?? undefined,
-		isRetry = false,
-	}: {
-		prompt?: string;
-		messageId?: ReturnType<typeof v4>;
-		isRetry?: boolean;
-	}): Promise<void> {
 		try {
 			$isAborted = false;
 			$loading = true;
 			pending = true;
+
+			// Add user message
+			const userMessage = createMessage('user', prompt, files.length > 0 ? files : undefined);
+			messages = [...messages, userMessage];
+
+			// Add empty assistant message
+			const assistantMessage = createMessage('assistant', '');
+			messages = [...messages, assistantMessage];
+
+			// Convert files to base64 if present
 			const base64Files = await Promise.all(
 				(files ?? []).map((file) =>
 					file2base64(file).then((value) => ({
@@ -121,98 +134,115 @@
 				)
 			);
 
-			let messageToWriteToId: Message["id"] | undefined = undefined;
-			// used for building the prompt, subtree of the conversation that goes from the latest message to the root
+			// Send via WebSocket
+			wsChat.sendMessage(prompt, base64Files);
+			files = [];
 
-			if (isRetry && messageId) {
-				// two cases, if we're retrying a user message with a newPrompt set,
-				// it means we're editing a user message
-				// if we're retrying on an assistant message, newPrompt cannot be set
-				// it means we're retrying the last assistant message for a new answer
+		} catch (err) {
+			$error = (err as Error).message || ERROR_MESSAGES.default;
+			console.error(err);
+			$loading = false;
+			pending = false;
+		}
+	}
 
-				const messageToRetry = messages.find((message) => message.id === messageId);
+	async function stopGeneration() {
+		$isAborted = true;
+		$loading = false;
+		pending = false;
+		// Optionally send stop message to backend
+	}
 
-				if (!messageToRetry) {
-					$error = "Message not found";
-				}
+	function handleKeydown(event: KeyboardEvent) {
+		// Stop generation on ESC key when loading
+		if (event.key === "Escape" && $loading) {
+			event.preventDefault();
+			stopGeneration();
+		}
+	}
 
-				if (messageToRetry?.from === "user" && prompt) {
-					// add a sibling to this message from the user, with the alternative prompt
-					// add a children to that sibling, where we can write to
-					const newUserMessageId = addSibling(
-						{
-							messages,
-							rootMessageId: data.rootMessageId,
-						},
-						{
-							from: "user",
-							content: prompt,
-							files: messageToRetry.files,
-						},
-						messageId
-					);
-					messageToWriteToId = addChildren(
-						{
-							messages,
-							rootMessageId: data.rootMessageId,
-						},
-						{ from: "assistant", content: "" },
-						newUserMessageId
-					);
-				} else if (messageToRetry?.from === "assistant") {
-					// we're retrying an assistant message, to generate a new answer
-					// just add a sibling to the assistant answer where we can write to
-					messageToWriteToId = addSibling(
-						{
-							messages,
-							rootMessageId: data.rootMessageId,
-						},
-						{ from: "assistant", content: "" },
-						messageId
-					);
-				}
-			} else {
-				// just a normal linear conversation, so we add the user message
-				// and the blank assistant message back to back
-				const newUserMessageId = addChildren(
-					{
-						messages,
-						rootMessageId: data.rootMessageId,
-					},
-					{
-						from: "user",
-						content: prompt ?? "",
-						files: base64Files,
-					},
-					messageId
-				);
+	onMount(async () => {
+		// Load existing messages
+		await loadMessages();
 
-				if (!data.rootMessageId) {
-					data.rootMessageId = newUserMessageId;
-				}
+		// Initialize WebSocket
+		initializeWebSocket();
 
-				messageToWriteToId = addChildren(
-					{
-						messages,
-						rootMessageId: data.rootMessageId,
-					},
-					{
-						from: "assistant",
-						content: "",
-					},
-					newUserMessageId
-				);
-			}
+		// Send pending message if exists
+		if ($pendingMessage) {
+			files = $pendingMessage.files;
+			await writeMessage({ prompt: $pendingMessage.content });
+			$pendingMessage = undefined;
+		}
+	});
 
-			const userMessage = messages.find((message) => message.id === messageId);
-			const messageToWriteTo = messages.find((message) => message.id === messageToWriteToId);
-			if (!messageToWriteTo) {
-				throw new Error("Message to write to not found");
-			}
+	onDestroy(() => {
+		if (wsChat) {
+			wsChat.disconnect();
+		}
+	});
 
-			const messageUpdatesAbortController = new AbortController();
+	async function onMessage(content: string) {
+		await writeMessage({ prompt: content });
+	}
 
-			const messageUpdatesIterator = await fetchMessageUpdates(
+	async function onRetry(payload: { id: Message["id"]; content?: string }) {
+		// Simple retry: just resend the last user message
+		const lastUserMessage = [...messages].reverse().find(msg => msg.from === 'user');
+		if (lastUserMessage) {
+			await writeMessage({ prompt: payload.content || lastUserMessage.content });
+		}
+	}
+
+	async function onShowAlternateMsg(payload: { id: Message["id"] }) {
+		// Alternate messages not supported in simple version
+		console.log('Alternate messages not supported yet');
+	}
+
+	beforeNavigate((navigation) => {
+		if (!page.params.id) return;
+
+		const navigatingAway =
+			navigation.to?.route.id !== page.route.id || navigation.to?.params?.id !== page.params.id;
+
+		if ($loading && navigatingAway) {
+			// Stop generation when navigating away
+			stopGeneration();
+		}
+
+		$isAborted = true;
+		$loading = false;
+	});
+
+	let title = $derived.by(() => {
+		const rawTitle = conversations.find((conv) => conv.id === page.params.id)?.title ?? '';
+		return rawTitle ? rawTitle.charAt(0).toUpperCase() + rawTitle.slice(1) : 'Chat';
+	});
+
+	let currentModel = $derived(findCurrentModel(data.models, data.oldModels, data.model));
+</script>
+
+<svelte:window onkeydown={handleKeydown} />
+
+<svelte:head>
+	<title>{title}</title>
+</svelte:head>
+
+<ChatWindow
+	loading={$loading}
+	{pending}
+	{messages}
+	messagesAlternatives={[]}
+	shared={false}
+	preprompt={data.preprompt}
+	bind:files
+	onmessage={onMessage}
+	onretry={onRetry}
+	onshowAlternateMsg={onShowAlternateMsg}
+	onstop={stopGeneration}
+	models={data.models}
+	{currentModel}
+/>
 				page.params.id,
 				{
 					base,

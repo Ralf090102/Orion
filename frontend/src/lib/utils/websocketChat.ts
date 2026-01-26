@@ -1,0 +1,113 @@
+/**
+ * WebSocket chat client for Orion backend
+ * Connects to FastAPI WebSocket endpoint at /ws/chat/{session_id}
+ */
+
+export interface WebSocketChatOptions {
+	sessionId: string;
+	onMessage: (content: string, done: boolean) => void;
+	onError?: (error: string) => void;
+	onConnect?: () => void;
+	onDisconnect?: () => void;
+	backendUrl?: string;
+}
+
+export class WebSocketChat {
+	private ws: WebSocket | null = null;
+	private options: WebSocketChatOptions;
+	private reconnectAttempts = 0;
+	private maxReconnectAttempts = 3;
+	private reconnectDelay = 1000;
+
+	constructor(options: WebSocketChatOptions) {
+		this.options = options;
+	}
+
+	connect() {
+		const wsUrl = this.options.backendUrl || import.meta.env.PUBLIC_BACKEND_WS || 'ws://localhost:8000';
+		const url = `${wsUrl}/ws/chat/${this.options.sessionId}`;
+
+		try {
+			this.ws = new WebSocket(url);
+
+			this.ws.onopen = () => {
+				console.log('WebSocket connected');
+				this.reconnectAttempts = 0;
+				this.options.onConnect?.();
+			};
+
+			this.ws.onmessage = (event) => {
+				try {
+					const data = JSON.parse(event.data);
+					
+					// Handle different message types from backend
+					if (data.type === 'message') {
+						// Streaming content
+						this.options.onMessage(data.content || '', false);
+					} else if (data.type === 'done') {
+						// Generation complete
+						this.options.onMessage('', true);
+					} else if (data.type === 'error') {
+						// Error from backend
+						this.options.onError?.(data.error || 'Unknown error');
+					}
+				} catch (err) {
+					console.error('Failed to parse WebSocket message:', err);
+					this.options.onError?.('Failed to parse server response');
+				}
+			};
+
+			this.ws.onerror = (event) => {
+				console.error('WebSocket error:', event);
+				this.options.onError?.('WebSocket connection error');
+			};
+
+			this.ws.onclose = (event) => {
+				console.log('WebSocket closed', event.code, event.reason);
+				this.options.onDisconnect?.();
+
+				// Attempt to reconnect
+				if (this.reconnectAttempts < this.maxReconnectAttempts) {
+					this.reconnectAttempts++;
+					console.log(`Reconnecting in ${this.reconnectDelay}ms (attempt ${this.reconnectAttempts})`);
+					setTimeout(() => this.connect(), this.reconnectDelay);
+					this.reconnectDelay *= 2; // Exponential backoff
+				}
+			};
+		} catch (err) {
+			console.error('Failed to create WebSocket:', err);
+			this.options.onError?.('Failed to create WebSocket connection');
+		}
+	}
+
+	sendMessage(message: string, files?: File[]) {
+		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+			console.error('WebSocket not connected');
+			this.options.onError?.('Not connected to server');
+			return;
+		}
+
+		try {
+			this.ws.send(JSON.stringify({
+				type: 'message',
+				content: message,
+				files: files || []
+			}));
+		} catch (err) {
+			console.error('Failed to send message:', err);
+			this.options.onError?.('Failed to send message');
+		}
+	}
+
+	disconnect() {
+		if (this.ws) {
+			this.reconnectAttempts = this.maxReconnectAttempts; // Prevent reconnection
+			this.ws.close();
+			this.ws = null;
+		}
+	}
+
+	isConnected(): boolean {
+		return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+	}
+}

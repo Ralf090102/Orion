@@ -22,7 +22,6 @@
 	import { browser } from "$app/environment";
 	import { snapScrollToBottom } from "$lib/actions/snapScrollToBottom";
 	import SystemPromptModal from "../SystemPromptModal.svelte";
-	import ShareConversationModal from "../ShareConversationModal.svelte";
 	import ChatIntroduction from "./ChatIntroduction.svelte";
 	import UploadedFile from "./UploadedFile.svelte";
 	import { useSettingsStore } from "$lib/stores/settings";
@@ -466,7 +465,7 @@
 
 <div class="relative z-[-1] min-h-0 min-w-0">
 	{#if shareModalOpen}
-		<ShareConversationModal open={shareModalOpen} onclose={() => shareModal.close()} />
+
 	{/if}
 	<div
 		class="scrollbar-custom h-full overflow-y-auto"

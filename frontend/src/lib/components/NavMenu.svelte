@@ -1,13 +1,10 @@
-<script lang="ts" module>
+<script lang="ts">
 	export const titles: { [key: string]: string } = {
 		today: "Today",
 		week: "This week",
 		month: "This month",
 		older: "Older",
 	} as const;
-</script>
-
-<script lang="ts">
 	import { base } from "$app/paths";
 
 	import Logo from "$lib/components/icons/Logo.svelte";
@@ -26,15 +23,13 @@
 	import { CONV_NUM_PER_PAGE } from "$lib/constants/pagination";
 	import { browser } from "$app/environment";
 	import { usePublicConfig } from "$lib/utils/PublicConfig.svelte";
-	import { useAPIClient, handleResponse } from "$lib/APIClient";
-	import { requireAuthUser } from "$lib/utils/auth";
 	import { enabledServersCount } from "$lib/stores/mcpServers";
 	import { isPro } from "$lib/stores/isPro";
 	import IconPro from "$lib/components/icons/IconPro.svelte";
 	import MCPServerManager from "./mcp/MCPServerManager.svelte";
 
 	const publicConfig = usePublicConfig();
-	const client = useAPIClient();
+	const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
 	interface Props {
 		conversations: ConvSidebar[];
@@ -56,16 +51,10 @@
 
 	function handleNewChatClick(e: MouseEvent) {
 		isAborted.set(true);
-
-		if (requireAuthUser()) {
-			e.preventDefault();
-		}
 	}
 
 	function handleNavItemClick(e: MouseEvent) {
-		if (requireAuthUser()) {
-			e.preventDefault();
-		}
+		// Navigation click handler
 	}
 
 	const dateRanges = [
@@ -89,21 +78,31 @@
 
 	async function handleVisible() {
 		p++;
-		const newConvs = await client.conversations
-			.get({
-				query: {
-					p,
-				},
-			})
-			.then(handleResponse)
-			.then((r) => r.conversations)
-			.catch((): ConvSidebar[] => []);
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/chat/sessions?limit=${CONV_NUM_PER_PAGE}&offset=${p * CONV_NUM_PER_PAGE}`);
+			
+			if (!response.ok) {
+				console.error('Failed to fetch sessions');
+				return;
+			}
 
-		if (newConvs.length === 0) {
-			hasMore = false;
+			const data = await response.json();
+			const newConvs: ConvSidebar[] = data.sessions?.map((session: any) => ({
+				id: session.session_id,
+				title: session.metadata?.title || session.metadata?.topic || 'New Chat',
+				updatedAt: new Date(session.updated_at),
+				createdAt: new Date(session.created_at),
+				model: session.metadata?.model || 'default'
+			})) || [];
+			
+			if (newConvs.length === 0) {
+				hasMore = false;
+			}
+
+			conversations = [...conversations, ...newConvs];
+		} catch (error) {
+			console.error('Error fetching conversations:', error);
 		}
-
-		conversations = [...conversations, ...newConvs];
 	}
 
 	$effect(() => {
