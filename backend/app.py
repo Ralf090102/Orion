@@ -128,12 +128,13 @@ async def root():
 
 # ========== ROUTE REGISTRATION ==========
 # Import and include routers
-from backend.api import chat, health, ingestion, rag, settings
+from backend.api import chat, health, ingestion, models, rag, settings
 
 app.include_router(settings.router)
 app.include_router(ingestion.router)
 app.include_router(rag.router)
 app.include_router(chat.router)
+app.include_router(models.router)
 app.include_router(health.router)
 
 

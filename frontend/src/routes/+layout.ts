@@ -24,13 +24,25 @@ export const load = async ({ depends, fetch }) => {
 		console.error('Failed to load conversations:', err);
 	}
 
-	// Mock models - replace with actual model from your backend if needed
+	// Fetch actual active model from backend
+	let activeModelName = 'mistral:latest';
+	try {
+		const response = await fetch(`${BACKEND_URL}/api/models/config`);
+		if (response.ok) {
+			const config = await response.json();
+			activeModelName = config.model;
+		}
+	} catch (err) {
+		console.error('Failed to load model config:', err);
+	}
+
+	// Create model entry based on active model
 	const models = [
 		{
-			id: 'default',
-			name: 'Local LLM',
-			displayName: 'Local LLM',
-			description: 'Local language model',
+			id: activeModelName,
+			name: activeModelName,
+			displayName: activeModelName,
+			description: 'Ollama model',
 			websiteUrl: '',
 			modelUrl: '',
 			datasetName: '',
@@ -56,9 +68,9 @@ export const load = async ({ depends, fetch }) => {
 		PUBLIC_APPLE_APP_ID: undefined,
 	};
 
-	// Mock settings
+	// Settings with actual active model
 	const settings = {
-		activeModel: 'default',
+		activeModel: activeModelName,
 		customPrompts: {},
 		hidePromptExamples: {},
 		multimodalOverrides: {},
