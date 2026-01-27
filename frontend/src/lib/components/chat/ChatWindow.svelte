@@ -27,6 +27,7 @@
 	import { useSettingsStore } from "$lib/stores/settings";
 	import { error } from "$lib/stores/errors";
 	import ModelSwitch from "./ModelSwitch.svelte";
+	import ModelParametersModal from "../ModelParametersModal.svelte";
 	import { routerExamples } from "$lib/constants/routerExamples";
 	import { mcpExamples } from "$lib/constants/mcpExamples";
 	import type { RouterFollowUp, RouterExample } from "$lib/constants/routerExamples";
@@ -86,6 +87,7 @@
 	let shareModalOpen = $state(false);
 	let editMsdgId: Message["id"] | null = $state(null);
 	let pastedLongContent = $state(false);
+	let showParametersModal = $state(false);
 
 	// Voice recording state
 	let isRecording = $state(false);
@@ -695,11 +697,11 @@
 							</span>
 						</span>
 					{:else if !currentModel.isRouter || !loading}
-						<a
-							href="{base}/settings/{currentModel.id}"
-							onclick={(e) => {
-								if (requireAuthUser()) {
-									e.preventDefault();
+						<button
+							type="button"
+							onclick={() => {
+								if (!requireAuthUser()) {
+									showParametersModal = true;
 								}
 							}}
 							class="inline-flex items-center gap-1 hover:underline"
@@ -711,7 +713,7 @@
 								Model: {currentModel.displayName}
 							{/if}
 							<CarbonCaretDown class="-ml-0.5 text-xxs" />
-						</a>
+						</button>
 					{:else if showRouterDetails && streamingRouterMetadata?.route}
 						<div
 							class="mr-2 flex items-center gap-1.5 whitespace-nowrap text-[.70rem] text-xs leading-none text-gray-400 dark:text-gray-400"
@@ -748,6 +750,14 @@
 		</div>
 	</div>
 </div>
+
+{#if showParametersModal}
+	<ModelParametersModal 
+		bind:open={showParametersModal}
+		onClose={() => showParametersModal = false}
+		modelName={currentModel.id}
+	/>
+{/if}
 
 <style lang="postcss">
 	.paste-glow {
