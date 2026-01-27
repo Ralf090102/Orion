@@ -1,279 +1,100 @@
 <script lang="ts">
-	import { onMount } from "svelte";
-	import CarbonSave from "~icons/carbon/save";
-	import CarbonReset from "~icons/carbon/reset";
+	import CarbonSettings from "~icons/carbon/settings";
+	import CarbonChevronRight from "~icons/carbon/chevron-right";
+	import CarbonDocumentTasks from "~icons/carbon/document-tasks";
 
-	let settings = $state({
-		backendUrl: 'http://localhost:8000',
-		backendWs: 'ws://localhost:8000',
-		ollamaUrl: 'http://localhost:11434',
-		embeddingModel: 'nomic-embed-text',
-		chatModel: 'llama3.2',
-		temperature: 0.7,
-		maxTokens: 2048,
-		topP: 0.9,
-		chunkSize: 1000,
-		chunkOverlap: 200,
-	});
-
-	let saved = $state(false);
-	let loading = $state(false);
-
-	onMount(async () => {
-		// TODO: Load settings from backend /api/settings
-		// For now, load from env/localStorage if available
-		const storedBackendUrl = localStorage.getItem('backendUrl');
-		if (storedBackendUrl) {
-			settings.backendUrl = storedBackendUrl;
-		}
-	});
-
-	async function saveSettings() {
-		loading = true;
-		try {
-			// TODO: Send to backend /api/settings
-			localStorage.setItem('backendUrl', settings.backendUrl);
-			
-			// Simulate API call
-			await new Promise(resolve => setTimeout(resolve, 500));
-			
-			saved = true;
-			setTimeout(() => {
-				saved = false;
-			}, 3000);
-		} catch (err) {
-			console.error('Failed to save settings:', err);
-		} finally {
-			loading = false;
-		}
-	}
-
-	function resetToDefaults() {
-		settings = {
-			backendUrl: 'http://localhost:8000',
-			backendWs: 'ws://localhost:8000',
-			ollamaUrl: 'http://localhost:11434',
-			embeddingModel: 'nomic-embed-text',
-			chatModel: 'llama3.2',
-			temperature: 0.7,
-			maxTokens: 2048,
-			topP: 0.9,
-			chunkSize: 1000,
-			chunkOverlap: 200,
-		};
-	}
+	const settingsCategories = [
+		{
+			id: 'rag',
+			title: 'RAG Pipeline',
+			description: 'Configure retrieval, embedding, chunking, and generation settings',
+			icon: CarbonDocumentTasks,
+			path: '/settings/rag',
+			enabled: true
+		},
+		// Future settings categories will be added here
+		// {
+		//   id: 'backend',
+		//   title: 'Backend Configuration',
+		//   description: 'Configure backend endpoints and connections',
+		//   icon: CarbonServer,
+		//   path: '/settings/backend',
+		//   enabled: false
+		// }
+	];
 </script>
 
 <svelte:head>
-	<title>Application Settings - Orion</title>
+	<title>Settings - Orion</title>
 </svelte:head>
 
 <div class="flex h-full flex-col gap-y-6 overflow-y-auto px-5 py-8 sm:px-8">
 	<div>
-		<h1 class="text-2xl font-bold">Application Settings</h1>
+		<h1 class="text-2xl font-bold">Settings</h1>
 		<p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
-			Configure backend endpoints and model parameters
+			Configure your Orion application
 		</p>
 	</div>
 
-	<form onsubmit={(e) => { e.preventDefault(); saveSettings(); }} class="flex flex-col gap-6">
-		<!-- Backend Configuration -->
-		<section class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
-			<h2 class="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">Backend Configuration</h2>
-			
-			<div class="flex flex-col gap-4">
-				<div>
-					<label for="backendUrl" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-						Backend URL
-					</label>
-					<input
-						type="text"
-						id="backendUrl"
-						bind:value={settings.backendUrl}
-						placeholder="http://localhost:8000"
-						class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-					/>
-					<p class="mt-1 text-xs text-gray-500">FastAPI backend REST endpoint</p>
+	<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+		{#each settingsCategories as category}
+			{#if category.enabled}
+				<a
+					href={category.path}
+					class="group rounded-xl border border-gray-200 bg-white p-6 transition-all hover:border-blue-500 hover:shadow-md dark:border-gray-700 dark:bg-gray-800 dark:hover:border-blue-500"
+				>
+					<div class="flex items-start justify-between">
+						<div class="flex items-start gap-4">
+							<div class="rounded-lg bg-blue-100 p-3 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+								<svelte:component this={category.icon} class="size-6" />
+							</div>
+							<div class="flex-1">
+								<h3 class="font-semibold text-gray-900 dark:text-gray-100">
+									{category.title}
+								</h3>
+								<p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+									{category.description}
+								</p>
+							</div>
+						</div>
+						<CarbonChevronRight class="size-5 text-gray-400 transition-transform group-hover:translate-x-1 dark:text-gray-500" />
+					</div>
+				</a>
+			{:else}
+				<div class="rounded-xl border border-gray-200 bg-gray-50 p-6 opacity-60 dark:border-gray-700 dark:bg-gray-800/50">
+					<div class="flex items-start gap-4">
+						<div class="rounded-lg bg-gray-200 p-3 text-gray-400 dark:bg-gray-700 dark:text-gray-500">
+							<svelte:component this={category.icon} class="size-6" />
+						</div>
+						<div class="flex-1">
+							<h3 class="font-semibold text-gray-500 dark:text-gray-400">
+								{category.title}
+							</h3>
+							<p class="mt-1 text-sm text-gray-500 dark:text-gray-500">
+								{category.description}
+							</p>
+							<p class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+								Coming soon
+							</p>
+						</div>
+					</div>
 				</div>
+			{/if}
+		{/each}
+	</div>
 
-				<div>
-					<label for="backendWs" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-						Backend WebSocket URL
-					</label>
-					<input
-						type="text"
-						id="backendWs"
-						bind:value={settings.backendWs}
-						placeholder="ws://localhost:8000"
-						class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-					/>
-					<p class="mt-1 text-xs text-gray-500">WebSocket endpoint for real-time chat</p>
-				</div>
-
-				<div>
-					<label for="ollamaUrl" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-						Ollama URL
-					</label>
-					<input
-						type="text"
-						id="ollamaUrl"
-						bind:value={settings.ollamaUrl}
-						placeholder="http://localhost:11434"
-						class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-					/>
-					<p class="mt-1 text-xs text-gray-500">Ollama API endpoint</p>
-				</div>
+	<!-- Info Box -->
+	<div class="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
+		<div class="flex items-start gap-3">
+			<CarbonSettings class="size-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+			<div class="flex-1">
+				<h3 class="font-semibold text-blue-900 dark:text-blue-200 text-sm">
+					Settings Organization
+				</h3>
+				<p class="text-sm text-blue-800 dark:text-blue-300 mt-1">
+					Settings are organized by feature category. Click on a category to configure its settings. More categories will be added as new features are developed.
+				</p>
 			</div>
-		</section>
-
-		<!-- Model Configuration -->
-		<section class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
-			<h2 class="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">Model Configuration</h2>
-			
-			<div class="flex flex-col gap-4">
-				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-					<div>
-						<label for="chatModel" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-							Chat Model
-						</label>
-						<input
-							type="text"
-							id="chatModel"
-							bind:value={settings.chatModel}
-							placeholder="llama3.2"
-							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-						/>
-					</div>
-
-					<div>
-						<label for="embeddingModel" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-							Embedding Model
-						</label>
-						<input
-							type="text"
-							id="embeddingModel"
-							bind:value={settings.embeddingModel}
-							placeholder="nomic-embed-text"
-							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-						/>
-					</div>
-				</div>
-
-				<div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-					<div>
-						<label for="temperature" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-							Temperature
-						</label>
-						<input
-							type="number"
-							id="temperature"
-							bind:value={settings.temperature}
-							min="0"
-							max="2"
-							step="0.1"
-							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-						/>
-						<p class="mt-1 text-xs text-gray-500">0.0 - 2.0</p>
-					</div>
-
-					<div>
-						<label for="maxTokens" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-							Max Tokens
-						</label>
-						<input
-							type="number"
-							id="maxTokens"
-							bind:value={settings.maxTokens}
-							min="128"
-							max="8192"
-							step="128"
-							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-						/>
-					</div>
-
-					<div>
-						<label for="topP" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-							Top P
-						</label>
-						<input
-							type="number"
-							id="topP"
-							bind:value={settings.topP}
-							min="0"
-							max="1"
-							step="0.1"
-							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-						/>
-						<p class="mt-1 text-xs text-gray-500">0.0 - 1.0</p>
-					</div>
-				</div>
-			</div>
-		</section>
-
-		<!-- RAG Configuration -->
-		<section class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
-			<h2 class="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">RAG Configuration</h2>
-			
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-				<div>
-					<label for="chunkSize" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-						Chunk Size
-					</label>
-					<input
-						type="number"
-						id="chunkSize"
-						bind:value={settings.chunkSize}
-						min="100"
-						max="4000"
-						step="100"
-						class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-					/>
-					<p class="mt-1 text-xs text-gray-500">Text chunk size for embeddings</p>
-				</div>
-
-				<div>
-					<label for="chunkOverlap" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-						Chunk Overlap
-					</label>
-					<input
-						type="number"
-						id="chunkOverlap"
-						bind:value={settings.chunkOverlap}
-						min="0"
-						max="500"
-						step="50"
-						class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-					/>
-					<p class="mt-1 text-xs text-gray-500">Overlap between chunks</p>
-				</div>
-			</div>
-		</section>
-
-		<!-- Action Buttons -->
-		<div class="flex items-center justify-between border-t border-gray-200 pt-6 dark:border-gray-700">
-			<button
-				type="button"
-				onclick={resetToDefaults}
-				class="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-			>
-				<CarbonReset class="size-4" />
-				Reset to Defaults
-			</button>
-
-			<button
-				type="submit"
-				disabled={loading}
-				class="flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
-			>
-				<CarbonSave class="size-4" />
-				{loading ? 'Saving...' : 'Save Settings'}
-			</button>
 		</div>
-
-		{#if saved}
-			<div class="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400">
-				✓ Settings saved successfully
-			</div>
-		{/if}
-	</form>
+	</div>
 </div>
