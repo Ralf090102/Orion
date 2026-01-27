@@ -163,12 +163,25 @@ class ChatWebSocketHandler:
             if temperature is not None:
                 generation_kwargs["temperature"] = temperature
             
-            # Token buffer for streaming
-            token_buffer = []
+            # Store reference to send_message for sync callback
+            send_msg = self.send_message
+            websocket = self.websocket
             
+            # Stream tokens directly to WebSocket (sync callback for Ollama)
             def stream_token(token: str):
-                """Collect tokens for streaming."""
-                token_buffer.append(token)
+                """Stream tokens directly to client (runs in sync context)."""
+                # Create async task to send via WebSocket
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Schedule coroutine in running loop
+                        asyncio.create_task(send_msg(message_type="token", content=token))
+                    else:
+                        # Run in new event loop if needed
+                        asyncio.run(send_msg(message_type="token", content=token))
+                except Exception as e:
+                    logger.error(f"Failed to send token: {e}")
             
             # Generate chat response with streaming
             result = self.generator.generate_chat_response(
@@ -180,13 +193,6 @@ class ChatWebSocketHandler:
                 on_token=stream_token,
                 **generation_kwargs,
             )
-            
-            # Stream tokens to client
-            for token in token_buffer:
-                await self.send_message(
-                    message_type="token",
-                    content=token,
-                )
             
             # Send sources if available
             if include_sources and result.rag_triggered and hasattr(result, "sources") and result.sources:

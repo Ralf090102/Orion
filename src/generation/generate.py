@@ -368,6 +368,8 @@ class AnswerGenerator:
                 temperature=llm_temperature,
                 top_p=self.config.rag.llm.top_p,
                 max_tokens=self.config.rag.llm.max_tokens,
+                stream=stream,
+                on_token=on_token,
             )
             timing.llm_generation_time = time.time() - llm_start
         except Exception as e:

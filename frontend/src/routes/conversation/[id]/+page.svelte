@@ -26,6 +26,7 @@
 	let messages = $state<Message[]>([]);
 	let conversations = $state(data.conversations);
 	let wsChat: WebSocketChat | null = null;
+	let messageUpdateTrigger = $state(0); // Force reactivity trigger
 
 	$effect(() => {
 		conversations = data.conversations;
@@ -75,15 +76,10 @@
 			wsChat.disconnect();
 		}
 
-		console.log('[WebSocket] Initializing connection for session:', page.params.id);
-
 		wsChat = new WebSocketChat({
 			sessionId: page.params.id,
 			onMessage: (content, done) => {
-				console.log('[WebSocket] Received message:', { content, done });
-				
 				if (done) {
-					console.log('[WebSocket] Generation complete');
 					$loading = false;
 					pending = false;
 					return;
@@ -94,26 +90,25 @@
 				const lastMsg = messages[lastIndex];
 				
 				if (lastMsg && lastMsg.from === 'assistant') {
-					// Create a new message object to trigger reactivity
-					const updatedMessage = {
+					// Force reactivity increment
+					messageUpdateTrigger++;
+					
+					// Create a completely new message object to trigger reactivity
+					const updatedMessage: Message = {
 						...lastMsg,
 						content: lastMsg.content + content,
 						updatedAt: new Date(),
-					};
+						// Force Svelte to detect this as a different object
+						_updateCount: messageUpdateTrigger
+					} as Message;
 					
 					// Create new array with updated message
 					messages = [
 						...messages.slice(0, lastIndex),
 						updatedMessage
 					];
-					
-					console.log('[WebSocket] Updated assistant message:', {
-						length: updatedMessage.content.length,
-						preview: updatedMessage.content.substring(0, 50),
-						totalMessages: messages.length
-					});
 				} else {
-					console.warn('[WebSocket] No assistant message to update, messages:', messages);
+					console.warn('[WebSocket] No assistant message to update');
 				}
 			},
 			onError: (errorMsg) => {
@@ -151,12 +146,10 @@
 			// Add user message
 			const userMessage = createMessage('user', prompt, files.length > 0 ? files : undefined);
 			messages = [...messages, userMessage];
-			console.log('[WriteMessage] Added user message, total messages:', messages.length);
 
 			// Add empty assistant message
 			const assistantMessage = createMessage('assistant', '');
 			messages = [...messages, assistantMessage];
-			console.log('[WriteMessage] Added empty assistant message, total messages:', messages.length);
 
 			// Convert files to base64 if present
 			const base64Files = await Promise.all(
@@ -170,15 +163,9 @@
 				)
 			);
 
-			if (base64Files.length > 0) {
-				console.log('[WriteMessage] Converted files to base64:', base64Files.length);
-			}
-
 			// Send via WebSocket
-			console.log('[WriteMessage] Sending to WebSocket...');
 			wsChat.sendMessage(prompt, base64Files);
 			files = [];
-			console.log('[WriteMessage] Message sent successfully');
 
 		} catch (err) {
 			console.error('[WriteMessage] Error:', err);

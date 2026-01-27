@@ -298,6 +298,7 @@ class OllamaClient:
         top_p: float = 0.9,
         max_tokens: Optional[int] = None,
         stream: bool = False,
+        on_token: Optional[callable] = None,
     ) -> dict:
         """
         Generate a response using the Ollama API.
@@ -308,7 +309,8 @@ class OllamaClient:
             temperature: Sampling temperature (0.0 to 1.0)
             top_p: Nucleus sampling parameter
             max_tokens: Maximum tokens to generate
-            stream: Whether to stream the response (not currently implemented)
+            stream: Whether to stream the response
+            on_token: Optional callback function for streaming tokens
             
         Returns:
             Dict with 'message' key containing response with 'content' key
@@ -329,13 +331,25 @@ class OllamaClient:
             if self.timeout:
                 options["timeout"] = self.timeout
             
-            # Call Ollama API
+            # Call Ollama API with streaming if requested
             response = ollama.chat(
                 model=model,
                 messages=messages,
                 options=options,
-                stream=False,
+                stream=stream,
             )
+            
+            # Handle streaming response
+            if stream and on_token:
+                full_content = ""
+                for chunk in response:
+                    if 'message' in chunk and 'content' in chunk['message']:
+                        token = chunk['message']['content']
+                        full_content += token
+                        on_token(token)
+                
+                # Return final response in same format as non-streaming
+                return {"message": {"content": full_content}}
             
             return response
             

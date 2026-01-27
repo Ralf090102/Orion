@@ -39,7 +39,6 @@ export class WebSocketChat {
 			this.ws.onmessage = (event) => {
 				try {
 					const data = JSON.parse(event.data);
-					console.log('[WebSocket] Received:', data);
 					
 					// Handle different message types from backend
 					if (data.type === 'token') {
@@ -53,16 +52,13 @@ export class WebSocketChat {
 						this.options.onError?.(data.content || data.data?.message || 'Unknown error');
 					} else if (data.type === 'connected') {
 						// Connection acknowledged
-						console.log('[WebSocket] Server acknowledged connection:', data.data);
+						console.log('[WebSocket] Connected to server');
 					} else if (data.type === 'sources') {
-						// RAG sources received
-						console.log('[WebSocket] Sources received:', data.data?.sources?.length || 0);
+						// RAG sources received (could be used to display citations)
 					} else if (data.type === 'metadata') {
-						// Metadata received
-						console.log('[WebSocket] Metadata:', data.data);
+						// Metadata received (processing time, RAG status, etc.)
 					} else if (data.type === 'pong') {
 						// Pong response to ping
-						console.log('[WebSocket] Pong received');
 					} else {
 						console.warn('[WebSocket] Unknown message type:', data.type);
 					}
