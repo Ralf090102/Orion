@@ -394,9 +394,9 @@
 {/if}
 {#if message.from === "user"}
 	<div
-		class="group relative {alternatives.length > 1 && editMsdgId === null
+		class="group relative ml-auto flex w-fit max-w-[85%] flex-col items-end gap-4 {alternatives.length > 1 && editMsdgId === null
 			? 'mb-7'
-			: ''} w-full items-start justify-start gap-4 max-sm:text-sm"
+			: ''}"
 		data-message-id={message.id}
 		data-message-type="user"
 		role="presentation"
@@ -405,7 +405,7 @@
 	>
 		<div class="flex w-full flex-col gap-2">
 			{#if message.files?.length}
-				<div class="flex w-fit gap-4 px-5">
+				<div class="flex w-fit flex-wrap gap-2.5 rounded-xl bg-blue-50/50 p-3 dark:bg-blue-950/20">
 					{#each message.files as file}
 						<UploadedFile {file} canClose={false} />
 					{/each}
@@ -414,14 +414,16 @@
 
 			<div class="flex w-full flex-row flex-nowrap">
 				{#if !editMode}
-					<p
-						class="disabled w-full appearance-none whitespace-break-spaces text-wrap break-words bg-inherit px-5 py-3.5 text-gray-500 dark:text-gray-400"
+					<div
+						class="w-full rounded-2xl border border-blue-200/80 bg-gradient-to-br from-blue-50 to-blue-100/50 px-5 py-3.5 shadow-sm dark:border-blue-800/50 dark:from-blue-950/40 dark:to-blue-900/30 dark:shadow-blue-900/20"
 					>
-						{message.content.trim()}
-					</p>
+						<p class="whitespace-break-spaces text-wrap break-words text-gray-800 dark:text-gray-100">
+							{message.content.trim()}
+						</p>
+					</div>
 				{:else}
 					<form
-						class="mt-3 flex w-full flex-col"
+						class="flex w-full flex-col gap-3"
 						bind:this={editFormEl}
 						onsubmit={(e) => {
 							e.preventDefault();
@@ -430,39 +432,37 @@
 						}}
 					>
 						<textarea
-							class="w-full whitespace-break-spaces break-words rounded-xl bg-gray-100 px-5 py-3.5 text-gray-500 *:h-max focus:outline-none dark:bg-gray-800 dark:text-gray-400"
+							class="w-full whitespace-break-spaces break-words rounded-xl border-2 border-blue-200 bg-white px-4 py-3 text-gray-800 shadow-sm transition-all focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-blue-800 dark:bg-gray-900 dark:text-gray-100 dark:focus:border-blue-600"
 							rows="5"
 							bind:this={editContentEl}
 							value={message.content.trim()}
 							onkeydown={handleKeyDown}
 							required
 						></textarea>
-						<div class="flex w-full flex-row flex-nowrap items-center justify-center gap-2 pt-2">
-							<button
-								type="submit"
-								class="btn rounded-lg px-3 py-1.5 text-sm
-                                {loading
-									? 'bg-gray-300 text-gray-400 dark:bg-gray-700 dark:text-gray-600'
-									: 'bg-gray-200 text-gray-600 hover:text-gray-800   focus:ring-0 dark:bg-gray-800 dark:text-gray-300 dark:hover:text-gray-200'}
-								"
-								disabled={loading}
-							>
-								Send
-							</button>
+						<div class="flex w-full flex-row items-center justify-end gap-2">
 							<button
 								type="button"
-								class="btn rounded-sm p-2 text-sm text-gray-400 hover:text-gray-500 focus:ring-0 dark:text-gray-400 dark:hover:text-gray-300"
+								class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-all hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
 								onclick={() => {
 									editMsdgId = null;
 								}}
 							>
 								Cancel
 							</button>
+							<button
+								type="submit"
+								class="rounded-lg border-0 bg-gradient-to-br px-4 py-2 text-sm font-medium shadow-md transition-all {loading
+									? 'from-gray-200 to-gray-300 text-gray-400 cursor-not-allowed dark:from-gray-700 dark:to-gray-600 dark:text-gray-500'
+									: 'from-blue-600 to-blue-700 text-white shadow-blue-500/30 hover:from-blue-700 hover:to-blue-800 hover:shadow-lg hover:shadow-blue-500/40 dark:from-blue-500 dark:to-blue-600 dark:shadow-blue-400/30 dark:hover:from-blue-600 dark:hover:to-blue-700'}"
+								disabled={loading}
+							>
+								Send
+							</button>
 						</div>
 					</form>
 				{/if}
 			</div>
-			<div class="absolute -bottom-4 ml-3.5 flex w-full gap-1.5">
+			<div class="absolute -bottom-3.5 right-0 flex gap-2">
 				{#if alternatives.length > 1 && editMsdgId === null}
 					<Alternatives
 						{message}
@@ -473,15 +473,15 @@
 				{/if}
 				{#if (alternatives.length > 1 && editMsdgId === null) || (!loading && !editMode)}
 					<button
-						class="hidden cursor-pointer items-center gap-1 rounded-md border border-gray-200 px-1.5 py-0.5 text-xs text-gray-400 group-hover:flex hover:flex hover:text-gray-500 dark:border-gray-700 dark:text-gray-400 dark:hover:text-gray-300 lg:-right-2"
-						title="Edit"
+						class="hidden cursor-pointer items-center gap-1.5 rounded-lg border border-blue-200/80 bg-white/90 px-2.5 py-1 text-xs font-medium text-blue-700 shadow-sm backdrop-blur transition-all group-hover:flex hover:flex hover:border-blue-300 hover:bg-blue-50 hover:text-blue-800 hover:shadow-md dark:border-blue-800/50 dark:bg-gray-900/90 dark:text-blue-300 dark:hover:border-blue-700 dark:hover:bg-blue-950/50 dark:hover:text-blue-200"
+						title="Edit message"
 						type="button"
 						onclick={() => {
 							if (requireAuthUser()) return;
 							editMsdgId = message.id;
 						}}
 					>
-						<CarbonPen />
+						<CarbonPen class="size-3" />
 						Edit
 					</button>
 				{/if}

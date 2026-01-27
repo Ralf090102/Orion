@@ -603,9 +603,10 @@
 					handleSubmit();
 				}}
 				class={{
-					"relative flex w-full max-w-4xl flex-1 items-center rounded-xl border bg-gray-100 dark:border-gray-700 dark:bg-gray-800": true,
+					"relative flex w-full max-w-4xl flex-1 items-center rounded-2xl border-2 bg-white shadow-lg shadow-gray-200/50 transition-all dark:border-gray-600 dark:bg-gray-800 dark:shadow-gray-900/50": true,
 					"opacity-30": isReadOnly,
 					"max-sm:mb-4": focused && isVirtualKeyboard(),
+					"ring-2 ring-blue-500/20 border-blue-400/50 dark:ring-blue-400/30 dark:border-blue-500/50": focused && !isReadOnly,
 				}}
 			>
 				{#if isRecording || isTranscribing}
@@ -648,13 +649,13 @@
 							<StopGeneratingBtn
 								onClick={() => onstop?.()}
 								showBorder={true}
-								classNames="absolute bottom-2 right-2 size-8 sm:size-7 self-end rounded-full border bg-white text-black shadow transition-none dark:border-transparent dark:bg-gray-600 dark:text-white"
+								classNames="absolute bottom-2.5 right-2.5 size-9 sm:size-8 self-end rounded-xl border-0 bg-gradient-to-br from-red-500 to-red-600 text-white shadow-md shadow-red-500/30 transition-all hover:from-red-600 hover:to-red-700 hover:shadow-lg dark:from-red-600 dark:to-red-700"
 							/>
 						{:else}
 							{#if transcriptionEnabled}
 								<button
 									type="button"
-									class="btn absolute bottom-2 right-10 mr-1.5 size-8 self-end rounded-full border bg-white/50 text-gray-500 transition-none hover:bg-gray-50 hover:text-gray-700 dark:border-transparent dark:bg-gray-600/50 dark:text-gray-300 dark:hover:bg-gray-500 dark:hover:text-white sm:right-9 sm:size-7"
+									class="btn absolute bottom-2.5 right-12 size-9 self-end rounded-xl border-0 bg-gradient-to-br from-gray-50 to-gray-100 text-gray-600 shadow-sm transition-all hover:from-gray-100 hover:to-gray-200 hover:text-gray-800 hover:shadow-md dark:from-gray-700 dark:to-gray-600 dark:text-gray-300 dark:hover:from-gray-600 dark:hover:to-gray-500 sm:right-11 sm:size-8"
 									disabled={isReadOnly}
 									onclick={() => {
 										isRecording = true;
@@ -665,10 +666,10 @@
 								</button>
 							{/if}
 							<button
-								class="btn absolute bottom-2 right-2 size-8 self-end rounded-full border bg-white text-black shadow transition-none enabled:hover:bg-white enabled:hover:shadow-inner dark:border-transparent dark:bg-gray-600 dark:text-white dark:hover:enabled:bg-black sm:size-7 {!draft ||
+								class="btn absolute bottom-2.5 right-2.5 size-9 self-end rounded-xl border-0 bg-gradient-to-br shadow-md transition-all sm:size-8 {!draft ||
 								isReadOnly
-									? ''
-									: '!bg-black !text-white dark:!bg-white dark:!text-black'}"
+									? 'from-gray-100 to-gray-200 text-gray-400 dark:from-gray-700 dark:to-gray-600 dark:text-gray-500 cursor-not-allowed'
+									: 'from-blue-600 to-blue-700 text-white shadow-blue-500/30 hover:from-blue-700 hover:to-blue-800 hover:shadow-lg hover:shadow-blue-500/40 dark:from-blue-500 dark:to-blue-600 dark:shadow-blue-400/30 dark:hover:from-blue-600 dark:hover:to-blue-700'}"
 								disabled={!draft || isReadOnly}
 								type="submit"
 								aria-label="Send message"

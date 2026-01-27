@@ -220,7 +220,7 @@
 		rows="1"
 		tabindex="0"
 		inputmode="text"
-		class="scrollbar-custom max-h-[4lh] w-full resize-none overflow-y-auto overflow-x-hidden border-0 bg-transparent px-2.5 py-2.5 outline-none focus:ring-0 focus-visible:ring-0 sm:px-3 md:max-h-[8lh]"
+		class="scrollbar-custom max-h-[4lh] w-full resize-none overflow-y-auto overflow-x-hidden border-0 bg-transparent px-4 py-3.5 text-gray-800 outline-none placeholder:text-gray-400 focus:ring-0 focus-visible:ring-0 dark:text-gray-100 dark:placeholder:text-gray-500 sm:px-4 md:max-h-[8lh]"
 		class:text-gray-400={disabled}
 		bind:value
 		bind:this={textareaElement}
@@ -237,7 +237,7 @@
 	{#if !showNoTools}
 		<div
 			class={[
-				"scrollbar-custom -ml-0.5 flex max-w-[calc(100%-40px)] flex-wrap items-center justify-start gap-2.5 px-3 pb-2.5 pt-1.5 text-gray-500 dark:text-gray-400 max-md:flex-nowrap max-md:overflow-x-auto sm:gap-2",
+				"scrollbar-custom flex max-w-[calc(100%-50px)] flex-wrap items-center justify-start gap-2.5 px-4 pb-3 pt-1 text-gray-500 dark:text-gray-400 max-md:flex-nowrap max-md:overflow-x-auto sm:gap-2",
 			]}
 		>
 			{#if showFileUpload}
@@ -269,11 +269,11 @@
 						}}
 					>
 						<DropdownMenu.Trigger
-							class="btn size-8 rounded-full border bg-white text-black shadow transition-none enabled:hover:bg-white enabled:hover:shadow-inner dark:border-transparent dark:bg-gray-600/50 dark:text-white dark:hover:enabled:bg-gray-600 sm:size-7"
-							disabled={loading}
-							aria-label="Add attachment"
-						>
-							<IconPlus class="text-base sm:text-sm" />
+						class="btn size-9 rounded-xl border-0 bg-gradient-to-br from-gray-50 to-gray-100 text-gray-700 shadow-sm transition-all enabled:hover:from-gray-100 enabled:hover:to-gray-200 enabled:hover:shadow-md dark:from-gray-700 dark:to-gray-600 dark:text-gray-200 dark:hover:enabled:from-gray-600 dark:hover:enabled:to-gray-500 sm:size-8"
+						disabled={loading}
+						aria-label="Add attachment"
+					>
+						<IconPlus class="text-lg sm:text-base" />
 						</DropdownMenu.Trigger>
 						<DropdownMenu.Portal>
 							<DropdownMenu.Content
