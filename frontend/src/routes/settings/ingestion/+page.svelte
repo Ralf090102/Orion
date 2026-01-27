@@ -525,9 +525,6 @@
 						{/each}
 					</div>
 					<p class="mt-2 text-xs text-gray-500">Enter absolute or relative paths to documents. Add multiple paths to ingest from different locations.</p>
-					<p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-						<strong>Note:</strong> Very small files (less than ~50 characters) may be skipped during ingestion if they don't meet minimum chunk size requirements.
-					</p>
 				</div>
 
 				<div class="flex flex-wrap gap-4">
@@ -682,6 +679,9 @@
 					{/each}
 				</div>
 			{/if}
+            <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                <strong>Note:</strong> Very small files (less than ~50 characters) may be skipped during ingestion if they don't meet minimum chunk size requirements.
+            </p>
 		</section>
 		{/if}
 
