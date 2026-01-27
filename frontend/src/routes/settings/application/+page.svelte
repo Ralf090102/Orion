@@ -2,6 +2,7 @@
 	import CarbonSettings from "~icons/carbon/settings";
 	import CarbonChevronRight from "~icons/carbon/chevron-right";
 	import CarbonDocumentTasks from "~icons/carbon/document-tasks";
+	import CarbonUpload from "~icons/carbon/upload";
 
 	const settingsCategories = [
 		{
@@ -10,6 +11,14 @@
 			description: 'Configure retrieval, embedding, chunking, and generation settings',
 			icon: CarbonDocumentTasks,
 			path: '/settings/rag',
+			enabled: true
+		},
+		{
+			id: 'ingestion',
+			title: 'Document Ingestion',
+			description: 'Ingest documents, manage knowledge base, and configure auto-ingestion',
+			icon: CarbonUpload,
+			path: '/settings/ingestion',
 			enabled: true
 		},
 		// Future settings categories will be added here
