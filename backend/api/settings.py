@@ -30,8 +30,6 @@ from backend.models.settings import (
     GenerationSettingsUpdate,
     GPUSettings,
     GPUSettingsUpdate,
-    LLMSettings,
-    LLMSettingsUpdate,
     RerankerSettings,
     RerankerSettingsUpdate,
     RetrievalSettings,
@@ -92,15 +90,6 @@ def _config_to_settings_response(config: OrionConfig) -> SettingsResponse:
             timeout=config.rag.reranker.timeout,
             top_k=config.rag.reranker.top_k,
             score_threshold=config.rag.reranker.score_threshold,
-        ),
-        llm=LLMSettings(
-            model=config.rag.llm.model,
-            base_url=config.rag.llm.base_url,
-            timeout=config.rag.llm.timeout,
-            temperature=config.rag.llm.temperature,
-            top_p=config.rag.llm.top_p,
-            max_tokens=config.rag.llm.max_tokens,
-            system_prompt=config.rag.llm.system_prompt,
         ),
         generation=GenerationSettings(
             mode=config.rag.generation.mode,
@@ -220,26 +209,6 @@ def _apply_settings_updates(
         if updates.reranker.score_threshold is not None:
             config.rag.reranker.score_threshold = updates.reranker.score_threshold
     
-    # LLM updates
-    if updates.llm:
-        updated_categories.append("llm")
-        if updates.llm.model is not None:
-            config.rag.llm.model = updates.llm.model
-            requires_restart.append("generator")
-            logger.info(f"LLM model changed to: {updates.llm.model}")
-        if updates.llm.base_url is not None:
-            config.rag.llm.base_url = updates.llm.base_url
-        if updates.llm.timeout is not None:
-            config.rag.llm.timeout = updates.llm.timeout
-        if updates.llm.temperature is not None:
-            config.rag.llm.temperature = updates.llm.temperature
-        if updates.llm.top_p is not None:
-            config.rag.llm.top_p = updates.llm.top_p
-        if updates.llm.max_tokens is not None:
-            config.rag.llm.max_tokens = updates.llm.max_tokens
-        if updates.llm.system_prompt is not None:
-            config.rag.llm.system_prompt = updates.llm.system_prompt
-    
     # Generation updates
     if updates.generation:
         updated_categories.append("generation")
@@ -330,7 +299,7 @@ async def get_all_settings(
     tags=["Settings"],
 )
 async def get_settings_by_category(
-    category: Literal["embedding", "chunking", "retrieval", "reranker", "llm", "generation", "vectorstore", "gpu"],
+    category: Literal["embedding", "chunking", "retrieval", "reranker", "generation", "vectorstore", "gpu"],
     config: OrionConfig = Depends(get_config_dependency),
 ):
     """
@@ -355,7 +324,6 @@ async def get_settings_by_category(
         "chunking": settings.chunking,
         "retrieval": settings.retrieval,
         "reranker": settings.reranker,
-        "llm": settings.llm,
         "generation": settings.generation,
         "vectorstore": settings.vectorstore,
         "gpu": settings.gpu,
@@ -436,7 +404,7 @@ async def update_settings(
     tags=["Settings"],
 )
 async def update_category_settings(
-    category: Literal["embedding", "chunking", "retrieval", "reranker", "llm", "generation", "vectorstore", "gpu"],
+    category: Literal["embedding", "chunking", "retrieval", "reranker", "generation", "vectorstore", "gpu"],
     updates: dict[str, Any],
     config: OrionConfig = Depends(get_config_dependency),
 ):
@@ -468,8 +436,6 @@ async def update_category_settings(
             update_request.retrieval = RetrievalSettingsUpdate(**updates)
         elif category == "reranker":
             update_request.reranker = RerankerSettingsUpdate(**updates)
-        elif category == "llm":
-            update_request.llm = LLMSettingsUpdate(**updates)
         elif category == "generation":
             update_request.generation = GenerationSettingsUpdate(**updates)
         elif category == "vectorstore":

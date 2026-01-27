@@ -161,44 +161,6 @@ class RerankerSettingsUpdate(BaseModel):
     score_threshold: Optional[float] = Field(None, ge=0.0, le=1.0, description="Score threshold (0-1)")
 
 
-# ========== LLM SETTINGS ==========
-class LLMSettings(BaseModel):
-    """LLM configuration settings (read-only)."""
-
-    model: str = Field(..., description="Ollama model name")
-    base_url: str = Field(..., description="Ollama API base URL")
-    timeout: int = Field(..., description="Request timeout in seconds")
-    temperature: float = Field(..., description="Sampling temperature (0-2)")
-    top_p: float = Field(..., description="Nucleus sampling parameter")
-    max_tokens: Optional[int] = Field(None, description="Maximum tokens to generate")
-    system_prompt: str = Field(..., description="Default system prompt")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "model": "mistral:latest",
-                "base_url": "http://localhost:11434",
-                "timeout": 90,
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "max_tokens": None,
-                "system_prompt": "You are Orion, a helpful AI assistant...",
-            }
-        }
-
-
-class LLMSettingsUpdate(BaseModel):
-    """LLM settings update (partial)."""
-
-    model: Optional[str] = Field(None, description="Ollama model name")
-    base_url: Optional[str] = Field(None, description="Ollama API URL")
-    timeout: Optional[int] = Field(None, ge=10, le=600, description="Timeout (10-600s)")
-    temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="Temperature (0-2)")
-    top_p: Optional[float] = Field(None, ge=0.0, le=1.0, description="Top-p (0-1)")
-    max_tokens: Optional[int] = Field(None, ge=1, description="Max tokens")
-    system_prompt: Optional[str] = Field(None, min_length=1, description="System prompt")
-
-
 # ========== GENERATION SETTINGS ==========
 class GenerationSettings(BaseModel):
     """Text generation settings (read-only)."""
@@ -338,7 +300,6 @@ class SettingsResponse(BaseModel):
     chunking: ChunkingSettings
     retrieval: RetrievalSettings
     reranker: RerankerSettings
-    llm: LLMSettings
     generation: GenerationSettings
     vectorstore: VectorStoreSettings
     gpu: GPUSettings
@@ -349,7 +310,6 @@ class SettingsResponse(BaseModel):
             "example": {
                 "embedding": {"model": "all-MiniLM-L12-v2", "batch_size": 64},
                 "retrieval": {"default_k": 5, "enable_reranking": True},
-                "llm": {"model": "mistral:latest", "temperature": 0.7},
                 "generation": {"mode": "rag", "enable_citations": True},
                 "last_updated": "2026-01-25T10:30:00Z",
             }
@@ -364,7 +324,6 @@ class SettingsUpdateRequest(BaseModel):
     chunking: Optional[ChunkingSettingsUpdate] = None
     retrieval: Optional[RetrievalSettingsUpdate] = None
     reranker: Optional[RerankerSettingsUpdate] = None
-    llm: Optional[LLMSettingsUpdate] = None
     generation: Optional[GenerationSettingsUpdate] = None
     vectorstore: Optional[VectorStoreSettingsUpdate] = None
     gpu: Optional[GPUSettingsUpdate] = None
@@ -375,10 +334,6 @@ class SettingsUpdateRequest(BaseModel):
                 "retrieval": {
                     "default_k": 10,
                     "enable_reranking": False,
-                },
-                "llm": {
-                    "temperature": 0.8,
-                    "model": "llama3:latest",
                 },
             }
         }
