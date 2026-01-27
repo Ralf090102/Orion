@@ -2,8 +2,10 @@
 	import { onMount } from "svelte";
 	import CarbonCheckmark from "~icons/carbon/checkmark";
 	import CarbonClose from "~icons/carbon/close";
+	import CarbonOverflowMenuVertical from "~icons/carbon/overflow-menu-vertical";
 	import { env as publicEnv } from "$env/dynamic/public";
 	import { useSettingsStore } from "$lib/stores/settings.js";
+	import ModelParametersModal from "$lib/components/ModelParametersModal.svelte";
 
 	const settings = useSettingsStore();
 	const BACKEND_URL = publicEnv.PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -24,6 +26,8 @@
 
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	let showParametersModal = $state(false);
+	let selectedModelForSettings = $state<string>("");
 
 	// Models to hide (embedding models, not for generation)
 	const HIDDEN_MODELS = ["nomic-embed-text", "nomic-embed"];
@@ -117,11 +121,24 @@
 			await fetchModels();
 		}
 	}
+
+	function openParametersModal(modelName: string) {
+		selectedModelForSettings = modelName;
+		showParametersModal = true;
+	}
 </script>
 
 <svelte:head>
 	<title>Models - Orion</title>
 </svelte:head>
+
+{#if showParametersModal}
+	<ModelParametersModal 
+		bind:open={showParametersModal}
+		onClose={() => showParametersModal = false}
+		modelName={selectedModelForSettings}
+	/>
+{/if}
 
 <div class="flex h-full flex-col gap-y-6 overflow-y-auto px-5 py-8 sm:px-8">
 	<div>
@@ -186,22 +203,32 @@
 						<p class="text-xs text-gray-500 dark:text-gray-500">Model ID: {model.id}</p>
 					</div>
 
-					<button
-						onclick={() => setActiveModel(model.name)}
-						disabled={model.active}
-						class="flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors
-							{model.active
-								? 'border-green-200 bg-green-50 text-green-700 cursor-default dark:border-green-800 dark:bg-green-900/20 dark:text-green-400'
-								: 'border-gray-300 bg-gray-50 text-gray-600 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600 cursor-pointer'}"
-					>
-						{#if model.active}
-							<CarbonCheckmark class="size-4" />
-							Active
-						{:else}
-							<CarbonClose class="size-4" />
-							Inactive
-						{/if}
-					</button>
+					<div class="flex items-center gap-2">
+						<button
+							onclick={() => setActiveModel(model.name)}
+							disabled={model.active}
+							class="flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors
+								{model.active
+									? 'border-green-200 bg-green-50 text-green-700 cursor-default dark:border-green-800 dark:bg-green-900/20 dark:text-green-400'
+									: 'border-gray-300 bg-gray-50 text-gray-600 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600 cursor-pointer'}"
+						>
+							{#if model.active}
+								<CarbonCheckmark class="size-4" />
+								Active
+							{:else}
+								<CarbonClose class="size-4" />
+								Inactive
+							{/if}
+						</button>
+
+						<button
+							onclick={() => openParametersModal(model.name)}
+							class="rounded-lg border border-gray-300 bg-white p-2 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors"
+							title="Model settings"
+						>
+							<CarbonOverflowMenuVertical class="size-5" />
+						</button>
+					</div>
 				</div>
 			{/each}
 		</div>

@@ -9,6 +9,7 @@ import ollama
 from backend.models.models import (
     ModelConfig,
     UpdateModelRequest,
+    UpdateLLMConfigRequest,
     ModelsListResponse,
     OllamaModelInfo,
 )
@@ -49,6 +50,7 @@ async def get_model_config(config: OrionConfig = Depends(get_config_dependency))
             top_p=config.rag.llm.top_p,
             max_tokens=config.rag.llm.max_tokens,
             timeout=config.rag.llm.timeout,
+            system_prompt=config.rag.llm.system_prompt,
         )
         
     except Exception as e:
@@ -126,6 +128,7 @@ async def update_model_config(
             top_p=config.rag.llm.top_p,
             max_tokens=config.rag.llm.max_tokens,
             timeout=config.rag.llm.timeout,
+            system_prompt=config.rag.llm.system_prompt,
         )
         
     except HTTPException:
@@ -135,6 +138,112 @@ async def update_model_config(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update model configuration: {str(e)}",
+        )
+
+
+# ========== UPDATE LLM CONFIGURATION PARAMETERS ==========
+@router.patch(
+    "/api/models/parameters",
+    summary="Update LLM configuration parameters",
+    description="Update temperature, top_p, max_tokens, timeout, and system_prompt (does not change model name)",
+    tags=["Models"],
+    response_model=ModelConfig,
+)
+async def update_llm_parameters(
+    request: UpdateLLMConfigRequest,
+    config: OrionConfig = Depends(get_config_dependency)
+):
+    """
+    Update LLM configuration parameters.
+    
+    Allows updating:
+    - temperature: Text generation randomness (0.0-2.0)
+    - top_p: Nucleus sampling parameter (0.0-1.0)
+    - max_tokens: Maximum tokens to generate (null for unlimited)
+    - timeout: Request timeout in seconds
+    - system_prompt: System prompt for the LLM
+    
+    Does NOT update:
+    - model: Use PATCH /api/models/config instead
+    - base_url: Should remain localhost:11434
+    
+    Args:
+        request: UpdateLLMConfigRequest with optional parameters to update
+        config: Singleton config instance (injected)
+        
+    Returns:
+        Updated ModelConfig with all current settings
+        
+    Raises:
+        HTTPException: If validation fails or update fails
+    """
+    try:
+        # Update only the provided fields
+        if request.temperature is not None:
+            if not 0.0 <= request.temperature <= 2.0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Temperature must be between 0.0 and 2.0"
+                )
+            config.rag.llm.temperature = request.temperature
+            logger.info(f"Updated temperature to: {request.temperature}")
+        
+        if request.top_p is not None:
+            if not 0.0 <= request.top_p <= 1.0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="top_p must be between 0.0 and 1.0"
+                )
+            config.rag.llm.top_p = request.top_p
+            logger.info(f"Updated top_p to: {request.top_p}")
+        
+        if request.max_tokens is not None:
+            if request.max_tokens < 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="max_tokens must be at least 1 (or null for unlimited)"
+                )
+            config.rag.llm.max_tokens = request.max_tokens
+            logger.info(f"Updated max_tokens to: {request.max_tokens}")
+        
+        if request.timeout is not None:
+            if request.timeout < 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="timeout must be at least 1 second"
+                )
+            config.rag.llm.timeout = request.timeout
+            logger.info(f"Updated timeout to: {request.timeout}")
+        
+        if request.system_prompt is not None:
+            if not request.system_prompt.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="system_prompt cannot be empty"
+                )
+            config.rag.llm.system_prompt = request.system_prompt
+            logger.info(f"Updated system_prompt")
+        
+        logger.info("✅ LLM configuration parameters updated successfully")
+        
+        # Return complete updated configuration
+        return ModelConfig(
+            model=config.rag.llm.model,
+            base_url=config.rag.llm.base_url,
+            temperature=config.rag.llm.temperature,
+            top_p=config.rag.llm.top_p,
+            max_tokens=config.rag.llm.max_tokens,
+            timeout=config.rag.llm.timeout,
+            system_prompt=config.rag.llm.system_prompt,
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update LLM parameters: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update LLM parameters: {str(e)}",
         )
 
 
