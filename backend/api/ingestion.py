@@ -84,10 +84,11 @@ def _background_ingestion(
     """
     try:
         # Update task status
+        start_time = datetime.now()
         _update_task(
             task_id,
             status="running",
-            started_at=datetime.now(),
+            started_at=start_time,
             progress=10.0,
         )
         
@@ -100,6 +101,10 @@ def _background_ingestion(
             clear_existing=clear_existing,
         )
         
+        # Calculate processing time
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        
         # Convert stats to IngestionStats model
         ingestion_stats = IngestionStats(
             total_files=stats.total_files,
@@ -107,7 +112,7 @@ def _background_ingestion(
             failed_files=stats.failed_files,
             success_rate=stats.success_rate,
             total_chunks=stats.total_chunks,
-            processing_time=0.0,  # Will be calculated by caller
+            processing_time=processing_time,
             errors=stats.errors[:10] if stats.errors else [],  # Limit to 10 errors
         )
         
@@ -115,7 +120,7 @@ def _background_ingestion(
         _update_task(
             task_id,
             status="completed",
-            completed_at=datetime.now(),
+            completed_at=end_time,
             progress=100.0,
             stats=ingestion_stats,
         )
@@ -123,7 +128,7 @@ def _background_ingestion(
         # Reset retriever to pick up new documents
         reset_retriever()
         
-        logger.info(f"Completed ingestion task {task_id}: {stats.successful_files}/{stats.total_files} files")
+        logger.info(f"Completed ingestion task {task_id}: {stats.successful_files}/{stats.total_files} files in {processing_time:.2f}s")
         
     except Exception as e:
         logger.error(f"Ingestion task {task_id} failed: {e}", exc_info=True)

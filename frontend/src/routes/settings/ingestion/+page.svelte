@@ -41,6 +41,7 @@
 	let error = $state<string | null>(null);
 	let success = $state<string | null>(null);
 	let activeSection = $state('ingest');
+	let pollingInterval: ReturnType<typeof setInterval> | null = null;
 
 	const sections = [
 		{ id: 'ingest', label: 'Ingest Documents' },
@@ -49,10 +50,39 @@
 		{ id: 'clear', label: 'Clear Knowledge Base' }
 	];
 
+	// Computed: count of running tasks
+	let runningTaskCount = $derived(tasks.filter(t => t.status === 'running' || t.status === 'pending').length);
+
 	onMount(async () => {
 		await loadTasks();
 		await checkWatchdogStatus();
+		
+		// Start polling for running tasks every 2 seconds
+		startPolling();
+		
+		// Cleanup on unmount
+		return () => {
+			stopPolling();
+		};
 	});
+
+	function startPolling() {
+		if (!pollingInterval) {
+			pollingInterval = setInterval(async () => {
+				// Only poll if there are running/pending tasks
+				if (runningTaskCount > 0) {
+					await loadTasks();
+				}
+			}, 2000); // Poll every 2 seconds
+		}
+	}
+
+	function stopPolling() {
+		if (pollingInterval) {
+			clearInterval(pollingInterval);
+			pollingInterval = null;
+		}
+	}
 
 	function scrollToSection(sectionId: string) {
 		activeSection = sectionId;
@@ -68,39 +98,292 @@
 		}
 	}
 
+	function openFolderPicker(index: number) {
+		// Create a hidden file input for folder selection
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.webkitdirectory = true;
+		input.multiple = false;
+		
+		input.onchange = (e: Event) => {
+			const target = e.target as HTMLInputElement;
+			if (target.files && target.files.length > 0) {
+				// Get the directory path from the first file
+				const firstFile = target.files[0];
+				// Extract directory path (remove the filename)
+				const fullPath = firstFile.webkitRelativePath || firstFile.name;
+				const dirPath = fullPath.split('/')[0]; // Get root folder name
+				
+				// For desktop apps, we'd get full path. For web, we get relative path
+				// Let user see what they selected
+				ingestPaths[index] = dirPath || 'Selected folder';
+			}
+		};
+		
+		input.click();
+	}
+
 	async function loadTasks() {
-		// TODO: Implement
-		console.log('TODO: Load tasks from backend');
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/ingest/tasks`);
+			if (!response.ok) throw new Error('Failed to load tasks');
+			
+			const data = await response.json();
+			const newTasks = data.tasks || [];
+			
+			// Check if any tasks just completed - if so, do delayed refreshes
+			// to ensure we get the final stats (don't update immediately to save CPU)
+			const previouslyRunning = tasks.filter(t => t.status === 'running').map(t => t.task_id);
+			const nowCompleted = newTasks.filter(t => 
+				previouslyRunning.includes(t.task_id) && 
+				(t.status === 'completed' || t.status === 'failed')
+			);
+			
+			// If no tasks just completed, update immediately
+			if (nowCompleted.length === 0) {
+				tasks = newTasks;
+			}
+			
+			// If any tasks just completed, refresh multiple times to ensure we get final stats
+			if (nowCompleted.length > 0) {
+				// First refresh after 500ms
+				setTimeout(async () => {
+					try {
+						const finalResponse = await fetch(`${BACKEND_URL}/api/ingest/tasks`);
+						if (finalResponse.ok) {
+							const finalData = await finalResponse.json();
+							tasks = finalData.tasks || [];
+						}
+					} catch (err) {
+						console.error('Failed to refresh final task stats (1st attempt):', err);
+					}
+				}, 500);
+				
+				// Second refresh after 1 second to catch any stragglers
+				setTimeout(async () => {
+					try {
+						const finalResponse = await fetch(`${BACKEND_URL}/api/ingest/tasks`);
+						if (finalResponse.ok) {
+							const finalData = await finalResponse.json();
+							tasks = finalData.tasks || [];
+						}
+					} catch (err) {
+						console.error('Failed to refresh final task stats (2nd attempt):', err);
+					}
+				}, 1000);
+			}
+		} catch (err) {
+			console.error('Failed to load tasks:', err);
+			error = err instanceof Error ? err.message : 'Failed to load tasks';
+		}
 	}
 
 	async function checkWatchdogStatus() {
-		// TODO: Implement
-		console.log('TODO: Check watchdog status');
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/watchdog/status`);
+			if (!response.ok) throw new Error('Failed to check watchdog status');
+			
+			const data = await response.json();
+			watchdogRunning = data.is_watching || false;
+			
+			if (data.watched_paths && data.watched_paths.length > 0) {
+				watchdogPaths = data.watched_paths.join('\n');
+			}
+			if (data.debounce_seconds !== undefined) {
+				watchdogDebounce = data.debounce_seconds;
+			}
+			if (data.recursive !== undefined) {
+				watchdogRecursive = data.recursive;
+			}
+		} catch (err) {
+			console.error('Failed to check watchdog status:', err);
+			// Don't show error to user - watchdog might just not be running
+		}
 	}
 
 	async function handleIngest() {
-		// TODO: Implement
-		console.log('TODO: Handle document ingestion');
+		loading = true;
+		error = null;
+		success = null;
+
+		try {
+			// Filter out empty paths
+			const validPaths = ingestPaths.filter(p => p.trim());
+			
+			if (validPaths.length === 0) {
+				error = 'Please enter at least one valid path';
+				return;
+			}
+
+			// Ingest each path
+			const results = [];
+			for (const path of validPaths) {
+				const endpoint = useAsync ? '/api/ingest/async' : '/api/ingest';
+				const response = await fetch(`${BACKEND_URL}${endpoint}`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						path: path.trim(),
+						clear_existing: clearExisting && validPaths.indexOf(path) === 0, // Only clear on first path
+						recursive: recursive
+					})
+				});
+
+				if (!response.ok) {
+					const errData = await response.json().catch(() => ({}));
+					throw new Error(errData.detail || `Failed to ingest: ${path}`);
+				}
+
+				const data = await response.json();
+				results.push({ path, data });
+			}
+
+			// Handle success
+			if (useAsync) {
+				success = `Started ${results.length} async ingestion task(s). Check the Task Management section for progress.`;
+				// Switch to tasks section
+				activeSection = 'tasks';
+				// Reload tasks
+				await loadTasks();
+			} else {
+				const totalFiles = results.reduce((sum, r) => sum + (r.data.stats?.successful_files || 0), 0);
+				success = `Successfully ingested ${totalFiles} file(s) from ${results.length} path(s)`;
+			}
+
+		} catch (err) {
+			console.error('Ingestion failed:', err);
+			error = err instanceof Error ? err.message : 'Ingestion failed';
+		} finally {
+			loading = false;
+		}
 	}
 
 	async function handleClearKB() {
-		// TODO: Implement
-		console.log('TODO: Clear knowledge base');
+		if (!confirm('⚠️ WARNING: This will permanently delete ALL documents and embeddings from the knowledge base!\n\nThis action CANNOT be undone.\n\nAre you absolutely sure you want to continue?')) {
+			return;
+		}
+
+		loading = true;
+		error = null;
+		success = null;
+
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/ingest/clear`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ confirm: true })
+			});
+
+			if (!response.ok) {
+				const errData = await response.json().catch(() => ({}));
+				throw new Error(errData.detail || 'Failed to clear knowledge base');
+			}
+
+			success = 'Knowledge base cleared successfully';
+			
+		} catch (err) {
+			console.error('Failed to clear knowledge base:', err);
+			error = err instanceof Error ? err.message : 'Failed to clear knowledge base';
+		} finally {
+			loading = false;
+		}
 	}
 
 	async function handleStartWatchdog() {
-		// TODO: Implement
-		console.log('TODO: Start watchdog');
+		loading = true;
+		error = null;
+		success = null;
+
+		try {
+			// Parse paths (one per line)
+			const paths = watchdogPaths
+				.split('\n')
+				.map(p => p.trim())
+				.filter(p => p.length > 0);
+
+			if (paths.length === 0) {
+				error = 'Please enter at least one path to watch';
+				return;
+			}
+
+			const response = await fetch(`${BACKEND_URL}/api/watchdog/start`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					paths,
+					recursive: watchdogRecursive,
+					debounce_seconds: watchdogDebounce
+				})
+			});
+
+			if (!response.ok) {
+				const errData = await response.json().catch(() => ({}));
+				throw new Error(errData.detail || 'Failed to start watchdog');
+			}
+
+			const data = await response.json();
+			watchdogRunning = true;
+			success = data.message || 'File watcher started successfully';
+			
+		} catch (err) {
+			console.error('Failed to start watchdog:', err);
+			error = err instanceof Error ? err.message : 'Failed to start watchdog';
+		} finally {
+			loading = false;
+		}
 	}
 
 	async function handleStopWatchdog() {
-		// TODO: Implement
-		console.log('TODO: Stop watchdog');
+		loading = true;
+		error = null;
+		success = null;
+
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/watchdog/stop`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ path: 'all' })
+			});
+
+			if (!response.ok) {
+				const errData = await response.json().catch(() => ({}));
+				throw new Error(errData.detail || 'Failed to stop watchdog');
+			}
+
+			const data = await response.json();
+			watchdogRunning = false;
+			success = data.message || 'File watcher stopped successfully';
+			
+		} catch (err) {
+			console.error('Failed to stop watchdog:', err);
+			error = err instanceof Error ? err.message : 'Failed to stop watchdog';
+		} finally {
+			loading = false;
+		}
 	}
 
 	async function deleteTask(taskId: string) {
-		// TODO: Implement
-		console.log('TODO: Delete task', taskId);
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/ingest/tasks/${taskId}`, {
+				method: 'DELETE'
+			});
+
+			if (!response.ok) {
+				const errData = await response.json().catch(() => ({}));
+				throw new Error(errData.detail || 'Failed to delete task');
+			}
+
+			// Remove from local state
+			tasks = tasks.filter(t => t.task_id !== taskId);
+			success = 'Task deleted successfully';
+			
+			// Auto-dismiss after 3 seconds
+			setTimeout(() => { success = null; }, 3000);
+			
+		} catch (err) {
+			console.error('Failed to delete task:', err);
+			error = err instanceof Error ? err.message : 'Failed to delete task';
+		}
 	}
 </script>
 
@@ -180,6 +463,11 @@
 						: 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'}"
 				>
 					{section.label}
+					{#if section.id === 'tasks' && tasks.length > 0}
+						<span class="ml-1.5 rounded-full px-1.5 py-0.5 text-xs {activeSection === section.id ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}">
+							{tasks.length}
+						</span>
+					{/if}
 				</button>
 			{/each}
 		</div>
@@ -218,7 +506,9 @@
 								/>
 								<button
 									type="button"
+									onclick={() => openFolderPicker(index)}
 									class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+									title="Browse for folder"
 								>
 									<CarbonFolder class="size-5" />
 								</button>
@@ -235,6 +525,9 @@
 						{/each}
 					</div>
 					<p class="mt-2 text-xs text-gray-500">Enter absolute or relative paths to documents. Add multiple paths to ingest from different locations.</p>
+					<p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+						<strong>Note:</strong> Very small files (less than ~50 characters) may be skipped during ingestion if they don't meet minimum chunk size requirements.
+					</p>
 				</div>
 
 				<div class="flex flex-wrap gap-4">
@@ -311,7 +604,8 @@
 				<div class="rounded-lg border border-gray-200 bg-gray-50 p-8 text-center dark:border-gray-700 dark:bg-gray-800/50">
 					<CarbonDocument class="mx-auto size-12 text-gray-400 dark:text-gray-500" />
 					<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">No ingestion tasks yet</p>
-					<p class="mt-1 text-xs text-gray-500 dark:text-gray-500">Tasks will appear here after you start an async ingestion</p>
+					<p class="mt-1 text-xs text-gray-500 dark:text-gray-500">Tasks only appear when using <strong>Async Mode</strong></p>
+					<p class="mt-1 text-xs text-gray-500 dark:text-gray-500">Enable "Async Mode (For Large Datasets)" in Ingest Documents, then click Start Ingestion</p>
 				</div>
 			{:else}
 				<div class="space-y-3">
