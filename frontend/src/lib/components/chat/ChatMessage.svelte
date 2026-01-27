@@ -394,9 +394,9 @@
 {/if}
 {#if message.from === "user"}
 	<div
-		class="group relative ml-auto flex w-fit max-w-[85%] flex-col items-end gap-4 {alternatives.length > 1 && editMsdgId === null
+		class="group relative ml-auto flex flex-col items-end gap-4 {alternatives.length > 1 && editMsdgId === null
 			? 'mb-7'
-			: ''}"
+			: ''} {editMode ? 'w-full' : 'w-fit max-w-[85%]'}"
 		data-message-id={message.id}
 		data-message-type="user"
 		role="presentation"
