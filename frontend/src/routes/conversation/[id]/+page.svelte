@@ -15,6 +15,7 @@
 	import "katex/dist/katex.min.css";
 	import { loading } from "$lib/stores/loading.js";
 	import { WebSocketChat } from "$lib/utils/websocketChat";
+	import { deleteMessage, getActiveMessages } from "$lib/utils/chatAPI";
 
 	let { data = $bindable() } = $props();
 
@@ -52,24 +53,29 @@
 	// Fetch existing messages for this session
 	async function loadMessages() {
 		try {
-			const response = await fetch(`${BACKEND_URL}/api/chat/sessions/${page.params.id}`);
-			if (!response.ok) {
-				throw new Error('Failed to load session');
-			}
-
-			const sessionData = await response.json();
+			// Use the active branch endpoint to get only the active conversation path
+			const response = await getActiveMessages(page.params.id);
+			
+			// Backend returns MessageHistoryResponse with a 'messages' array
+			const backendMessages = response?.messages || [];
 			
 			// Convert backend messages to frontend format
-			messages = sessionData.messages?.map((msg: any) => ({
-				id: crypto.randomUUID(),
+			messages = backendMessages.map((msg: any) => ({
+				id: msg.message_id || crypto.randomUUID(), // Use backend message_id if available
 				from: msg.role === 'user' ? 'user' : 'assistant',
 				content: msg.content,
 				createdAt: new Date(msg.timestamp),
 				updatedAt: new Date(msg.timestamp),
-			})) || [];
-		} catch (err) {
-			console.error('Failed to load messages:', err);
-			$error = 'Failed to load conversation';
+			}));
+		} catch (err: any) {
+			// If session doesn't exist yet (404), that's fine - it's a new session
+			if (err.message?.includes('Session not found') || err.message?.includes('404')) {
+				console.log('[LoadMessages] New session, no messages yet');
+				messages = [];
+			} else {
+				console.error('Failed to load messages:', err);
+				$error = 'Failed to load conversation';
+			}
 		}
 	}
 
@@ -85,6 +91,8 @@
 				if (done) {
 					$loading = false;
 					pending = false;
+					// Reload messages from backend to get proper message_ids
+					loadMessages();
 					return;
 				}
 
@@ -255,10 +263,68 @@
 	}
 
 	async function onRetry(payload: { id: Message["id"]; content?: string }) {
-		// Simple retry: just resend the last user message
-		const lastUserMessage = [...messages].reverse().find(msg => msg.from === 'user');
-		if (lastUserMessage) {
-			await writeMessage({ prompt: payload.content || lastUserMessage.content });
+		try {
+			// Find the message being retried
+			const messageIndex = messages.findIndex(msg => msg.id === payload.id);
+			if (messageIndex === -1) {
+				console.error('[Retry] Message not found:', payload.id);
+				return;
+			}
+
+			const message = messages[messageIndex];
+			
+			if (payload.content) {
+				// EDIT SCENARIO: User edited their message
+				// Delete the user message (which will cascade delete the assistant response)
+				if (message.from === 'user') {
+					try {
+						await deleteMessage(page.params.id, payload.id);
+					} catch (err: any) {
+						// If message not found in backend, it might be a new message still being processed
+						console.warn('[Retry] Message not in backend yet, skipping delete:', err.message);
+					}
+					
+					// Remove the user message and any subsequent messages from UI
+					messages = messages.slice(0, messageIndex);
+					
+					// Send the edited message
+					await writeMessage({ prompt: payload.content });
+				}
+			} else {
+				// RETRY SCENARIO: Regenerate assistant response
+				if (message.from === 'assistant') {
+					try {
+						await deleteMessage(page.params.id, payload.id);
+					} catch (err: any) {
+						console.warn('[Retry] Message not in backend yet, skipping delete:', err.message);
+					}
+					
+					// Find the user message right before this assistant message
+					const userMessageIndex = messageIndex - 1;
+					if (userMessageIndex >= 0 && messages[userMessageIndex].from === 'user') {
+						// Save the user content BEFORE slicing
+						const userContent = messages[userMessageIndex].content;
+						
+						// Remove both user and assistant messages
+						messages = messages.slice(0, userMessageIndex);
+						
+						// Resend the user message
+						if (userContent) {
+							await writeMessage({ prompt: userContent });
+						}
+					} else {
+						// Fallback: just remove assistant and find last user message
+						messages = messages.slice(0, messageIndex);
+						const lastUserMessage = [...messages].reverse().find(msg => msg.from === 'user');
+						if (lastUserMessage) {
+							await writeMessage({ prompt: lastUserMessage.content });
+						}
+					}
+				}
+			}
+		} catch (err) {
+			console.error('[Retry] Error:', err);
+			$error = 'Failed to retry message';
 		}
 	}
 

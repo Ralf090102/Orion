@@ -24,6 +24,8 @@ class ConversationMessage:
     role: str  # "user" or "assistant"
     content: str
     tokens: int = 0
+    message_id: str | None = None  # For branching operations
+    timestamp: str = ""  # ISO format timestamp
 
     def __post_init__(self):
         """Calculate tokens after initialization"""

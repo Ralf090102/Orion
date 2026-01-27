@@ -746,10 +746,11 @@ async def get_active_messages(
         # Convert to response model
         messages = [
             Message(
+                message_id=getattr(msg, 'message_id', None),
                 role=msg.role,
                 content=msg.content,
                 tokens=msg.tokens,
-                timestamp="",  # ConversationMessage doesn't have timestamp
+                timestamp=getattr(msg, 'timestamp', ''),
             )
             for msg in conversation_messages
         ]

@@ -788,7 +788,7 @@ class SessionManager:
             session_id: Session identifier
 
         Returns:
-            List of ConversationMessage objects in active branch
+            List of ConversationMessage objects in active branch with metadata
         """
         session = self.get_session(session_id)
         if not session:
@@ -812,13 +812,15 @@ class SessionManager:
             
             # Take first active candidate (should only be one)
             next_msg = candidates[0]
-            active_messages.append(
-                ConversationMessage(
-                    role=next_msg["role"],
-                    content=next_msg["content"],
-                    tokens=next_msg.get("tokens", 0)
-                )
+            msg = ConversationMessage(
+                role=next_msg["role"],
+                content=next_msg["content"],
+                tokens=next_msg.get("tokens", 0)
             )
+            # Add metadata fields for frontend use
+            msg.message_id = next_msg.get("message_id")
+            msg.timestamp = next_msg.get("timestamp", "")
+            active_messages.append(msg)
             current_id = next_msg["message_id"]
 
         return active_messages

@@ -152,6 +152,10 @@ class DeleteSessionResponse(BaseModel):
 class Message(BaseModel):
     """Model for a chat message."""
 
+    message_id: str | None = Field(
+        default=None,
+        description="Unique message identifier for branching operations",
+    )
     role: str = Field(
         ...,
         description="Message role (user or assistant)",
@@ -164,6 +168,7 @@ class Message(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
+                "message_id": "550e8400-e29b-41d4-a716-446655440000",
                 "role": "user",
                 "content": "What is machine learning?",
                 "tokens": 5,
