@@ -18,6 +18,7 @@ export class WebSocketChat {
 	private reconnectAttempts = 0;
 	private maxReconnectAttempts = 3;
 	private reconnectDelay = 1000;
+	private shouldReconnect = true;
 
 	constructor(options: WebSocketChatOptions) {
 		this.options = options;
@@ -26,6 +27,9 @@ export class WebSocketChat {
 	connect() {
 		const wsUrl = this.options.backendUrl || import.meta.env.PUBLIC_BACKEND_WS || 'ws://localhost:8000';
 		const url = `${wsUrl}/ws/chat/${this.options.sessionId}`;
+
+		// Reset reconnection flag when explicitly connecting
+		this.shouldReconnect = true;
 
 		try {
 			this.ws = new WebSocket(url);
@@ -77,8 +81,8 @@ export class WebSocketChat {
 				console.log('WebSocket closed', event.code, event.reason);
 				this.options.onDisconnect?.();
 
-				// Attempt to reconnect
-				if (this.reconnectAttempts < this.maxReconnectAttempts) {
+				// Only attempt to reconnect if shouldReconnect flag is true
+				if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
 					this.reconnectAttempts++;
 					console.log(`Reconnecting in ${this.reconnectDelay}ms (attempt ${this.reconnectAttempts})`);
 					setTimeout(() => this.connect(), this.reconnectDelay);
@@ -118,8 +122,11 @@ export class WebSocketChat {
 	}
 
 	disconnect() {
+		// Prevent any reconnection attempts
+		this.shouldReconnect = false;
+		this.reconnectAttempts = this.maxReconnectAttempts;
+		
 		if (this.ws) {
-			this.reconnectAttempts = this.maxReconnectAttempts; // Prevent reconnection
 			this.ws.close();
 			this.ws = null;
 		}

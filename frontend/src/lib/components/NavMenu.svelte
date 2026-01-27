@@ -185,43 +185,6 @@
 <div
 	class="flex touch-none flex-col gap-1 rounded-r-xl border border-l-0 border-gray-100 p-3 text-sm dark:border-transparent md:mt-3 md:bg-gradient-to-l md:from-gray-50 md:dark:from-gray-800/30"
 >
-	{#if user?.username || user?.email}
-		<div
-			class="group flex items-center gap-1.5 rounded-lg pl-2.5 pr-2 hover:bg-gray-100 first:hover:bg-transparent dark:hover:bg-gray-700 first:dark:hover:bg-transparent"
-		>
-			<span
-				class="flex h-9 flex-none shrink items-center gap-1.5 truncate pr-2 text-gray-500 dark:text-gray-400"
-				>{user?.username || user?.email}</span
-			>
-
-			{#if publicConfig.isHuggingChat && $isPro === false}
-				<a
-					href="https://huggingface.co/subscribe/pro?from=HuggingChat"
-					target="_blank"
-					rel="noopener noreferrer"
-					class="ml-auto flex h-[20px] items-center gap-1 rounded-md bg-gradient-to-r from-pink-500/10 via-green-500/10 to-green-500/5 px-1.5 py-0.5 text-xs text-gray-500 hover:from-pink-500/20 hover:via-green-500/20 dark:from-pink-500/20 dark:via-green-500/20 dark:to-green-500/10 dark:text-gray-400 dark:hover:from-pink-500/30 dark:hover:via-green-500/30"
-				>
-					<IconPro />
-					Get PRO
-				</a>
-			{:else if publicConfig.isHuggingChat && $isPro === true}
-				<span
-					class="ml-auto flex h-[20px] items-center gap-1 rounded-md bg-gradient-to-r from-pink-500/10 via-green-500/10 to-green-500/5 px-1.5 py-0.5 text-xs text-gray-500 hover:from-pink-500/20 hover:via-green-500/20 dark:from-pink-500/20 dark:via-green-500/20 dark:to-green-500/10 dark:text-gray-400 dark:hover:from-pink-500/30 dark:hover:via-green-500/30"
-				>
-					<IconPro />
-					PRO
-				</span>
-			{/if}
-
-			<img
-				src="https://huggingface.co/api/users/{user.username}/avatar?redirect=true"
-				class="{!(publicConfig.isHuggingChat && $isPro !== null)
-					? 'ml-auto'
-					: ''} size-4 rounded-full border bg-gray-500 dark:border-white/40"
-				alt=""
-			/>
-		</div>
-	{/if}
 	<a
 		href="{base}/models"
 		class="flex h-9 flex-none items-center gap-1.5 rounded-lg pl-2.5 pr-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
@@ -233,22 +196,6 @@
 			>{nModels}</span
 		>
 	</a>
-
-	{#if user?.username || user?.email}
-		<button
-			onclick={() => (showMcpModal = true)}
-			class="flex h-9 flex-none items-center gap-1.5 rounded-lg pl-2.5 pr-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
-		>
-			MCP Servers
-			{#if $enabledServersCount > 0}
-				<span
-					class="ml-auto rounded-md bg-blue-600/10 px-1.5 py-0.5 text-xs text-blue-600 dark:bg-blue-600/20 dark:text-blue-400"
-				>
-					{$enabledServersCount}
-				</span>
-			{/if}
-		</button>
-	{/if}
 
 	<span class="flex gap-1">
 		<a

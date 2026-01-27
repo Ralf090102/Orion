@@ -191,13 +191,7 @@
 	}
 
 	onMount(async () => {
-		// Load existing messages
-		await loadMessages();
-
-		// Initialize WebSocket
-		initializeWebSocket();
-
-		// Send pending message if exists
+		// Send pending message if exists (messages and WebSocket will be initialized by $effect)
 		if ($pendingMessage) {
 			files = $pendingMessage.files;
 			await writeMessage({ prompt: $pendingMessage.content });
@@ -210,7 +204,11 @@
 		const sessionId = page.params.id;
 		if (!browser || !sessionId) return;
 
-		console.log('[Effect] Session ID changed to:', sessionId);
+		// Disconnect existing WebSocket before creating new one
+		if (wsChat) {
+			wsChat.disconnect();
+			wsChat = null;
+		}
 		
 		// Reset state
 		messages = [];
@@ -218,7 +216,7 @@
 		$loading = false;
 		pending = false;
 
-		// Reload for new session
+		// Load messages and initialize WebSocket for new/current session
 		loadMessages();
 		initializeWebSocket();
 	});
