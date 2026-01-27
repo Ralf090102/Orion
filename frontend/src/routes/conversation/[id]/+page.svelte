@@ -27,6 +27,9 @@
 	let conversations = $state(data.conversations);
 	let wsChat: WebSocketChat | null = null;
 	let messageUpdateTrigger = $state(0); // Force reactivity trigger
+	let hasPendingMessage = $state(false); // Track if we need to send pending message
+	let pendingMessageContent = $state<string>('');
+	let pendingMessageFiles = $state<File[]>([]);
 
 	$effect(() => {
 		conversations = data.conversations;
@@ -124,6 +127,19 @@
 			},
 			onConnect: () => {
 				console.log('[WebSocket] Connected to chat server');
+				
+				// Send pending message if exists and WebSocket is now ready
+				if (hasPendingMessage && pendingMessageContent) {
+					console.log('[WebSocket] Sending pending message after connection');
+					// Use setTimeout to ensure the connection is fully established
+					setTimeout(async () => {
+						files = pendingMessageFiles;
+						await writeMessage({ prompt: pendingMessageContent });
+						hasPendingMessage = false;
+						pendingMessageContent = '';
+						pendingMessageFiles = [];
+					}, 100);
+				}
 			},
 			onDisconnect: () => {
 				console.log('[WebSocket] Disconnected from chat server');
@@ -196,11 +212,13 @@
 	}
 
 	onMount(async () => {
-		// Send pending message if exists (messages and WebSocket will be initialized by $effect)
+		// Store pending message info to send after WebSocket connects
 		if ($pendingMessage) {
-			files = $pendingMessage.files;
-			await writeMessage({ prompt: $pendingMessage.content });
+			hasPendingMessage = true;
+			pendingMessageContent = $pendingMessage.content;
+			pendingMessageFiles = $pendingMessage.files || [];
 			$pendingMessage = undefined;
+			console.log('[Mount] Stored pending message, will send after WebSocket connects');
 		}
 	});
 
