@@ -92,6 +92,23 @@ class SessionManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        # Check if messages table exists and needs migration
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='messages'")
+        table_exists = cursor.fetchone() is not None
+        
+        if table_exists:
+            # Check if the table has the new schema
+            cursor.execute("PRAGMA table_info(messages)")
+            columns = {col[1] for col in cursor.fetchall()}
+            needs_migration = "message_id" not in columns or "parent_id" not in columns
+            
+            if needs_migration:
+                logger.info("Existing database detected with old schema - recreating tables")
+                # Drop old tables (CASCADE will handle messages)
+                cursor.execute("DROP TABLE IF EXISTS messages")
+                cursor.execute("DROP TABLE IF EXISTS sessions")
+                conn.commit()
+        
         # Create sessions table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
@@ -103,16 +120,20 @@ class SessionManager:
             )
         """)
         
-        # Create messages table
+        # Create messages table with parent-child relationships
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT UNIQUE NOT NULL,
                 session_id TEXT NOT NULL,
+                parent_id TEXT,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
                 tokens INTEGER DEFAULT 0,
                 timestamp TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+                is_active BOOLEAN DEFAULT 1,
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
+                FOREIGN KEY (parent_id) REFERENCES messages(message_id) ON DELETE CASCADE
             )
         """)
         
@@ -120,6 +141,16 @@ class SessionManager:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_messages_session 
             ON messages(session_id)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_messages_parent
+            ON messages(parent_id)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_messages_active
+            ON messages(session_id, is_active)
         """)
         
         cursor.execute("""
@@ -245,30 +276,45 @@ class SessionManager:
         return count
 
     def add_message(
-        self, session_id: str, role: str, content: str, tokens: int = 0
-    ) -> bool:
+        self, 
+        session_id: str, 
+        role: str, 
+        content: str, 
+        tokens: int = 0,
+        parent_id: Optional[str] = None,
+        message_id: Optional[str] = None
+    ) -> Optional[str]:
         """
-        Add a message to session history.
+        Add a message to session history with parent-child tracking.
 
         Args:
             session_id: Session identifier
             role: "user" or "assistant"
             content: Message content
             tokens: Token count (optional)
+            parent_id: ID of parent message for branching (optional)
+            message_id: Custom message ID (generates UUID if None)
 
         Returns:
-            True if added, False if session not found
+            Message ID if added, None if session not found
         """
         session = self.get_session(session_id)
         if not session:
             logger.warning(f"Session not found: {session_id}")
-            return False
+            return None
+
+        # Generate message ID if not provided
+        if message_id is None:
+            message_id = str(uuid.uuid4())
 
         message = {
+            "message_id": message_id,
             "role": role,
             "content": content,
             "tokens": tokens,
             "timestamp": datetime.now().isoformat(),
+            "parent_id": parent_id,
+            "is_active": True,
         }
 
         session.messages.append(message)
@@ -278,8 +324,8 @@ class SessionManager:
             self._add_message_to_db(session_id, message)
             self._update_session_timestamp(session_id)
 
-        logger.debug(f"Added {role} message to session {session_id}")
-        return True
+        logger.debug(f"Added {role} message {message_id} to session {session_id}")
+        return message_id
 
     def get_messages(self, session_id: str) -> list[ConversationMessage]:
         """
@@ -419,7 +465,7 @@ class SessionManager:
             logger.error(f"Failed to save session {session.session_id}: {e}")
 
     def _add_message_to_db(self, session_id: str, message: dict[str, Any]) -> None:
-        """Add a message to the database."""
+        """Add a message to the database with parent tracking."""
         if not self.persist_to_disk:
             return
 
@@ -428,14 +474,18 @@ class SessionManager:
             cursor = conn.cursor()
             
             cursor.execute("""
-                INSERT INTO messages (session_id, role, content, tokens, timestamp)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO messages 
+                (message_id, session_id, parent_id, role, content, tokens, timestamp, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
+                message["message_id"],
                 session_id,
+                message.get("parent_id"),
                 message["role"],
                 message["content"],
                 message.get("tokens", 0),
-                message["timestamp"]
+                message["timestamp"],
+                message.get("is_active", True)
             ))
             
             # Update message count
@@ -547,7 +597,7 @@ class SessionManager:
             for session_id, created_at, updated_at, metadata_json in sessions_data:
                 # Load messages for this session
                 cursor.execute("""
-                    SELECT role, content, tokens, timestamp 
+                    SELECT message_id, role, content, tokens, timestamp, parent_id, is_active
                     FROM messages 
                     WHERE session_id = ?
                     ORDER BY id ASC
@@ -555,10 +605,13 @@ class SessionManager:
                 
                 messages = [
                     {
-                        "role": row[0],
-                        "content": row[1],
-                        "tokens": row[2],
-                        "timestamp": row[3]
+                        "message_id": row[0],
+                        "role": row[1],
+                        "content": row[2],
+                        "tokens": row[3],
+                        "timestamp": row[4],
+                        "parent_id": row[5],
+                        "is_active": bool(row[6])
                     }
                     for row in cursor.fetchall()
                 ]
@@ -580,6 +633,266 @@ class SessionManager:
                 
         except Exception as e:
             logger.error(f"Failed to load sessions from database: {e}")
+
+    def delete_message_and_children(self, session_id: str, message_id: str) -> bool:
+        """
+        Delete a message and all its children (cascading delete).
+        Useful for retry/edit functionality.
+
+        Args:
+            session_id: Session identifier
+            message_id: Message ID to delete
+
+        Returns:
+            True if deleted, False if message not found
+        """
+        session = self.get_session(session_id)
+        if not session:
+            logger.warning(f"Session not found: {session_id}")
+            return False
+
+        # Find all descendant message IDs (recursive)
+        def get_all_descendants(msg_id: str) -> set[str]:
+            descendants = {msg_id}
+            children = [m for m in session.messages if m.get("parent_id") == msg_id]
+            for child in children:
+                descendants.update(get_all_descendants(child["message_id"]))
+            return descendants
+
+        to_delete = get_all_descendants(message_id)
+
+        # Remove from in-memory session
+        session.messages = [m for m in session.messages if m["message_id"] not in to_delete]
+        session.updated_at = datetime.now().isoformat()
+
+        # Remove from database (CASCADE will handle children)
+        if self.persist_to_disk:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                # Delete the message (CASCADE handles children)
+                cursor.execute("""
+                    DELETE FROM messages 
+                    WHERE message_id = ? AND session_id = ?
+                """, (message_id, session_id))
+                
+                deleted_count = cursor.rowcount
+                
+                # Update message count
+                cursor.execute("""
+                    UPDATE sessions 
+                    SET message_count = (
+                        SELECT COUNT(*) FROM messages WHERE session_id = ?
+                    )
+                    WHERE session_id = ?
+                """, (session_id, session_id))
+                
+                conn.commit()
+                conn.close()
+                
+                logger.info(f"Deleted message {message_id} and {len(to_delete)} total message(s)")
+                return deleted_count > 0
+                
+            except Exception as e:
+                logger.error(f"Failed to delete message {message_id}: {e}")
+                return False
+
+        logger.info(f"Deleted {len(to_delete)} message(s) from session {session_id}")
+        return True
+
+    def create_branch(
+        self, 
+        session_id: str, 
+        parent_id: str, 
+        role: str, 
+        content: str, 
+        tokens: int = 0,
+        deactivate_siblings: bool = True
+    ) -> Optional[str]:
+        """
+        Create a new branch (alternative response) from a parent message.
+        Used for retry/edit functionality.
+
+        Args:
+            session_id: Session identifier
+            parent_id: Parent message ID to branch from
+            role: "user" or "assistant"
+            content: Message content
+            tokens: Token count (optional)
+            deactivate_siblings: Mark sibling branches as inactive (default: True)
+
+        Returns:
+            New message ID if created, None if failed
+        """
+        session = self.get_session(session_id)
+        if not session:
+            logger.warning(f"Session not found: {session_id}")
+            return None
+
+        # Verify parent exists
+        parent_exists = any(m["message_id"] == parent_id for m in session.messages)
+        if not parent_exists:
+            logger.warning(f"Parent message not found: {parent_id}")
+            return None
+
+        # Deactivate sibling branches if requested
+        if deactivate_siblings:
+            self._deactivate_siblings(session_id, parent_id)
+
+        # Create new message as child of parent
+        new_message_id = self.add_message(
+            session_id=session_id,
+            role=role,
+            content=content,
+            tokens=tokens,
+            parent_id=parent_id
+        )
+
+        logger.info(f"Created branch: {new_message_id} from parent {parent_id}")
+        return new_message_id
+
+    def _deactivate_siblings(self, session_id: str, parent_id: str) -> None:
+        """Mark all messages with the same parent as inactive."""
+        session = self.get_session(session_id)
+        if not session:
+            return
+
+        # Deactivate siblings in memory
+        for message in session.messages:
+            if message.get("parent_id") == parent_id:
+                message["is_active"] = False
+
+        # Deactivate in database
+        if self.persist_to_disk:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    UPDATE messages 
+                    SET is_active = 0
+                    WHERE session_id = ? AND parent_id = ?
+                """, (session_id, parent_id))
+                
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                logger.error(f"Failed to deactivate siblings: {e}")
+
+    def get_active_branch_messages(self, session_id: str) -> list[ConversationMessage]:
+        """
+        Get only messages from the active conversation branch.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            List of ConversationMessage objects in active branch
+        """
+        session = self.get_session(session_id)
+        if not session:
+            return []
+
+        # Build conversation tree and extract active path
+        active_messages = []
+        
+        # Start with root messages (no parent)
+        current_id = None
+        
+        while True:
+            # Find active child of current message
+            candidates = [
+                m for m in session.messages 
+                if m.get("parent_id") == current_id and m.get("is_active", True)
+            ]
+            
+            if not candidates:
+                break
+            
+            # Take first active candidate (should only be one)
+            next_msg = candidates[0]
+            active_messages.append(
+                ConversationMessage(
+                    role=next_msg["role"],
+                    content=next_msg["content"],
+                    tokens=next_msg.get("tokens", 0)
+                )
+            )
+            current_id = next_msg["message_id"]
+
+        return active_messages
+
+    def get_message_branches(self, session_id: str, parent_id: Optional[str] = None) -> list[dict[str, Any]]:
+        """
+        Get all alternative branches from a parent message.
+
+        Args:
+            session_id: Session identifier
+            parent_id: Parent message ID (None for root messages)
+
+        Returns:
+            List of message dictionaries that are children of parent
+        """
+        session = self.get_session(session_id)
+        if not session:
+            return []
+
+        return [
+            m for m in session.messages 
+            if m.get("parent_id") == parent_id
+        ]
+
+    def switch_branch(self, session_id: str, message_id: str) -> bool:
+        """
+        Switch to a different conversation branch by activating a message.
+
+        Args:
+            session_id: Session identifier
+            message_id: Message ID to activate
+
+        Returns:
+            True if switched, False if message not found
+        """
+        session = self.get_session(session_id)
+        if not session:
+            logger.warning(f"Session not found: {session_id}")
+            return False
+
+        # Find the message
+        target_message = next((m for m in session.messages if m["message_id"] == message_id), None)
+        if not target_message:
+            logger.warning(f"Message not found: {message_id}")
+            return False
+
+        parent_id = target_message.get("parent_id")
+
+        # Deactivate all siblings (messages with same parent)
+        self._deactivate_siblings(session_id, parent_id)
+
+        # Activate target message
+        target_message["is_active"] = True
+
+        # Update in database
+        if self.persist_to_disk:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    UPDATE messages 
+                    SET is_active = 1
+                    WHERE message_id = ? AND session_id = ?
+                """, (message_id, session_id))
+                
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                logger.error(f"Failed to switch branch: {e}")
+                return False
+
+        logger.info(f"Switched to branch: {message_id}")
+        return True
 
     def cleanup_old_sessions(self, max_age_days: int = 7) -> int:
         """
@@ -650,6 +963,9 @@ class SessionManager:
             cursor.execute("SELECT COUNT(*) FROM messages")
             total_messages = cursor.fetchone()[0]
             
+            cursor.execute("SELECT COUNT(*) FROM messages WHERE is_active = 1")
+            active_messages = cursor.fetchone()[0]
+            
             cursor.execute("SELECT SUM(tokens) FROM messages")
             total_tokens = cursor.fetchone()[0] or 0
             
@@ -661,6 +977,8 @@ class SessionManager:
             return {
                 "total_sessions": total_sessions,
                 "total_messages": total_messages,
+                "active_messages": active_messages,
+                "inactive_branches": total_messages - active_messages,
                 "total_tokens": total_tokens,
                 "database_size_mb": round(db_size_mb, 2),
                 "database_path": str(self.db_path),
