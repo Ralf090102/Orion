@@ -393,34 +393,19 @@ class AnswerGenerator:
 
         # Store messages in session if session_manager provided
         if session_manager and session_id:
-            # Get the last message to use as parent for the new user message
-            existing_messages = session_manager.get_messages(session_id)
-            parent_id = None
-            if existing_messages:
-                # Find the last message's ID from session
-                session = session_manager.get_session(session_id)
-                if session and session.messages:
-                    last_msg = session.messages[-1]
-                    parent_id = last_msg.get("message_id")
-            
-            # Add user message with parent link
-            user_msg_id = session_manager.add_message(
+            session_manager.add_message(
                 session_id=session_id,
                 role="user",
                 content=message,
                 tokens=user_tokens,
-                parent_id=parent_id,
             )
-            
-            # Add assistant message as child of user message
             session_manager.add_message(
                 session_id=session_id,
                 role="assistant",
                 content=answer,
                 tokens=assistant_tokens,
-                parent_id=user_msg_id,
             )
-            logger.debug(f"Stored messages in session {session_id} with parent-child links")
+            logger.debug(f"Stored messages in session {session_id}")
         else:
             # Fallback to prompt builder history (old behavior)
             self.prompt_builder.add_to_history(role="user", content=message)

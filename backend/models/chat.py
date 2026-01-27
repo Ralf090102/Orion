@@ -152,10 +152,6 @@ class DeleteSessionResponse(BaseModel):
 class Message(BaseModel):
     """Model for a chat message."""
 
-    message_id: str | None = Field(
-        default=None,
-        description="Unique message identifier for branching operations",
-    )
     role: str = Field(
         ...,
         description="Message role (user or assistant)",
@@ -168,7 +164,6 @@ class Message(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "message_id": "550e8400-e29b-41d4-a716-446655440000",
                 "role": "user",
                 "content": "What is machine learning?",
                 "tokens": 5,
@@ -338,159 +333,6 @@ class ChatStreamChunk(BaseModel):
             ]
         }
 
-# ========== MESSAGE BRANCHING MODELS ==========
-class DeleteMessageRequest(BaseModel):
-    """Request model for deleting a message and its children."""
-
-    message_id: str = Field(..., description="Message ID to delete")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "message_id": "msg-abc123",
-            }
-        }
-
-
-class DeleteMessageResponse(BaseModel):
-    """Response model for message deletion."""
-
-    status: str = Field(..., description="Operation status")
-    message: str = Field(..., description="Status message")
-    deleted_count: int = Field(..., description="Number of messages deleted")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "status": "success",
-                "message": "Message and children deleted successfully",
-                "deleted_count": 3,
-            }
-        }
-
-
-class CreateBranchRequest(BaseModel):
-    """Request model for creating a conversation branch."""
-
-    parent_id: str = Field(..., description="Parent message ID to branch from")
-    role: str = Field(..., description="Message role (user/assistant)")
-    content: str = Field(..., description="Message content")
-    tokens: int = Field(default=0, description="Token count")
-    deactivate_siblings: bool = Field(
-        default=True,
-        description="Deactivate other branches from same parent",
-    )
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "parent_id": "msg-abc123",
-                "role": "user",
-                "content": "Let me rephrase that question...",
-                "tokens": 0,
-                "deactivate_siblings": True,
-            }
-        }
-
-
-class BranchResponse(BaseModel):
-    """Response model for branch creation."""
-
-    status: str = Field(..., description="Operation status")
-    message: str = Field(..., description="Status message")
-    message_id: str = Field(..., description="New message ID")
-    parent_id: str = Field(..., description="Parent message ID")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "status": "success",
-                "message": "Branch created successfully",
-                "message_id": "msg-xyz789",
-                "parent_id": "msg-abc123",
-            }
-        }
-
-
-class BranchInfo(BaseModel):
-    """Information about a conversation branch."""
-
-    message_id: str = Field(..., description="Message ID")
-    role: str = Field(..., description="Message role")
-    content: str = Field(..., description="Message content")
-    tokens: int = Field(default=0, description="Token count")
-    timestamp: str = Field(..., description="Creation timestamp")
-    is_active: bool = Field(..., description="Whether branch is active")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "message_id": "msg-xyz789",
-                "role": "user",
-                "content": "What is machine learning?",
-                "tokens": 8,
-                "timestamp": "2026-01-25T14:00:00",
-                "is_active": True,
-            }
-        }
-
-
-class BranchesResponse(BaseModel):
-    """Response model for listing branches."""
-
-    status: str = Field(..., description="Operation status")
-    parent_id: Optional[str] = Field(None, description="Parent message ID (None for root)")
-    branches: list[BranchInfo] = Field(..., description="List of alternative branches")
-    total: int = Field(..., description="Total number of branches")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "status": "success",
-                "parent_id": "msg-abc123",
-                "branches": [
-                    {
-                        "message_id": "msg-xyz789",
-                        "role": "user",
-                        "content": "What is machine learning?",
-                        "tokens": 8,
-                        "timestamp": "2026-01-25T14:00:00",
-                        "is_active": True,
-                    }
-                ],
-                "total": 1,
-            }
-        }
-
-
-class SwitchBranchRequest(BaseModel):
-    """Request model for switching active branch."""
-
-    message_id: str = Field(..., description="Message ID to activate")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "message_id": "msg-xyz789",
-            }
-        }
-
-
-class SwitchBranchResponse(BaseModel):
-    """Response model for branch switching."""
-
-    status: str = Field(..., description="Operation status")
-    message: str = Field(..., description="Status message")
-    message_id: str = Field(..., description="Activated message ID")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "status": "success",
-                "message": "Branch switched successfully",
-                "message_id": "msg-xyz789",
-            }
-        }
 
 # ========== WEBSOCKET MODELS ==========
 class WebSocketMessage(BaseModel):
