@@ -37,6 +37,7 @@ class DebouncedEventHandler(FileSystemEventHandler):
         on_created: Optional[Callable[[str], None]] = None,
         on_modified: Optional[Callable[[str], None]] = None,
         on_deleted: Optional[Callable[[str], None]] = None,
+        on_moved: Optional[Callable[[str, str], None]] = None,
         debounce_seconds: float = 1.0,
         ignore_patterns: Optional[list[str]] = None,
     ):
@@ -47,6 +48,7 @@ class DebouncedEventHandler(FileSystemEventHandler):
             on_created: Callback for file creation events
             on_modified: Callback for file modification events
             on_deleted: Callback for file deletion events
+            on_moved: Callback for file rename/move events (old_path, new_path)
             debounce_seconds: Delay before triggering callbacks
             ignore_patterns: List of glob patterns to ignore
         """
@@ -54,6 +56,7 @@ class DebouncedEventHandler(FileSystemEventHandler):
         self.on_created_callback = on_created
         self.on_modified_callback = on_modified
         self.on_deleted_callback = on_deleted
+        self.on_moved_callback = on_moved
         self.debounce_seconds = debounce_seconds
         self.ignore_patterns = ignore_patterns or []
         
@@ -78,25 +81,32 @@ class DebouncedEventHandler(FileSystemEventHandler):
         
         return False
 
-    def _debounced_callback(self, event_type: str, file_path: str) -> None:
+    def _debounced_callback(self, event_type: str, file_path: str, dest_path: Optional[str] = None) -> None:
         """
         Execute debounced callback after delay.
 
         Args:
-            event_type: Type of event ('created', 'modified', 'deleted')
-            file_path: Path to the affected file
+            event_type: Type of event ('created', 'modified', 'deleted', 'moved')
+            file_path: Path to the affected file (or source path for 'moved')
+            dest_path: Destination path (only for 'moved' events)
         """
         with self._lock:
             # Cancel existing timer for this file
             if file_path in self._timers:
                 self._timers[file_path].cancel()
                 del self._timers[file_path]
+            # For moves, also cancel timer for destination
+            if dest_path and dest_path in self._timers:
+                self._timers[dest_path].cancel()
+                del self._timers[dest_path]
 
         # Schedule new callback
         def execute_callback():
             with self._lock:
                 if file_path in self._timers:
                     del self._timers[file_path]
+                if dest_path and dest_path in self._timers:
+                    del self._timers[dest_path]
             
             # Execute the appropriate callback
             if event_type == "created" and self.on_created_callback:
@@ -105,6 +115,8 @@ class DebouncedEventHandler(FileSystemEventHandler):
                 self.on_modified_callback(file_path)
             elif event_type == "deleted" and self.on_deleted_callback:
                 self.on_deleted_callback(file_path)
+            elif event_type == "moved" and self.on_moved_callback and dest_path:
+                self.on_moved_callback(file_path, dest_path)
 
         timer = Timer(self.debounce_seconds, execute_callback)
         
@@ -128,6 +140,11 @@ class DebouncedEventHandler(FileSystemEventHandler):
         if not event.is_directory and not self._should_ignore(event.src_path):
             self._debounced_callback("deleted", event.src_path)
 
+    def on_moved(self, event: FileSystemEvent) -> None:
+        """Handle file rename/move event."""
+        if not event.is_directory and not self._should_ignore(event.src_path) and not self._should_ignore(event.dest_path):
+            self._debounced_callback("moved", event.src_path, event.dest_path)
+
     def cancel_all_timers(self) -> None:
         """Cancel all pending debounced callbacks."""
         with self._lock:
@@ -150,6 +167,7 @@ class FileWatcher:
         on_file_added: Optional[Callable[[str], None]] = None,
         on_file_modified: Optional[Callable[[str], None]] = None,
         on_file_deleted: Optional[Callable[[str], None]] = None,
+        on_file_moved: Optional[Callable[[str, str], None]] = None,
         config: Optional["OrionConfig"] = None,
     ):
         """
@@ -160,6 +178,7 @@ class FileWatcher:
             on_file_added: Callback for file additions
             on_file_modified: Callback for file modifications
             on_file_deleted: Callback for file deletions (if None, uses vector_store)
+            on_file_moved: Callback for file renames/moves (old_path, new_path)
             config: Orion configuration
         """
         self.config = ensure_config(config)
@@ -170,6 +189,7 @@ class FileWatcher:
         self._on_file_added = on_file_added
         self._on_file_modified = on_file_modified
         self._on_file_deleted = on_file_deleted
+        self._on_file_moved = on_file_moved
         
         # Watchdog components
         self.observer: Optional["Observer"] = None
@@ -277,6 +297,40 @@ class FileWatcher:
         except Exception as e:
             log_error(f"Error deleting chunks for {file_path}: {e}", config=self.config)
 
+    def _handle_file_moved(self, old_path: str, new_path: str) -> None:
+        """
+        Handle file rename/move event.
+
+        Args:
+            old_path: Original file path
+            new_path: New file path after rename/move
+        """
+        log_info(f"File moved/renamed: {old_path} -> {new_path}", config=self.config)
+        
+        # Use custom callback if provided
+        if self._on_file_moved:
+            try:
+                if self.executor:
+                    self.executor.submit(self._on_file_moved, old_path, new_path)
+                else:
+                    self._on_file_moved(old_path, new_path)
+            except Exception as e:
+                log_error(f"Error processing moved file {old_path} -> {new_path}: {e}", config=self.config)
+        else:
+            # Default behavior: delete old, add new
+            try:
+                # Delete old path from vector store
+                self._delete_from_vector_store(old_path)
+                
+                # Trigger re-ingestion of new path
+                if self._on_file_added:
+                    if self.executor:
+                        self.executor.submit(self._on_file_added, new_path)
+                    else:
+                        self._on_file_added(new_path)
+            except Exception as e:
+                log_error(f"Error handling moved file {old_path} -> {new_path}: {e}", config=self.config)
+
     def start(self, paths: Optional[list[str]] = None) -> bool:
         """
         Start watching directories for file changes.
@@ -326,6 +380,7 @@ class FileWatcher:
                 on_created=self._handle_file_created,
                 on_modified=self._handle_file_modified,
                 on_deleted=self._handle_file_deleted,
+                on_moved=self._handle_file_moved,
                 debounce_seconds=self.watchdog_config.debounce_seconds,
                 ignore_patterns=self.watchdog_config.ignore_patterns,
             )
@@ -438,6 +493,7 @@ def create_file_watcher(
     on_file_added: Optional[Callable[[str], None]] = None,
     on_file_modified: Optional[Callable[[str], None]] = None,
     on_file_deleted: Optional[Callable[[str], None]] = None,
+    on_file_moved: Optional[Callable[[str, str], None]] = None,
     config: Optional["OrionConfig"] = None,
 ) -> FileWatcher:
     """
@@ -448,6 +504,7 @@ def create_file_watcher(
         on_file_added: Callback for file additions
         on_file_modified: Callback for file modifications
         on_file_deleted: Callback for file deletions
+        on_file_moved: Callback for file renames/moves (old_path, new_path)
         config: Orion configuration
 
     Returns:
@@ -462,9 +519,13 @@ def create_file_watcher(
         def handle_new_file(path):
             print(f"New file: {path}")
         
+        def handle_renamed_file(old_path, new_path):
+            print(f"File renamed: {old_path} -> {new_path}")
+        
         watcher = create_file_watcher(
             on_file_added=handle_new_file,
             on_file_modified=handle_new_file,
+            on_file_moved=handle_renamed_file,
         )
         watcher.start()
         
@@ -479,5 +540,6 @@ def create_file_watcher(
         on_file_added=on_file_added,
         on_file_modified=on_file_modified,
         on_file_deleted=on_file_deleted,
+        on_file_moved=on_file_moved,
         config=config,
     )
