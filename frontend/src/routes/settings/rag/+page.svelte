@@ -1,9 +1,12 @@
 <script lang="ts">
+	import { onMount } from "svelte";
 	import CarbonSave from "~icons/carbon/save";
 	import CarbonReset from "~icons/carbon/reset";
 	import CarbonWarning from "~icons/carbon/warning";
 
-	// Placeholder data - will be loaded from backend later
+	const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
+
+	// Settings data - will be loaded from backend
 	let settings = $state({
 		embedding: {
 			model: "all-MiniLM-L12-v2",
@@ -67,6 +70,8 @@
 
 	let saved = $state(false);
 	let loading = $state(false);
+	let error = $state<string | null>(null);
+	let reingestionWarning = $state(false);
 	let activeSection = $state('embedding');
 
 	const sections = [
@@ -79,89 +84,119 @@
 		{ id: 'gpu', label: 'GPU' }
 	];
 
+	onMount(async () => {
+		await loadSettings();
+	});
+
+	async function loadSettings() {
+		try {
+			loading = true;
+			error = null;
+			const response = await fetch(`${BACKEND_URL}/api/settings`);
+			
+			if (!response.ok) {
+				throw new Error(`Failed to load settings: ${response.statusText}`);
+			}
+			
+			const data = await response.json();
+			settings = data;
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to load settings';
+			console.error('Failed to load settings:', err);
+		} finally {
+			loading = false;
+		}
+	}
+
 	function scrollToSection(sectionId: string) {
 		activeSection = sectionId;
 	}
 
 	async function saveSettings() {
 		loading = true;
+		error = null;
 		try {
-			// TODO: POST to /api/settings
-			await new Promise(resolve => setTimeout(resolve, 500));
+			const response = await fetch(`${BACKEND_URL}/api/settings`, {
+				method: 'PUT',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify(settings),
+			});
 			
+			if (!response.ok) {
+				const errorData = await response.json().catch(() => ({}));
+				throw new Error(errorData.detail || `Failed to save settings: ${response.statusText}`);
+			}
+			
+			const result = await response.json();
+			
+			// Show success message
 			saved = true;
 			setTimeout(() => {
 				saved = false;
 			}, 3000);
+
+			// Show re-ingestion warning if embedding or chunking was updated
+			if (result.updated_categories && 
+				(result.updated_categories.includes('embedding') || 
+				 result.updated_categories.includes('chunking'))) {
+				reingestionWarning = true;
+				setTimeout(() => {
+					reingestionWarning = false;
+				}, 8000);
+			}
+
+			// Show warnings if any
+			if (result.warnings && result.warnings.length > 0) {
+				console.warn('Settings saved with warnings:', result.warnings);
+			}
+
+			// Show restart requirements if any
+			if (result.requires_restart && result.requires_restart.length > 0) {
+				console.info('Components requiring restart:', result.requires_restart);
+			}
 		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to save settings';
 			console.error('Failed to save settings:', err);
 		} finally {
 			loading = false;
 		}
 	}
 
-	function resetToDefaults() {
-		// Reset to default values
-		settings = {
-			embedding: {
-				model: "all-MiniLM-L12-v2",
-				batch_size: 64,
-				timeout: 30,
-				cache_embeddings: true
-			},
-			chunking: {
-				strategy: "recursive",
-				chunk_size: 512,
-				chunk_overlap: 128,
-				max_chunk_size: 512,
-				min_chunk_size: 256
-			},
-			retrieval: {
-				default_k: 5,
-				max_k: 20,
-				similarity_threshold: 0.2,
-				enable_reranking: true,
-				enable_hybrid_search: true,
-				semantic_weight: 0.8,
-				keyword_weight: 0.2,
-				enable_mmr: true,
-				mmr_diversity_bias: 0.5,
-				mmr_fetch_k: 20,
-				mmr_threshold: 0.475
-			},
-			reranker: {
-				model: "cross-encoder/ms-marco-MiniLM-L-6-v2",
-				batch_size: 16,
-				timeout: 30,
-				top_k: 10,
-				score_threshold: 0.5
-			},
-			generation: {
-				mode: "rag",
-				enable_citations: true,
-				citation_format: "[{index}]",
-				max_context_chunks: 5,
-				validate_citations: true,
-				expand_citations: false,
-				max_history_messages: 10,
-				enable_rag_augmentation: true,
-				rag_trigger_mode: "auto",
-				max_total_tokens: 4096,
-				reserve_tokens_for_response: 1024
-			},
-			vectorstore: {
-				collection_name: "orion_knowledge_base",
-				persist_directory: "./data/chroma-data",
-				distance_metric: "cosine",
-				batch_size: 64
-			},
-			gpu: {
-				enabled: false,
-				auto_detect: true,
-				preferred_device: "auto",
-				fallback_to_cpu: true
+	async function resetToDefaults() {
+		if (!confirm('Are you sure you want to reset all settings to defaults? This action cannot be undone.')) {
+			return;
+		}
+
+		loading = true;
+		error = null;
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/settings/reset`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({}),
+			});
+			
+			if (!response.ok) {
+				throw new Error(`Failed to reset settings: ${response.statusText}`);
 			}
-		};
+			
+			// Reload settings from backend
+			await loadSettings();
+			
+			saved = true;
+			setTimeout(() => {
+				saved = false;
+			}, 3000);
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to reset settings';
+			console.error('Failed to reset settings:', err);
+		} finally {
+			loading = false;
+		}
 	}
 </script>
 
@@ -192,6 +227,29 @@
 		</div>
 	</div>
 
+	<!-- Error Message -->
+	{#if error}
+		<div class="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">
+			<div class="flex items-start gap-3">
+				<CarbonWarning class="size-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+				<div class="flex-1">
+					<h3 class="font-semibold text-red-900 dark:text-red-200 text-sm">
+						Error
+					</h3>
+					<p class="text-sm text-red-800 dark:text-red-300 mt-1">
+						{error}
+					</p>
+				</div>
+				<button
+					onclick={() => error = null}
+					class="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-200"
+				>
+					×
+				</button>
+			</div>
+		</div>
+	{/if}
+
 	<!-- Navigation Tabs -->
 	<div class="sticky top-0 z-10 -mx-5 sm:-mx-8 px-5 sm:px-8 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 py-3">
 		<div class="flex gap-2 overflow-x-auto scrollbar-custom pb-1">
@@ -210,6 +268,15 @@
 	</div>
 
 	<form onsubmit={(e) => { e.preventDefault(); saveSettings(); }} class="flex flex-col gap-6">
+		<!-- Loading State -->
+		{#if loading && !settings.embedding}
+			<div class="flex items-center justify-center py-12">
+				<div class="text-center">
+					<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+					<p class="mt-4 text-sm text-gray-600 dark:text-gray-400">Loading settings...</p>
+				</div>
+			</div>
+		{:else}
 		<!-- Embedding Settings -->
 		{#if activeSection === 'embedding'}
 		<section class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
@@ -870,6 +937,8 @@
 		</section>
 		{/if}
 
+		{/if}
+
 		<!-- Action Buttons -->
 		<div class="flex items-center justify-between border-t border-gray-200 pt-6 dark:border-gray-700">
 			<button
@@ -899,3 +968,13 @@
 		{/if}
 	</form>
 </div>
+
+<!-- Re-ingestion Warning Popup -->
+{#if reingestionWarning}
+	<div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
+		<div class="rounded-lg border border-blue-300 bg-blue-600 shadow-lg px-4 py-3 text-sm text-white flex items-center gap-2 max-w-md">
+			<CarbonWarning class="size-4 flex-shrink-0" />
+			<span>To see changes, re-ingesting is required</span>
+		</div>
+	</div>
+{/if}
