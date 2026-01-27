@@ -4,7 +4,7 @@
 	import { isAborted } from "$lib/stores/isAborted";
 	import { onMount, onDestroy } from "svelte";
 	import { page } from "$app/state";
-	import { beforeNavigate } from "$app/navigation";
+	import { beforeNavigate, invalidateAll } from "$app/navigation";
 	import { base } from "$app/paths";
 	import { ERROR_MESSAGES, error } from "$lib/stores/errors";
 	import { findCurrentModel } from "$lib/utils/models";
@@ -110,6 +110,11 @@
 				} else {
 					console.warn('[WebSocket] No assistant message to update');
 				}
+			},
+			onTitleGenerated: (title) => {
+				console.log('[WebSocket] Title generated:', title);
+				// Trigger page invalidation to refresh sidebar with new title
+				invalidateAll();
 			},
 			onError: (errorMsg) => {
 				console.error('[WebSocket] Error:', errorMsg);

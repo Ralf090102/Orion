@@ -35,6 +35,29 @@ class CreateSessionRequest(BaseModel):
         }
 
 
+class UpdateSessionRequest(BaseModel):
+    """Request model for updating session metadata."""
+
+    title: Optional[str] = Field(
+        default=None,
+        description="Session title/name",
+    )
+    metadata: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Additional metadata to merge (title will be added to this)",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "title": "Machine Learning Discussion",
+                "metadata": {
+                    "tags": ["ml", "python"],
+                },
+            }
+        }
+
+
 class SessionInfo(BaseModel):
     """Model for session information."""
 

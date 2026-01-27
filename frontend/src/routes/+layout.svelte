@@ -82,10 +82,25 @@
 	}
 
 	async function editConversationTitle(id: string, title: string) {
-		// Note: Your backend doesn't support title editing yet
-		// This is a placeholder for future implementation
-		conversations = conversations.map((conv) => (conv.id === id ? { ...conv, title } : conv));
-		console.log('Title editing not yet implemented in backend');
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/chat/sessions/${id}`, {
+				method: 'PATCH',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({ title }),
+			});
+
+			if (!response.ok) {
+				throw new Error(`Failed to update session title: ${response.statusText}`);
+			}
+
+			// Update local state
+			conversations = conversations.map((conv) => (conv.id === id ? { ...conv, title } : conv));
+		} catch (err) {
+			console.error('Failed to update session title:', err);
+			$error = String(err);
+		}
 	}
 
 	onDestroy(() => {

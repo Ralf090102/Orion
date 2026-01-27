@@ -9,6 +9,7 @@ export interface WebSocketChatOptions {
 	onError?: (error: string) => void;
 	onConnect?: () => void;
 	onDisconnect?: () => void;
+	onTitleGenerated?: (title: string) => void;
 	backendUrl?: string;
 }
 
@@ -60,8 +61,10 @@ export class WebSocketChat {
 					} else if (data.type === 'sources') {
 						// RAG sources received (could be used to display citations)
 					} else if (data.type === 'metadata') {
-						// Metadata received (processing time, RAG status, etc.)
-					} else if (data.type === 'pong') {
+						// Metadata received (processing time, RAG status, etc.)				} else if (data.type === 'title') {
+					// Session title generated - notify parent to update sidebar
+					console.log('[WebSocket] Session title generated:', data.content);
+					this.options.onTitleGenerated?.(data.content);					} else if (data.type === 'pong') {
 						// Pong response to ping
 					} else {
 						console.warn('[WebSocket] Unknown message type:', data.type);

@@ -30,6 +30,7 @@ from backend.models.chat import (
     SessionInfo,
     SessionListResponse,
     SessionResponse,
+    UpdateSessionRequest,
 )
 from src.generation.generate import AnswerGenerator
 from src.generation.session_manager import SessionManager
@@ -281,6 +282,78 @@ async def delete_session(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete session: {str(e)}",
+        )
+
+
+@router.patch(
+    "/api/chat/sessions/{session_id}",
+    response_model=SessionResponse,
+    summary="Update session metadata",
+    description="Update session title and/or metadata",
+    tags=["Chat"],
+)
+async def update_session(
+    session_id: str,
+    request: UpdateSessionRequest,
+    session_manager: SessionManager = Depends(get_session_manager_dependency),
+):
+    """
+    Update session metadata (title, tags, etc.).
+    
+    Args:
+        session_id: Session identifier
+        request: Update request with title and/or metadata
+        session_manager: Session manager instance (injected)
+        
+    Returns:
+        SessionResponse with updated session info
+        
+    Raises:
+        HTTPException: If session not found or update fails
+    """
+    try:
+        logger.info(f"Updating session {session_id}: title={request.title}")
+        
+        # Check if session exists
+        session = session_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Session not found: {session_id}",
+            )
+        
+        # Build metadata update
+        metadata_update = request.metadata.copy() if request.metadata else {}
+        if request.title is not None:
+            metadata_update["title"] = request.title
+        
+        # Update session metadata
+        if metadata_update:
+            session_manager.update_session_metadata(session_id, metadata_update)
+            logger.info(f"Updated session {session_id} metadata: {list(metadata_update.keys())}")
+        
+        # Get updated session
+        updated_session = session_manager.get_session(session_id)
+        
+        return SessionResponse(
+            status="success",
+            message="Session updated successfully",
+            session=SessionInfo(
+                session_id=updated_session.session_id,
+                created_at=updated_session.created_at,
+                updated_at=updated_session.updated_at,
+                message_count=len(updated_session.messages),
+                metadata=updated_session.metadata,
+            ),
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update session {session_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update session: {str(e)}",
         )
 
 

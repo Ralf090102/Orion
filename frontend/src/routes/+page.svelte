@@ -38,6 +38,7 @@
 				body: JSON.stringify({
 					metadata: {
 						model: $settings.activeModel || 'default',
+						title: 'New Chat',  // Temporary title, will be auto-generated after first message
 					}
 				}),
 			});
@@ -47,7 +48,12 @@
 				throw new Error(`Failed to create session: ${errorText}`);
 			}
 
-			const { session_id } = await createSessionRes.json();
+			const responseData = await createSessionRes.json();
+			const sessionId = responseData.session?.session_id || responseData.session_id;
+
+			if (!sessionId) {
+				throw new Error('No session ID returned from server');
+			}
 
 			// Store the pending message for the conversation page
 			pendingMessage.set({
@@ -56,7 +62,7 @@
 			});
 
 			// Navigate to the conversation page
-			await goto(`${base}/conversation/${session_id}`, { invalidateAll: true });
+			await goto(`${base}/conversation/${sessionId}`, { invalidateAll: true });
 		} catch (err) {
 			error.set((err as Error).message || ERROR_MESSAGES.default);
 			console.error(err);

@@ -136,6 +136,83 @@ class ChatWebSocketHandler:
             data={"code": code},
         )
     
+    async def _maybe_generate_title(self, first_message: str):
+        """
+        Generate a session title if this is the first user message.
+        
+        Args:
+            first_message: The user's first message
+        """
+        try:
+            # Check if session already has a title
+            session = self.session_manager.get_session(self.session_id)
+            if not session:
+                return
+            
+            # Only generate if no title or title is default "New Chat"
+            existing_title = session.metadata.get("title", "")
+            if existing_title and existing_title != "New Chat":
+                return
+            
+            # Only generate for the first user message (2 messages total: 1 user + 1 assistant)
+            if len(session.messages) > 2:
+                return
+            
+            logger.info(f"Auto-generating title for session {self.session_id}")
+            
+            # Use LLM to generate a concise title
+            title_prompt = f"""Generate a very short, concise title (maximum 6 words) for a conversation that starts with this message:
+
+"{first_message}"
+
+Reply with ONLY the title, nothing else. No quotes, no explanations."""
+
+            messages = [
+                {"role": "user", "content": title_prompt}
+            ]
+            
+            # Generate title using LLM (non-streaming)
+            from src.core.llm import OllamaClient
+            llm = OllamaClient(timeout=10)
+            
+            response = llm.generate(
+                messages=messages,
+                model=self.config.rag.llm.model,
+                temperature=0.7,
+                top_p=0.9,
+                max_tokens=20,  # Keep it short
+                stream=False,
+            )
+            
+            generated_title = response.get("message", {}).get("content", "").strip()
+            
+            # Clean up the title (remove quotes if present)
+            generated_title = generated_title.strip('"\'').strip()
+            
+            # Limit length
+            if len(generated_title) > 60:
+                generated_title = generated_title[:57] + "..."
+            
+            if generated_title and generated_title != first_message:
+                # Update session metadata with generated title
+                self.session_manager.update_session_metadata(
+                    self.session_id,
+                    {"title": generated_title}
+                )
+                
+                logger.info(f"Generated title for session {self.session_id}: '{generated_title}'")
+                
+                # Optionally send title update to client
+                await self.send_message(
+                    message_type="title",
+                    content=generated_title,
+                    data={"session_id": self.session_id}
+                )
+            
+        except Exception as e:
+            logger.warning(f"Failed to generate title for session {self.session_id}: {e}")
+            # Don't fail the entire request if title generation fails
+    
     async def handle_user_message(self, message: str, options: dict[str, Any] | None = None):
         """
         Handle incoming user message and generate response.
@@ -237,6 +314,9 @@ class ChatWebSocketHandler:
                 f"WebSocket message processed: {len(result.answer)} chars, "
                 f"RAG={result.rag_triggered}, {processing_time:.3f}s"
             )
+            
+            # Auto-generate title for first message
+            await self._maybe_generate_title(message)
             
         except Exception as e:
             logger.error(f"Failed to process message: {e}", exc_info=True)
