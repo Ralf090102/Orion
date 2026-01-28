@@ -15,6 +15,7 @@
 	import "katex/dist/katex.min.css";
 	import { loading } from "$lib/stores/loading.js";
 	import { WebSocketChat } from "$lib/utils/websocketChat";
+	import titleUpdate from "$lib/stores/titleUpdate";
 
 	let { data = $bindable() } = $props();
 
@@ -116,15 +117,11 @@
 			},
 			onTitleGenerated: (title) => {
 				console.log('[WebSocket] Title generated:', title);
-				// Update the conversation title in the local conversations array
-				const convIndex = conversations.findIndex((conv) => conv.id === page.params.id);
-				if (convIndex !== -1) {
-					conversations = [
-						...conversations.slice(0, convIndex),
-						{ ...conversations[convIndex], title },
-						...conversations.slice(convIndex + 1)
-					];
-				}
+				// Update sidebar via titleUpdate store
+				$titleUpdate = {
+					convId: page.params.id,
+					title: title
+				};
 			},
 			onError: (errorMsg) => {
 				console.error('[WebSocket] Error:', errorMsg);

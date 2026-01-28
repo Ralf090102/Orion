@@ -234,18 +234,24 @@ class ChatWebSocketHandler:
             first_message: The user's first message
         """
         try:
-            # Check if session already has a title
-            session = self.session_manager.get_session(self.session_id)
+            # Reload session from database to get latest messages
+            session = self.session_manager.get_session(self.session_id, reload_from_db=True)
             if not session:
                 return
             
             # Only generate if no title or title is default "New Chat"
             existing_title = session.metadata.get("title", "")
             if existing_title and existing_title != "New Chat":
+                logger.debug(f"Session {self.session_id} already has title: '{existing_title}'")
                 return
             
-            # Only generate for the first user message (2 messages total: 1 user + 1 assistant)
-            if len(session.messages) > 2:
+            # Only generate for the first exchange (2 messages: 1 user + 1 assistant)
+            # Note: We just added both messages, so should have exactly 2
+            message_count = len(session.messages)
+            logger.debug(f"Session {self.session_id} has {message_count} messages")
+            
+            if message_count != 2:
+                logger.debug(f"Skipping title generation - need exactly 2 messages, have {message_count}")
                 return
             
             logger.info(f"Auto-generating title for session {self.session_id}")
