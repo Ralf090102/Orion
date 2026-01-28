@@ -287,6 +287,71 @@ class SessionManager:
         """
         return self.get_session(session_id, reload_from_db=True)
 
+    def delete_last_messages(self, session_id: str, count: int = 2) -> bool:
+        """
+        Delete the last N messages from a session (for retry functionality).
+        
+        Args:
+            session_id: Session identifier
+            count: Number of messages to delete from the end (default 2 for user+assistant pair)
+            
+        Returns:
+            True if deleted, False if session not found or not enough messages
+        """
+        session = self.get_session(session_id)
+        if not session:
+            logger.warning(f"Session not found: {session_id}")
+            return False
+        
+        if len(session.messages) < count:
+            logger.warning(f"Not enough messages to delete (have {len(session.messages)}, need {count})")
+            return False
+        
+        # Get the message IDs to delete
+        messages_to_delete = session.messages[-count:]
+        message_ids = [msg.get("id") for msg in messages_to_delete if msg.get("id")]
+        
+        # Delete from database first
+        if self.persist_to_disk and message_ids:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                # Delete messages and their sources
+                placeholders = ",".join(["?"] * len(message_ids))
+                cursor.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", message_ids)
+                cursor.execute(f"DELETE FROM message_sources WHERE message_id IN ({placeholders})", message_ids)
+                
+                # Update session metadata
+                cursor.execute(
+                    """
+                    UPDATE sessions 
+                    SET message_count = message_count - ?, 
+                        updated_at = ?
+                    WHERE session_id = ?
+                    """,
+                    (count, datetime.now().isoformat(), session_id)
+                )
+                
+                conn.commit()
+                conn.close()
+                
+                logger.info(f"Deleted {count} messages from session {session_id} in database")
+            except Exception as e:
+                logger.error(f"Failed to delete messages from database: {e}")
+                return False
+        
+        # Update in-memory session
+        session.messages = session.messages[:-count]
+        session.message_count = len(session.messages)
+        session.updated_at = datetime.now()
+        
+        # Invalidate cache to force reload on next access
+        self.invalidate_cache(session_id)
+        
+        logger.info(f"Deleted last {count} messages from session {session_id}")
+        return True
+
     def delete_session(self, session_id: str) -> bool:
         """
         Delete a session.

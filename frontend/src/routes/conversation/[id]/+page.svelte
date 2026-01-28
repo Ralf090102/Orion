@@ -259,10 +259,35 @@
 	}
 
 	async function onRetry(payload: { id: Message["id"]; content?: string }) {
-		// Simple retry: just resend the last user message
-		const lastUserMessage = [...messages].reverse().find(msg => msg.from === 'user');
-		if (lastUserMessage) {
-			await writeMessage({ prompt: payload.content || lastUserMessage.content });
+		try {
+			// Find the last user message
+			const lastUserMessage = [...messages].reverse().find(msg => msg.from === 'user');
+			if (!lastUserMessage) {
+				console.warn('[Retry] No user message found');
+				return;
+			}
+			
+			const retryContent = payload.content || lastUserMessage.content;
+			
+			// Delete last 2 messages from database (user + assistant)
+			const response = await fetch(
+				`${BACKEND_URL}/api/chat/sessions/${page.params.id}/messages/last?count=2`,
+				{ method: 'DELETE' }
+			);
+			
+			if (!response.ok) {
+				throw new Error('Failed to delete messages for retry');
+			}
+			
+			// Remove last 2 messages from UI
+			messages = messages.slice(0, -2);
+			
+			// Resend the message
+			await writeMessage({ prompt: retryContent });
+			
+		} catch (err) {
+			console.error('[Retry] Error:', err);
+			$error = 'Failed to retry message';
 		}
 	}
 

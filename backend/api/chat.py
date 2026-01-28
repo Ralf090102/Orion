@@ -285,6 +285,63 @@ async def delete_session(
         )
 
 
+@router.delete(
+    "/api/chat/sessions/{session_id}/messages/last",
+    summary="Delete last messages",
+    description="Delete the last N messages from a session (for retry functionality)",
+    tags=["Chat"],
+)
+async def delete_last_messages(
+    session_id: str,
+    count: int = 2,
+    session_manager: SessionManager = Depends(get_session_manager_dependency),
+):
+    """
+    Delete the last N messages from a session.
+    
+    Typically used for retry functionality to delete the previous user+assistant exchange.
+    
+    Args:
+        session_id: Session identifier
+        count: Number of messages to delete (default 2 for user+assistant pair)
+        session_manager: Session manager instance (injected)
+        
+    Returns:
+        Success response
+        
+    Raises:
+        HTTPException: If session not found or deletion fails
+    """
+    try:
+        logger.info(f"Deleting last {count} messages from session: {session_id}")
+        
+        # Delete messages
+        success = session_manager.delete_last_messages(session_id, count)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to delete messages (session not found or insufficient messages)",
+            )
+        
+        logger.info(f"Deleted last {count} messages from session: {session_id}")
+        
+        return {
+            "status": "success",
+            "message": f"Deleted last {count} messages",
+            "session_id": session_id,
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete messages: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete messages: {str(e)}",
+        )
+
+
 @router.patch(
     "/api/chat/sessions/{session_id}",
     response_model=SessionResponse,
