@@ -392,14 +392,20 @@
 		isTranscribing = true;
 
 		try {
-			const response = await fetch(`${base}/api/transcribe`, {
+			// Create FormData for multipart upload
+			const formData = new FormData();
+			formData.append('audio', audioBlob, 'recording.webm');
+			formData.append('language', 'en'); // Optional: specify language
+
+			const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
+			const response = await fetch(`${BACKEND_URL}/api/transcribe`, {
 				method: "POST",
-				headers: { "Content-Type": audioBlob.type },
-				body: audioBlob,
+				body: formData,
 			});
 
 			if (!response.ok) {
-				throw new Error(await response.text());
+				const errorData = await response.json().catch(() => ({ detail: 'Transcription failed' }));
+				throw new Error(errorData.detail || 'Transcription failed');
 			}
 
 			const { text } = await response.json();
@@ -407,10 +413,12 @@
 			if (trimmedText) {
 				// Append transcribed text to draft
 				draft = draft.trim() ? `${draft.trim()} ${trimmedText}` : trimmedText;
+			} else {
+				$error = "No speech detected. Please try again.";
 			}
 		} catch (err) {
 			console.error("Transcription error:", err);
-			$error = "Transcription failed. Please try again.";
+			$error = err instanceof Error ? err.message : "Transcription failed. Please try again.";
 		} finally {
 			isTranscribing = false;
 		}
@@ -421,14 +429,20 @@
 		isTranscribing = true;
 
 		try {
-			const response = await fetch(`${base}/api/transcribe`, {
+			// Create FormData for multipart upload
+			const formData = new FormData();
+			formData.append('audio', audioBlob, 'recording.webm');
+			formData.append('language', 'en'); // Optional: specify language
+
+			const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
+			const response = await fetch(`${BACKEND_URL}/api/transcribe`, {
 				method: "POST",
-				headers: { "Content-Type": audioBlob.type },
-				body: audioBlob,
+				body: formData,
 			});
 
 			if (!response.ok) {
-				throw new Error(await response.text());
+				const errorData = await response.json().catch(() => ({ detail: 'Transcription failed' }));
+				throw new Error(errorData.detail || 'Transcription failed');
 			}
 
 			const { text } = await response.json();
@@ -437,10 +451,12 @@
 				// Set draft and send immediately
 				draft = draft.trim() ? `${draft.trim()} ${trimmedText}` : trimmedText;
 				handleSubmit();
+			} else {
+				$error = "No speech detected. Please try again.";
 			}
 		} catch (err) {
 			console.error("Transcription error:", err);
-			$error = "Transcription failed. Please try again.";
+			$error = err instanceof Error ? err.message : "Transcription failed. Please try again.";
 		} finally {
 			isTranscribing = false;
 		}

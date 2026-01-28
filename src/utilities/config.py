@@ -2,7 +2,8 @@ import os
 from src.utilities.utils import log_error
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
+from pathlib import Path
 
 # Disable HuggingFace symlink warnings on Windows
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
@@ -65,6 +66,22 @@ class ChunkerType(str, Enum):
     RECURSIVE = "recursive"
     SEMANTIC = "semantic"
     SMART = "smart"
+
+
+class WhisperDevice(str, Enum):
+    """Whisper compute device options"""
+
+    AUTO = "auto"
+    CPU = "cpu"
+    CUDA = "cuda"
+
+
+class WhisperComputeType(str, Enum):
+    """Whisper compute precision options"""
+
+    INT8 = "int8"
+    FLOAT16 = "float16"
+    FLOAT32 = "float32"
 
 
 # ========== BASE CONFIGURATION CLASS ==========
@@ -427,6 +444,43 @@ class WatchdogConfig(BaseConfig):
             raise ValueError("paths must be a list of strings")
 
 
+@dataclass
+class WhisperConfig(BaseConfig):
+    """Configuration for Whisper speech-to-text"""
+
+    model_size: str = "base"  # tiny, base, small, medium, large
+    device: str = "auto"  # auto, cpu, cuda
+    compute_type: str = "int8"  # int8, float16, float32
+    language: Optional[str] = None  # None = auto-detect, or "en", "es", etc.
+    model_cache_dir: Path = field(default_factory=lambda: Path.home() / ".cache" / "whisper")
+
+    @classmethod
+    def from_env(cls) -> "WhisperConfig":
+        """Load Whisper configuration from environment variables."""
+        cache_dir_str = get_env_str("WHISPER_MODEL_CACHE_DIR", str(Path.home() / ".cache" / "whisper"))
+        
+        return cls(
+            model_size=get_env_str("WHISPER_MODEL_SIZE", "base"),
+            device=get_env_str("WHISPER_DEVICE", "auto"),
+            compute_type=get_env_str("WHISPER_COMPUTE_TYPE", "int8"),
+            language=get_env_str("WHISPER_LANGUAGE", "") or None,
+            model_cache_dir=Path(cache_dir_str),
+        )
+
+    def validate(self) -> None:
+        """Validate Whisper configuration values."""
+        valid_sizes = ["tiny", "base", "small", "medium", "large", "large-v2", "large-v3"]
+        if self.model_size not in valid_sizes:
+            raise ValueError(f"model_size must be one of {valid_sizes}")
+        
+        valid_devices = ["auto", "cpu", "cuda"]
+        if self.device not in valid_devices:
+            raise ValueError(f"device must be one of {valid_devices}")
+        
+        valid_compute_types = ["int8", "float16", "float32"]
+        if self.compute_type not in valid_compute_types:
+            raise ValueError(f"compute_type must be one of {valid_compute_types}")
+
 
 # ========== MAIN RAG CONFIGURATION ==========
 @dataclass
@@ -669,6 +723,7 @@ class OrionConfig(BaseConfig):
     gpu: GPUConfig = field(default_factory=GPUConfig)
     watchdog: WatchdogConfig = field(default_factory=WatchdogConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    whisper: WhisperConfig = field(default_factory=WhisperConfig)
     version: str = "1.0.0"
 
     @classmethod
@@ -680,6 +735,7 @@ class OrionConfig(BaseConfig):
             gpu=GPUConfig.from_env(),
             watchdog=WatchdogConfig.from_env(),
             logging=LoggingConfig.from_env(),
+            whisper=WhisperConfig.from_env(),
             version=get_env_str("ORION_VERSION", "1.0.0"),
         )
         config.validate()

@@ -63,6 +63,9 @@ typer
 rich
 requests
 
+# Features
+faster-whisper
+
 # ================================
 # WARNING
 # ================================
