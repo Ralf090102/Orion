@@ -89,7 +89,7 @@ export const load = async ({ depends, fetch }) => {
 		user: null, // No authentication for local use
 		settings,
 		publicConfig,
-		transcriptionEnabled: false,
+		transcriptionEnabled: true, // Enable microphone button
 		tools: [],
 	};
 };

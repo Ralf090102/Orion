@@ -37,6 +37,7 @@ export const load: PageLoad = async ({ params, depends, fetch, parent }) => {
 			preprompt: '',
 			rootMessageId: null,
 			shared: false,
+			transcriptionEnabled: true, // Enable microphone button
 		};
 	} catch (err) {
 		console.error('Failed to load conversation:', err);

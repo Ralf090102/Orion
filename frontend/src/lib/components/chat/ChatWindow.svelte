@@ -655,7 +655,7 @@
 							{#if transcriptionEnabled}
 								<button
 									type="button"
-									class="btn absolute bottom-2.5 right-12 size-9 self-end rounded-xl border-0 bg-gradient-to-br from-gray-50 to-gray-100 text-gray-600 shadow-sm transition-all hover:from-gray-100 hover:to-gray-200 hover:text-gray-800 hover:shadow-md dark:from-gray-700 dark:to-gray-600 dark:text-gray-300 dark:hover:from-gray-600 dark:hover:to-gray-500 sm:right-11 sm:size-8"
+									class="btn absolute bottom-2.5 right-13 size-9 self-end rounded-xl border-0 bg-gradient-to-br from-gray-50 to-gray-100 text-gray-600 shadow-sm transition-all hover:from-gray-100 hover:to-gray-200 hover:text-gray-800 hover:shadow-md dark:from-gray-700 dark:to-gray-600 dark:text-gray-300 dark:hover:from-gray-600 dark:hover:to-gray-500 sm:right-12 sm:size-8"
 									disabled={isReadOnly}
 									onclick={() => {
 										isRecording = true;
