@@ -1,10 +1,11 @@
 """
 WebSocket Chat Handler
 
-Real-time bidirectional chat via WebSocket.
+Real-time bidirectional chat via WebSocket with robust token streaming.
 Compatible with HuggingFace chat-ui and other WebSocket clients.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class ChatWebSocketHandler:
-    """Handler for WebSocket chat connections."""
+    """Handler for WebSocket chat connections with robust token streaming."""
     
     def __init__(
         self,
@@ -47,6 +48,90 @@ class ChatWebSocketHandler:
         self.generator = generator
         self.config = config
         self.connected = False
+        
+        # Token streaming queue (fixes fire-and-forget issues)
+        self.token_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        self._queue_task: asyncio.Task | None = None
+        self._is_processing = False
+    
+    async def _process_token_queue(self):
+        """
+        Process tokens from the queue and send them to the client.
+        
+        This runs in a dedicated task to ensure tokens are sent in order
+        without race conditions or dropped messages.
+        """
+        logger.debug(f"Token queue processor started for session {self.session_id}")
+        
+        try:
+            while self.connected or not self.token_queue.empty():
+                try:
+                    # Get token with timeout to allow checking connected status
+                    token = await asyncio.wait_for(
+                        self.token_queue.get(),
+                        timeout=0.1
+                    )
+                    
+                    # None is sentinel value for "done streaming"
+                    if token is None:
+                        logger.debug("Received end-of-stream signal")
+                        break
+                    
+                    # Send token to client
+                    await self.send_message(message_type="token", content=token)
+                    self.token_queue.task_done()
+                    
+                except asyncio.TimeoutError:
+                    # No token available, loop again to check connection status
+                    continue
+                except Exception as e:
+                    logger.error(f"Error processing token: {e}", exc_info=True)
+                    break
+        
+        finally:
+            logger.debug(f"Token queue processor stopped for session {self.session_id}")
+            self._is_processing = False
+    
+    def queue_token(self, token: str):
+        """
+        Queue a token for sending (thread-safe).
+        
+        This is called from the sync streaming callback and safely
+        adds tokens to the async queue.
+        
+        Args:
+            token: Token content to send
+        """
+        try:
+            # Put token in queue (non-blocking)
+            self.token_queue.put_nowait(token)
+        except asyncio.QueueFull:
+            logger.warning(f"Token queue full, dropping token: {token[:20]}...")
+        except Exception as e:
+            logger.error(f"Failed to queue token: {e}")
+    
+    async def start_token_streaming(self):
+        """Start the token queue processor task."""
+        if not self._is_processing:
+            self._is_processing = True
+            self._queue_task = asyncio.create_task(self._process_token_queue())
+            logger.debug("Started token streaming task")
+    
+    async def stop_token_streaming(self):
+        """Stop the token queue processor and signal end of stream."""
+        # Signal end of stream
+        await self.token_queue.put(None)
+        
+        # Wait for queue to finish processing
+        if self._queue_task and not self._queue_task.done():
+            try:
+                await asyncio.wait_for(self._queue_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Token queue processor did not finish in time")
+                if not self._queue_task.done():
+                    self._queue_task.cancel()
+        
+        logger.debug("Stopped token streaming task")
     
     async def connect(self) -> bool:
         """
@@ -88,9 +173,14 @@ class ChatWebSocketHandler:
             return False
     
     async def disconnect(self):
-        """Close WebSocket connection."""
+        """Close WebSocket connection and cleanup resources."""
         if self.connected:
             try:
+                # Stop token streaming first
+                if self._is_processing:
+                    await self.stop_token_streaming()
+                
+                # Close WebSocket
                 await self.websocket.close()
                 logger.info(f"WebSocket disconnected for session: {self.session_id}")
             except Exception as e:
@@ -215,7 +305,7 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
     
     async def handle_user_message(self, message: str, options: dict[str, Any] | None = None):
         """
-        Handle incoming user message and generate response.
+        Handle incoming user message and generate response with queued streaming.
         
         Args:
             message: User message content
@@ -240,25 +330,18 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
             if temperature is not None:
                 generation_kwargs["temperature"] = temperature
             
-            # Store reference to send_message for sync callback
-            send_msg = self.send_message
-            websocket = self.websocket
+            # Start token streaming task
+            await self.start_token_streaming()
             
-            # Stream tokens directly to WebSocket (sync callback for Ollama)
+            # Define sync callback for token streaming (called by Ollama)
             def stream_token(token: str):
-                """Stream tokens directly to client (runs in sync context)."""
-                # Create async task to send via WebSocket
-                import asyncio
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # Schedule coroutine in running loop
-                        asyncio.create_task(send_msg(message_type="token", content=token))
-                    else:
-                        # Run in new event loop if needed
-                        asyncio.run(send_msg(message_type="token", content=token))
-                except Exception as e:
-                    logger.error(f"Failed to send token: {e}")
+                """
+                Queue tokens for async sending (thread-safe).
+                
+                This is called from the sync Ollama streaming callback.
+                Tokens are queued and sent by the async queue processor.
+                """
+                self.queue_token(token)
             
             # Generate chat response with streaming
             result = self.generator.generate_chat_response(
@@ -270,6 +353,9 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
                 on_token=stream_token,
                 **generation_kwargs,
             )
+            
+            # Stop token streaming (sends end-of-stream signal)
+            await self.stop_token_streaming()
             
             # Send sources if available
             if include_sources and result.rag_triggered and hasattr(result, "sources") and result.sources:
@@ -320,6 +406,9 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
             
         except Exception as e:
             logger.error(f"Failed to process message: {e}", exc_info=True)
+            # Stop streaming on error
+            if self._is_processing:
+                await self.stop_token_streaming()
             await self.send_error(f"Failed to process message: {str(e)}")
     
     async def handle_ping(self):

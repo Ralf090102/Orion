@@ -88,48 +88,97 @@ class SessionManager:
             logger.info("Session manager initialized (in-memory only)")
 
     def _init_database(self) -> None:
-        """Initialize SQLite database schema."""
+        """Initialize SQLite database schema with future-proof fields."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Create sessions table
+        # Create sessions table with additional metadata columns
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                metadata TEXT,
-                message_count INTEGER DEFAULT 0
+                title TEXT DEFAULT 'New Chat',
+                message_count INTEGER DEFAULT 0,
+                last_model TEXT,
+                metadata_json TEXT
             )
         """)
         
-        # Create messages table
+        # Create messages table with UUID, metadata, and branching support
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
-                role TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
                 content TEXT NOT NULL,
                 tokens INTEGER DEFAULT 0,
                 timestamp TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+                
+                -- Metadata fields
+                model TEXT,
+                rag_triggered BOOLEAN DEFAULT 0,
+                processing_time_ms INTEGER,
+                metadata_json TEXT,
+                
+                -- Future branching support (inactive for now)
+                parent_id TEXT,
+                is_active BOOLEAN DEFAULT 1,
+                edited_from TEXT,
+                version INTEGER DEFAULT 1,
+                
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
+                FOREIGN KEY (parent_id) REFERENCES messages(id) ON DELETE CASCADE
             )
         """)
         
-        # Create indexes for better performance
+        # Create sources table for RAG citations
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS message_sources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT NOT NULL,
+                citation TEXT,
+                content TEXT,
+                score REAL,
+                rank INTEGER,
+                FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+            )
+        """)
+        
+        # Create indexes for performance
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_messages_session 
-            ON messages(session_id)
+            ON messages(session_id, timestamp)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_messages_rag 
+            ON messages(rag_triggered) WHERE rag_triggered = 1
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_messages_parent 
+            ON messages(parent_id) WHERE parent_id IS NOT NULL
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sources_message 
+            ON message_sources(message_id)
         """)
         
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_sessions_updated 
-            ON sessions(updated_at)
+            ON sessions(updated_at DESC)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sessions_title 
+            ON sessions(title)
         """)
         
         conn.commit()
         conn.close()
-        logger.debug("SQLite database schema initialized")
+        logger.debug("SQLite database schema initialized (future-proof)")
 
     def create_session(
         self,
@@ -178,17 +227,65 @@ class SessionManager:
         logger.info(f"Created session: {session_id} (user={user}, topic={topic})")
         return session_id
 
-    def get_session(self, session_id: str) -> Optional[ChatSession]:
+    def get_session(self, session_id: str, reload_from_db: bool = False) -> Optional[ChatSession]:
         """
         Retrieve a session by ID.
 
         Args:
             session_id: Session identifier
+            reload_from_db: Force reload from database (default: False, use cache)
 
         Returns:
             ChatSession or None if not found
         """
-        return self.sessions.get(session_id)
+        # If reload requested and we have disk persistence, load from DB
+        if reload_from_db and self.persist_to_disk and self.db_path:
+            session = self._load_session_from_db(session_id)
+            if session:
+                self.sessions[session_id] = session  # Update cache
+            return session
+        
+        # Check cache first (fast path)
+        session = self.sessions.get(session_id)
+        
+        # If not in cache but we have persistence, try loading from DB
+        if session is None and self.persist_to_disk and self.db_path:
+            session = self._load_session_from_db(session_id)
+            if session:
+                self.sessions[session_id] = session  # Add to cache
+                logger.debug(f"Auto-loaded session {session_id} from DB (cache miss)")
+        
+        return session
+
+    def invalidate_cache(self, session_id: str) -> None:
+        """
+        Remove a session from the in-memory cache.
+        
+        Use this after external modifications to force next read to reload from DB.
+        The session will be automatically reloaded on next get_session() call if
+        persist_to_disk is enabled.
+        
+        Args:
+            session_id: Session identifier to invalidate
+        """
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+            logger.debug(f"Invalidated cache for session: {session_id}")
+
+    def reload_session(self, session_id: str) -> Optional[ChatSession]:
+        """
+        Force reload a session from database, bypassing cache.
+        
+        This is equivalent to get_session(session_id, reload_from_db=True) but more explicit.
+        Use when you need to ensure you have the latest data from disk.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Reloaded ChatSession or None if not found
+        """
+        return self.get_session(session_id, reload_from_db=True)
 
     def delete_session(self, session_id: str) -> bool:
         """
@@ -245,30 +342,58 @@ class SessionManager:
         return count
 
     def add_message(
-        self, session_id: str, role: str, content: str, tokens: int = 0
-    ) -> bool:
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        tokens: int = 0,
+        model: Optional[str] = None,
+        rag_triggered: bool = False,
+        processing_time_ms: Optional[int] = None,
+        metadata: Optional[dict[str, Any]] = None,
+        parent_id: Optional[str] = None,
+        sources: Optional[list[dict[str, Any]]] = None,
+    ) -> Optional[str]:
         """
-        Add a message to session history.
+        Add a message to session history with optional metadata.
 
         Args:
             session_id: Session identifier
-            role: "user" or "assistant"
+            role: "user", "assistant", or "system"
             content: Message content
             tokens: Token count (optional)
+            model: LLM model used (optional)
+            rag_triggered: Whether RAG retrieval was triggered (optional)
+            processing_time_ms: Processing time in milliseconds (optional)
+            metadata: Additional metadata dictionary (optional)
+            parent_id: Parent message ID for branching (optional)
+            sources: List of source dictionaries for RAG citations (optional)
 
         Returns:
-            True if added, False if session not found
+            Message ID if added, None if session not found
         """
         session = self.get_session(session_id)
         if not session:
             logger.warning(f"Session not found: {session_id}")
-            return False
+            return None
 
+        # Generate UUID for message
+        message_id = str(uuid.uuid4())
+        
         message = {
+            "id": message_id,
             "role": role,
             "content": content,
             "tokens": tokens,
             "timestamp": datetime.now().isoformat(),
+            "model": model,
+            "rag_triggered": rag_triggered,
+            "processing_time_ms": processing_time_ms,
+            "metadata": metadata or {},
+            "parent_id": parent_id,
+            "is_active": True,
+            "version": 1,
+            "sources": sources or [],
         }
 
         session.messages.append(message)
@@ -277,9 +402,13 @@ class SessionManager:
         if self.persist_to_disk:
             self._add_message_to_db(session_id, message)
             self._update_session_timestamp(session_id)
+            
+            # Add sources if provided
+            if sources:
+                self._add_message_sources_to_db(message_id, sources)
 
-        logger.debug(f"Added {role} message to session {session_id}")
-        return True
+        logger.debug(f"Added {role} message {message_id} to session {session_id}")
+        return message_id
 
     def get_messages(self, session_id: str) -> list[ConversationMessage]:
         """
@@ -392,7 +521,7 @@ class SessionManager:
     # ========== SQLite PERSISTENCE METHODS ==========
 
     def _save_session_to_db(self, session: ChatSession) -> None:
-        """Save session to SQLite database."""
+        """Save session to SQLite database with new schema fields."""
         if not self.persist_to_disk:
             return
 
@@ -400,16 +529,22 @@ class SessionManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
+            # Extract title and last_model from metadata
+            title = session.metadata.get("title", "New Chat")
+            last_model = session.metadata.get("last_model")
+            
             cursor.execute("""
                 INSERT OR REPLACE INTO sessions 
-                (session_id, created_at, updated_at, metadata, message_count)
-                VALUES (?, ?, ?, ?, ?)
+                (session_id, created_at, updated_at, title, message_count, last_model, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 session.session_id,
                 session.created_at,
                 session.updated_at,
-                json.dumps(session.metadata),
-                len(session.messages)
+                title,
+                len(session.messages),
+                last_model,
+                json.dumps(session.metadata)
             ))
             
             conn.commit()
@@ -419,7 +554,7 @@ class SessionManager:
             logger.error(f"Failed to save session {session.session_id}: {e}")
 
     def _add_message_to_db(self, session_id: str, message: dict[str, Any]) -> None:
-        """Add a message to the database."""
+        """Add a message to the database with new schema fields."""
         if not self.persist_to_disk:
             return
 
@@ -428,14 +563,26 @@ class SessionManager:
             cursor = conn.cursor()
             
             cursor.execute("""
-                INSERT INTO messages (session_id, role, content, tokens, timestamp)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO messages (
+                    id, session_id, role, content, tokens, timestamp,
+                    model, rag_triggered, processing_time_ms, metadata_json,
+                    parent_id, is_active, version
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
+                message["id"],
                 session_id,
                 message["role"],
                 message["content"],
                 message.get("tokens", 0),
-                message["timestamp"]
+                message["timestamp"],
+                message.get("model"),
+                message.get("rag_triggered", False),
+                message.get("processing_time_ms"),
+                json.dumps(message.get("metadata", {})),
+                message.get("parent_id"),
+                message.get("is_active", True),
+                message.get("version", 1)
             ))
             
             # Update message count
@@ -449,6 +596,33 @@ class SessionManager:
             conn.close()
         except Exception as e:
             logger.error(f"Failed to add message to session {session_id}: {e}")
+
+    def _add_message_sources_to_db(self, message_id: str, sources: list[dict[str, Any]]) -> None:
+        """Add message sources (RAG citations) to the database."""
+        if not self.persist_to_disk or not sources:
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for rank, source in enumerate(sources):
+                cursor.execute("""
+                    INSERT INTO message_sources (message_id, citation, content, score, rank)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    message_id,
+                    source.get("citation", ""),
+                    source.get("content", ""),
+                    source.get("score", 0.0),
+                    rank
+                ))
+            
+            conn.commit()
+            conn.close()
+            logger.debug(f"Added {len(sources)} sources for message {message_id}")
+        except Exception as e:
+            logger.error(f"Failed to add sources for message {message_id}: {e}")
 
     def _clear_messages_in_db(self, session_id: str) -> None:
         """Clear all messages for a session in the database."""
@@ -527,8 +701,104 @@ class SessionManager:
         except Exception as e:
             logger.error(f"Failed to delete session {session_id}: {e}")
 
+    def _load_session_from_db(self, session_id: str) -> Optional[ChatSession]:
+        """Load a single session from SQLite database with new schema."""
+        if not self.persist_to_disk or not self.db_path.exists():
+            return None
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Load session metadata
+            cursor.execute("""
+                SELECT session_id, created_at, updated_at, title, last_model, metadata_json 
+                FROM sessions
+                WHERE session_id = ?
+            """, (session_id,))
+            
+            session_data = cursor.fetchone()
+            if not session_data:
+                conn.close()
+                return None
+            
+            session_id, created_at, updated_at, title, last_model, metadata_json = session_data
+            
+            # Load messages for this session with new fields
+            cursor.execute("""
+                SELECT id, role, content, tokens, timestamp,
+                       model, rag_triggered, processing_time_ms, metadata_json,
+                       parent_id, is_active, version
+                FROM messages 
+                WHERE session_id = ?
+                ORDER BY timestamp ASC
+            """, (session_id,))
+            
+            messages = []
+            message_rows = cursor.fetchall()
+            
+            for row in message_rows:
+                msg_id, role, content, tokens, timestamp, model, rag_triggered, processing_time_ms, msg_metadata_json, parent_id, is_active, version = row
+                
+                # Load sources for this message
+                cursor.execute("""
+                    SELECT citation, content, score, rank
+                    FROM message_sources
+                    WHERE message_id = ?
+                    ORDER BY rank ASC
+                """, (msg_id,))
+                
+                sources = [
+                    {
+                        "citation": src[0],
+                        "content": src[1],
+                        "score": src[2],
+                        "rank": src[3]
+                    }
+                    for src in cursor.fetchall()
+                ]
+                
+                messages.append({
+                    "id": msg_id,
+                    "role": role,
+                    "content": content,
+                    "tokens": tokens,
+                    "timestamp": timestamp,
+                    "model": model,
+                    "rag_triggered": bool(rag_triggered),
+                    "processing_time_ms": processing_time_ms,
+                    "metadata": json.loads(msg_metadata_json) if msg_metadata_json else {},
+                    "parent_id": parent_id,
+                    "is_active": bool(is_active),
+                    "version": version,
+                    "sources": sources
+                })
+            
+            conn.close()
+            
+            # Merge title and last_model into metadata
+            metadata = json.loads(metadata_json) if metadata_json else {}
+            metadata["title"] = title
+            if last_model:
+                metadata["last_model"] = last_model
+            
+            session = ChatSession(
+                session_id=session_id,
+                created_at=created_at,
+                updated_at=updated_at,
+                messages=messages,
+                metadata=metadata
+            )
+            
+            logger.debug(f"Loaded session {session_id} from database")
+            return session
+            
+        except Exception as e:
+            logger.error(f"Failed to load session {session_id} from database: {e}")
+            return None
+
     def _load_sessions_from_db(self) -> None:
-        """Load all sessions from SQLite database."""
+        """Load all sessions from SQLite database using updated schema."""
         if not self.persist_to_disk or not self.db_path.exists():
             return
 
@@ -536,47 +806,20 @@ class SessionManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Load sessions
-            cursor.execute("""
-                SELECT session_id, created_at, updated_at, metadata 
-                FROM sessions
-            """)
-            
-            sessions_data = cursor.fetchall()
-            
-            for session_id, created_at, updated_at, metadata_json in sessions_data:
-                # Load messages for this session
-                cursor.execute("""
-                    SELECT role, content, tokens, timestamp 
-                    FROM messages 
-                    WHERE session_id = ?
-                    ORDER BY id ASC
-                """, (session_id,))
-                
-                messages = [
-                    {
-                        "role": row[0],
-                        "content": row[1],
-                        "tokens": row[2],
-                        "timestamp": row[3]
-                    }
-                    for row in cursor.fetchall()
-                ]
-                
-                session = ChatSession(
-                    session_id=session_id,
-                    created_at=created_at,
-                    updated_at=updated_at,
-                    messages=messages,
-                    metadata=json.loads(metadata_json) if metadata_json else {}
-                )
-                
-                self.sessions[session_id] = session
+            # Get all session IDs
+            cursor.execute("SELECT session_id FROM sessions")
+            session_ids = [row[0] for row in cursor.fetchall()]
             
             conn.close()
             
-            if sessions_data:
-                logger.info(f"Loaded {len(sessions_data)} session(s) from database")
+            # Use _load_session_from_db for each session (reuses logic)
+            for session_id in session_ids:
+                session = self._load_session_from_db(session_id)
+                if session:
+                    self.sessions[session_id] = session
+            
+            if session_ids:
+                logger.info(f"Loaded {len(session_ids)} session(s) from database")
                 
         except Exception as e:
             logger.error(f"Failed to load sessions from database: {e}")

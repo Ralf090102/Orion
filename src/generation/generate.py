@@ -22,6 +22,7 @@ class GenerationResult:
     query_type: str
     mode: str
     metadata: dict[str, Any]
+    rag_triggered: bool = False
     timing: TimingBreakdown | None = None
 
 
@@ -119,6 +120,7 @@ class AnswerGenerator:
                 query_type=classification.query_type,
                 mode="rag",
                 metadata={"error": str(e), "retrieval_failed": True},
+                rag_triggered=True,
                 timing=timing,
             )
 
@@ -131,6 +133,7 @@ class AnswerGenerator:
                 query_type=classification.query_type,
                 mode="rag",
                 metadata={"no_results": True},
+                rag_triggered=True,
                 timing=timing,
             )
 
@@ -170,6 +173,7 @@ class AnswerGenerator:
                 query_type=classification.query_type,
                 mode="rag",
                 metadata={"error": str(e), "prompt_building_failed": True},
+                rag_triggered=True,
                 timing=timing,
             )
 
@@ -198,6 +202,7 @@ class AnswerGenerator:
                 query_type=classification.query_type,
                 mode="rag",
                 metadata={"error": str(e), "llm_generation_failed": True},
+                rag_triggered=True,
                 timing=timing,
             )
 
@@ -235,6 +240,7 @@ class AnswerGenerator:
             query_type=classification.query_type,
             mode="rag",
             metadata=metadata,
+            rag_triggered=True,
             timing=timing,
         )
 
@@ -348,6 +354,7 @@ class AnswerGenerator:
                 query_type=classification.query_type,
                 mode="chat",
                 metadata={"error": str(e), "prompt_building_failed": True},
+                rag_triggered=False,
                 timing=timing,
             )
 
@@ -382,6 +389,7 @@ class AnswerGenerator:
                 query_type=classification.query_type,
                 mode="chat",
                 metadata={"error": str(e), "llm_generation_failed": True},
+                rag_triggered=False,
                 timing=timing,
             )
 
@@ -393,17 +401,27 @@ class AnswerGenerator:
 
         # Store messages in session if session_manager provided
         if session_manager and session_id:
+            # Store user message
             session_manager.add_message(
                 session_id=session_id,
                 role="user",
                 content=message,
                 tokens=user_tokens,
             )
+            
+            # Store assistant message with metadata
+            processing_time_ms = int(timing.total_time * 1000) if timing else None
+            
             session_manager.add_message(
                 session_id=session_id,
                 role="assistant",
                 content=answer,
                 tokens=assistant_tokens,
+                model=self.config.rag.llm.model,
+                rag_triggered=should_retrieve,
+                processing_time_ms=processing_time_ms,
+                metadata=metadata,
+                sources=sources if should_retrieve and sources else None,
             )
             logger.debug(f"Stored messages in session {session_id}")
         else:
@@ -431,18 +449,15 @@ class AnswerGenerator:
 
         logger.info("Chat response generated successfully")
         
-        # Add rag_triggered attribute for API compatibility
-        result = GenerationResult(
+        return GenerationResult(
             answer=answer,
             sources=sources,
             query_type=classification.query_type,
             mode="chat",
             metadata=metadata,
+            rag_triggered=should_retrieve,
             timing=timing,
         )
-        result.rag_triggered = should_retrieve  # Add as dynamic attribute
-        
-        return result
 
     def generate(
         self, query: str, mode: str | None = None, **kwargs
