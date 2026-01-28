@@ -580,6 +580,9 @@ class SessionManager:
         if self.persist_to_disk:
             self._update_session_metadata_in_db(session_id, session.metadata)
             self._update_session_timestamp(session_id)
+        
+        # Invalidate cache to ensure fresh data on next access
+        self.invalidate_cache(session_id)
 
         return True
 
