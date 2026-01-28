@@ -399,6 +399,24 @@ class AnswerGenerator:
         user_tokens = len(message) // 4
         assistant_tokens = len(answer) // 4
 
+        # Format sources if RAG was used
+        sources = []
+        if include_sources and prepared_contexts:
+            sources = self._format_sources(prepared_contexts)
+
+        # Calculate total timing
+        timing.total_time = time.time() - overall_start
+
+        # Build metadata (before storing to session)
+        metadata = {
+            "query_type": classification.query_type,
+            "rag_retrieval_triggered": should_retrieve,
+            "num_contexts_used": len(prepared_contexts),
+            "conversation_turns": len(self.prompt_builder.conversation_history) // 2,
+            "total_tokens": prompt_components.total_tokens,
+            "llm_model": self.config.rag.llm.model,
+        }
+
         # Store messages in session if session_manager provided
         if session_manager and session_id:
             # Store user message
@@ -428,24 +446,6 @@ class AnswerGenerator:
             # Fallback to prompt builder history (old behavior)
             self.prompt_builder.add_to_history(role="user", content=message)
             self.prompt_builder.add_to_history(role="assistant", content=answer)
-
-        # Format sources if RAG was used
-        sources = []
-        if include_sources and prepared_contexts:
-            sources = self._format_sources(prepared_contexts)
-
-        # Calculate total timing
-        timing.total_time = time.time() - overall_start
-
-        # Build metadata
-        metadata = {
-            "query_type": classification.query_type,
-            "rag_retrieval_triggered": should_retrieve,
-            "num_contexts_used": len(prepared_contexts),
-            "conversation_turns": len(self.prompt_builder.conversation_history) // 2,
-            "total_tokens": prompt_components.total_tokens,
-            "llm_model": self.config.rag.llm.model,
-        }
 
         logger.info("Chat response generated successfully")
         
