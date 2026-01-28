@@ -116,8 +116,15 @@
 			},
 			onTitleGenerated: (title) => {
 				console.log('[WebSocket] Title generated:', title);
-				// Trigger page invalidation to refresh sidebar with new title
-				invalidateAll();
+				// Update the conversation title in the local conversations array
+				const convIndex = conversations.findIndex((conv) => conv.id === page.params.id);
+				if (convIndex !== -1) {
+					conversations = [
+						...conversations.slice(0, convIndex),
+						{ ...conversations[convIndex], title },
+						...conversations.slice(convIndex + 1)
+					];
+				}
 			},
 			onError: (errorMsg) => {
 				console.error('[WebSocket] Error:', errorMsg);
