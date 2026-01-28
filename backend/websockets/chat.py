@@ -315,7 +315,7 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
         
         Args:
             message: User message content
-            options: Optional settings (rag_mode, include_sources, temperature, etc.)
+            options: Optional settings (rag_mode, include_sources, temperature, files, etc.)
         """
         try:
             options = options or {}
@@ -325,10 +325,35 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
             rag_mode = options.get("rag_mode") or self.config.rag.generation.rag_trigger_mode
             include_sources = options.get("include_sources", False)
             temperature = options.get("temperature")
+            files = options.get("files", [])
+            
+            # Parse uploaded files if present
+            file_context = ""
+            file_metadata = []
+            if files and len(files) > 0:
+                try:
+                    from src.utilities.file_parser import parse_multiple_files
+                    
+                    logger.info(f"Processing {len(files)} uploaded file(s)")
+                    file_context, file_metadata = parse_multiple_files(
+                        files,
+                        config=self.config,
+                        max_per_file=5000  # Limit chars per file
+                    )
+                    logger.info(f"Extracted {len(file_context)} chars from {len(files)} file(s)")
+                except Exception as e:
+                    logger.error(f"Failed to parse uploaded files: {e}")
+                    await self.send_error(f"Failed to parse uploaded files: {str(e)}")
+                    return
+            
+            # Prepend file context to user message if present
+            enhanced_message = message
+            if file_context:
+                enhanced_message = f"{file_context}\n\n**User Question:**\n{message}"
             
             logger.info(
-                f"Processing message in session {self.session_id}: '{message}' "
-                f"(rag_mode={rag_mode}, sources={include_sources})"
+                f"Processing message in session {self.session_id}: '{message[:50]}...' "
+                f"(rag_mode={rag_mode}, sources={include_sources}, files={len(files)})"
             )
             
             # Build generation kwargs
@@ -351,7 +376,7 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
             
             # Generate chat response with streaming
             result = self.generator.generate_chat_response(
-                message=message,
+                message=enhanced_message,  # Use enhanced message with file context
                 session_id=self.session_id,
                 session_manager=self.session_manager,
                 rag_mode=rag_mode,

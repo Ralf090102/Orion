@@ -197,6 +197,123 @@ class CSVLoader:
             raise Exception(f"Failed to load CSV file: {e}")
 
 
+class PPTXLoader:
+    """Custom PowerPoint loader using python-pptx"""
+    
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+    
+    def load(self) -> list[Document]:
+        """Load PPTX file and extract text from slides"""
+        try:
+            from pptx import Presentation
+            
+            prs = Presentation(self.file_path)
+            all_text = []
+            
+            for slide_num, slide in enumerate(prs.slides, 1):
+                slide_text = []
+                for shape in slide.shapes:
+                    if hasattr(shape, "text") and shape.text:
+                        slide_text.append(shape.text)
+                
+                if slide_text:
+                    all_text.append(f"=== Slide {slide_num} ===\n" + "\n".join(slide_text))
+            
+            text = "\n\n".join(all_text)
+            
+            return [
+                Document(
+                    page_content=text,
+                    metadata={
+                        "source": self.file_path,
+                        "extraction_method": "python-pptx",
+                        "slide_count": len(prs.slides)
+                    },
+                )
+            ]
+        except ImportError:
+            log_warning("python-pptx not installed. Install with: pip install python-pptx", config=None)
+            raise Exception("python-pptx not available for PPTX loading")
+        except Exception as e:
+            raise Exception(f"Failed to load PPTX file: {e}")
+
+
+class XLSXLoader:
+    """Custom Excel loader using openpyxl"""
+    
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+    
+    def load(self) -> list[Document]:
+        """Load XLSX file and extract data from sheets"""
+        try:
+            from openpyxl import load_workbook
+            
+            wb = load_workbook(self.file_path, data_only=True)
+            all_text = []
+            
+            for sheet_name in wb.sheetnames:
+                sheet = wb[sheet_name]
+                sheet_text = [f"=== Sheet: {sheet_name} ==="]
+                
+                for row in sheet.iter_rows(values_only=True):
+                    # Filter out None values and convert to strings
+                    row_data = [str(cell) for cell in row if cell is not None]
+                    if row_data:
+                        sheet_text.append(", ".join(row_data))
+                
+                if len(sheet_text) > 1:  # More than just the header
+                    all_text.append("\n".join(sheet_text))
+            
+            text = "\n\n".join(all_text)
+            
+            return [
+                Document(
+                    page_content=text,
+                    metadata={
+                        "source": self.file_path,
+                        "extraction_method": "openpyxl",
+                        "sheet_count": len(wb.sheetnames)
+                    },
+                )
+            ]
+        except ImportError:
+            log_warning("openpyxl not installed. Install with: pip install openpyxl", config=None)
+            raise Exception("openpyxl not available for XLSX loading")
+        except Exception as e:
+            raise Exception(f"Failed to load XLSX file: {e}")
+
+
+class RTFLoader:
+    """Custom RTF loader using striprtf"""
+    
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+    
+    def load(self) -> list[Document]:
+        """Load RTF file"""
+        try:
+            from striprtf.striprtf import rtf_to_text
+            
+            with open(self.file_path, "r", encoding="utf-8", errors="ignore") as f:
+                rtf_content = f.read()
+            
+            text = rtf_to_text(rtf_content)
+            
+            return [
+                Document(
+                    page_content=text,
+                    metadata={"source": self.file_path, "extraction_method": "striprtf"},
+                )
+            ]
+        except ImportError:
+            log_warning("striprtf not installed. Install with: pip install striprtf", config=None)
+            raise Exception("striprtf not available for RTF loading")
+        except Exception as e:
+            raise Exception(f"Failed to load RTF file: {e}")
+
+
 # ========== SUPPORTED FILE TYPES ==========
 # Expanded to match FileType enum from vector_store.py
 SUPPORTED_EXTENSIONS = {
@@ -246,6 +363,9 @@ SUPPORTED_EXTENSIONS = {
 DOCUMENT_LOADERS = {
     ".pdf": PyMuPDFLoader,
     ".docx": DOCXLoader,
+    ".pptx": PPTXLoader,
+    ".xlsx": XLSXLoader,
+    ".rtf": RTFLoader,
     ".txt": TextLoader,
     ".md": MarkdownLoader,
     ".json": JSONLoader,

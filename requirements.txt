@@ -47,6 +47,7 @@ python-pptx
 openpyxl
 pymupdf
 pillow
+striprtf
 
 # FastAPI backend
 fastapi

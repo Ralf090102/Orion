@@ -168,15 +168,7 @@
 			$loading = true;
 			pending = true;
 
-			// Add user message
-			const userMessage = createMessage('user', prompt, files.length > 0 ? files : undefined);
-			messages = [...messages, userMessage];
-
-			// Add empty assistant message
-			const assistantMessage = createMessage('assistant', '');
-			messages = [...messages, assistantMessage];
-
-			// Convert files to base64 if present
+			// Convert files to base64 first
 			const base64Files = await Promise.all(
 				(files ?? []).map((file) =>
 					file2base64(file).then((value) => ({
@@ -187,6 +179,14 @@
 					}))
 				)
 			);
+
+			// Add user message with proper file structure for display
+			const userMessage = createMessage('user', prompt, base64Files.length > 0 ? base64Files : undefined);
+			messages = [...messages, userMessage];
+
+			// Add empty assistant message
+			const assistantMessage = createMessage('assistant', '');
+			messages = [...messages, assistantMessage];
 
 			// Send via WebSocket
 			wsChat.sendMessage(prompt, base64Files);
