@@ -482,6 +482,66 @@ class WhisperConfig(BaseConfig):
             raise ValueError(f"compute_type must be one of {valid_compute_types}")
 
 
+@dataclass
+class TTSConfig(BaseConfig):
+    """Text-to-Speech configuration"""
+    
+    enabled: bool = True
+    engine: str = "piper"  # "piper" (only supported for now)
+    
+    # Piper-specific settings
+    default_voice: str = "en_US-lessac-medium"
+    model_cache_dir: Path = field(default_factory=lambda: Path.home() / ".cache" / "piper")
+    
+    # Audio settings
+    sample_rate: int = 22050
+    default_speed: float = 1.0
+    audio_format: str = "wav"  # "wav", "mp3"
+    
+    # GPU settings
+    use_gpu: bool = False
+    device: str = "auto"  # "auto", "cpu", "cuda"
+    
+    # Voice management
+    auto_download_voices: bool = True
+    max_cached_voices: int = 3  # Limit memory usage
+    
+    @classmethod
+    def from_env(cls) -> "TTSConfig":
+        """Load TTS configuration from environment variables."""
+        cache_dir_str = get_env_str("TTS_MODEL_CACHE_DIR", str(Path.home() / ".cache" / "piper"))
+        
+        return cls(
+            enabled=get_env_bool("TTS_ENABLED", True),
+            engine=get_env_str("TTS_ENGINE", "piper"),
+            default_voice=get_env_str("TTS_DEFAULT_VOICE", "en_US-lessac-medium"),
+            model_cache_dir=Path(cache_dir_str),
+            sample_rate=get_env_int("TTS_SAMPLE_RATE", 22050),
+            default_speed=get_env_float("TTS_DEFAULT_SPEED", 1.0),
+            audio_format=get_env_str("TTS_AUDIO_FORMAT", "wav"),
+            use_gpu=get_env_bool("TTS_USE_GPU", False),
+            device=get_env_str("TTS_DEVICE", "auto"),
+            auto_download_voices=get_env_bool("TTS_AUTO_DOWNLOAD_VOICES", True),
+            max_cached_voices=get_env_int("TTS_MAX_CACHED_VOICES", 3),
+        )
+    
+    def validate(self) -> None:
+        """Validate TTS configuration values."""
+        valid_engines = ["piper"]
+        if self.engine not in valid_engines:
+            raise ValueError(f"TTS engine must be one of {valid_engines}")
+        
+        if self.default_speed <= 0 or self.default_speed > 3.0:
+            raise ValueError(f"TTS speed must be between 0 and 3.0, got {self.default_speed}")
+        
+        valid_formats = ["wav", "mp3"]
+        if self.audio_format not in valid_formats:
+            raise ValueError(f"Audio format must be one of {valid_formats}")
+        
+        if self.max_cached_voices <= 0:
+            raise ValueError(f"max_cached_voices must be positive, got {self.max_cached_voices}")
+
+
 # ========== MAIN RAG CONFIGURATION ==========
 @dataclass
 class RAGConfig(BaseConfig):
@@ -724,6 +784,7 @@ class OrionConfig(BaseConfig):
     watchdog: WatchdogConfig = field(default_factory=WatchdogConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     whisper: WhisperConfig = field(default_factory=WhisperConfig)
+    tts: TTSConfig = field(default_factory=TTSConfig)
     version: str = "1.0.0"
 
     @classmethod
@@ -736,6 +797,7 @@ class OrionConfig(BaseConfig):
             watchdog=WatchdogConfig.from_env(),
             logging=LoggingConfig.from_env(),
             whisper=WhisperConfig.from_env(),
+            tts=TTSConfig.from_env(),
             version=get_env_str("ORION_VERSION", "1.0.0"),
         )
         config.validate()
@@ -771,6 +833,16 @@ class OrionConfig(BaseConfig):
             self.watchdog.validate()
         except Exception as e:
             log_error(f"Watchdog config validation failed: {e}")
+            raise
+        try:
+            self.whisper.validate()
+        except Exception as e:
+            log_error(f"Whisper config validation failed: {e}")
+            raise
+        try:
+            self.tts.validate()
+        except Exception as e:
+            log_error(f"TTS config validation failed: {e}")
             raise
         
 

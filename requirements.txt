@@ -63,8 +63,13 @@ typer
 rich
 requests
 
-# Features
+# Speech
+pydub
 faster-whisper
+piper-tts
+onnxruntime
+onnxruntime-gpu
+
 
 # ================================
 # WARNING
