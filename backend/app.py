@@ -122,13 +122,14 @@ async def root():
             "rag": "/api/ask, /api/query",
             "chat": "/api/chat/*",
             "ingestion": "/api/ingest/*",
+            "speech": "/api/speech/*",
         },
     }
 
 
 # ========== ROUTE REGISTRATION ==========
 # Import and include routers
-from backend.api import chat, health, ingestion, models, rag, settings, transcription
+from backend.api import chat, health, ingestion, models, rag, settings, speech
 
 app.include_router(settings.router)
 app.include_router(ingestion.router)
@@ -136,7 +137,7 @@ app.include_router(rag.router)
 app.include_router(chat.router)
 app.include_router(models.router)
 app.include_router(health.router)
-app.include_router(transcription.router)
+app.include_router(speech.router)
 
 
 # ========== WEBSOCKET ROUTES ==========

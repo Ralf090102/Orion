@@ -150,8 +150,9 @@ def main(argv: List[str] | None = None) -> int:
     data = load_pyproject(PYPROJECT)
     core = [normalize(x) for x in data.get("project", {}).get("dependencies", [])]
     extras = data.get("project", {}).get("optional-dependencies", {}) or {}
+    extras.setdefault("features", ["faster-whisper"])
 
-    # ensure extras values are lists
+    # ensure extras values are lists and normalized
     extras = {k: [normalize(e) for e in v] for k, v in extras.items()}
 
     if args.generate_requirements:

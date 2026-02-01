@@ -160,6 +160,98 @@ export const api = {
 	health: () => fetchAPI<{ status: string }>('/health'),
 	
 	config: () => fetchAPI<Record<string, unknown>>('/api/config'),
+
+	// Speech - STT & TTS
+	speech: {
+		// Speech-to-Text
+		transcribe: async (audioFile: File, language?: string) => {
+			const formData = new FormData();
+			formData.append('audio', audioFile);
+			if (language) {
+				formData.append('language', language);
+			}
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/transcribe`, {
+				method: 'POST',
+				body: formData,
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json().catch(() => null);
+				throw new APIError(
+					errorData?.detail || `HTTP ${response.status}: ${response.statusText}`,
+					response.status,
+					errorData
+				);
+			}
+
+			return await response.json() as {
+				text: string;
+				language: string;
+				duration: number;
+				model_info: Record<string, unknown>;
+			};
+		},
+
+		// Text-to-Speech (placeholder)
+		synthesize: (text: string, options?: {
+			language?: string;
+			voice?: string;
+			speed?: number;
+			format?: 'mp3' | 'wav' | 'opus';
+		}) =>
+			fetchAPI<Blob>('/api/speech/synthesize', {
+				method: 'POST',
+				body: JSON.stringify({ text, ...options }),
+			}),
+
+		// Whisper Configuration
+		getWhisperConfig: () =>
+			fetchAPI<{
+				status: string;
+				config: {
+					model_size: string;
+					device: string;
+					compute_type: string;
+					language: string | null;
+					model_cache_dir: string;
+				};
+				requires_reload: boolean;
+			}>('/api/speech/config/whisper'),
+
+		updateWhisperConfig: (config: {
+			model_size?: 'tiny' | 'base' | 'small' | 'medium' | 'large' | 'large-v2' | 'large-v3';
+			device?: 'auto' | 'cpu' | 'cuda';
+			compute_type?: 'int8' | 'float16' | 'float32';
+			language?: string | null;
+		}) =>
+			fetchAPI<{
+				status: string;
+				message: string;
+				config: {
+					model_size: string;
+					device: string;
+					compute_type: string;
+					language: string | null;
+					model_cache_dir: string;
+				};
+				requires_reload: boolean;
+			}>('/api/speech/config/whisper', {
+				method: 'PATCH',
+				body: JSON.stringify(config),
+			}),
+
+		// Health check
+		health: () =>
+			fetchAPI<{
+				status: string;
+				stt_available: boolean;
+				tts_available: boolean;
+				whisper_loaded: boolean;
+				whisper_config: Record<string, unknown>;
+				tts_engine: string | null;
+			}>('/api/speech/health'),
+	},
 };
 
 /**
