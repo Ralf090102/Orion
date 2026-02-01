@@ -187,6 +187,11 @@ class SpeechHealthResponse(BaseModel):
 
     status: str = Field(..., description="Service status: ready, degraded, error")
     stt_available: bool = Field(..., description="Speech-to-Text service availability")
+    # Backwards/forwards compatibility: some frontends expect `whisper_available`
+    whisper_available: bool = Field(
+        default=False,
+        description="Alias for stt_available for frontend compatibility",
+    )
     tts_available: bool = Field(..., description="Text-to-Speech service availability")
     whisper_loaded: bool = Field(
         default=False,

@@ -3,6 +3,7 @@
 	import CarbonChevronRight from "~icons/carbon/chevron-right";
 	import CarbonDocumentTasks from "~icons/carbon/document-tasks";
 	import CarbonUpload from "~icons/carbon/upload";
+	import CarbonVolumeMute from "~icons/carbon/volume-mute";
 
 	const settingsCategories = [
 		{
@@ -19,6 +20,14 @@
 			description: 'Ingest documents, manage knowledge base, and configure auto-ingestion',
 			icon: CarbonUpload,
 			path: '/settings/ingestion',
+			enabled: true
+		},
+		{
+			id: 'speech',
+			title: 'Speech & Audio',
+			description: 'Configure speech-to-text (STT) and text-to-speech (TTS) settings',
+			icon: CarbonVolumeMute,
+			path: '/settings/speech',
 			enabled: true
 		},
 		// Future settings categories will be added here

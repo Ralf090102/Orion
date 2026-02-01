@@ -406,6 +406,7 @@ async def speech_health(
     return SpeechHealthResponse(
         status=overall_status,
         stt_available=stt_available,
+        whisper_available=stt_available,
         tts_available=tts_available,
         whisper_loaded=whisper_loaded,
         whisper_config={
