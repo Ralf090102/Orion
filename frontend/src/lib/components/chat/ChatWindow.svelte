@@ -398,7 +398,7 @@
 			formData.append('language', 'en'); // Optional: specify language
 
 			const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
-			const response = await fetch(`${BACKEND_URL}/api/transcribe`, {
+			const response = await fetch(`${BACKEND_URL}/api/speech/transcribe`, {
 				method: "POST",
 				body: formData,
 			});
@@ -435,7 +435,7 @@
 			formData.append('language', 'en'); // Optional: specify language
 
 			const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
-			const response = await fetch(`${BACKEND_URL}/api/transcribe`, {
+			const response = await fetch(`${BACKEND_URL}/api/speech/transcribe`, {
 				method: "POST",
 				body: formData,
 			});
