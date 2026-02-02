@@ -44,7 +44,8 @@ htmlcov/
 test-results/
 
 # Local data
-data/
+data/chat-data
+data/chroma-data
 *.db
 *.sqlite
 

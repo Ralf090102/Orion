@@ -7,7 +7,7 @@ Uses singleton pattern for heavy components (retriever, generator).
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, status
 
@@ -25,6 +25,10 @@ _session_manager: Optional[SessionManager] = None
 _retriever: Optional[OrionRetriever] = None
 _generator: Optional[AnswerGenerator] = None
 _tts_manager: Optional["TTSManager"] = None  # Forward reference for lazy import
+
+if TYPE_CHECKING:
+    # Import for type checkers only (avoids runtime import side-effects)
+    from src.utilities.tts_manager import TTSManager
 
 
 # ========== INITIALIZATION & CLEANUP ==========
