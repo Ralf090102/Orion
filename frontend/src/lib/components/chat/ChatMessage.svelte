@@ -23,6 +23,13 @@
 	import { isMessageToolUpdate } from "$lib/utils/messageUpdates";
 	import { MessageUpdateType, type MessageToolUpdate } from "$lib/types/MessageUpdate";
 
+	// Global TTS state shared across all message instances
+	let globalTTSState = $state<{
+		audio: HTMLAudioElement | null;
+		messageId: string | null;
+		audioUrl: string | null;
+	}>({ audio: null, messageId: null, audioUrl: null });
+
 	interface Props {
 		message: Message;
 		loading?: boolean;
@@ -53,8 +60,10 @@
 	let isCopied = $state(false);
 	let messageWidth: number = $state(0);
 	let messageInfoWidth: number = $state(0);
-	let isReadingAloud = $state(false);
-	let currentAudio: HTMLAudioElement | null = null;
+	let isTTSLoading = $state(false);
+	
+	// Computed property to check if this message is currently playing
+	let isReadingAloud = $derived(globalTTSState.messageId === message.id);
 
 	const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
@@ -117,24 +126,30 @@
 
 	async function readAloud() {
 		try {
-			// Stop current audio if playing
-			if (currentAudio) {
-				currentAudio.pause();
-				currentAudio = null;
-				isReadingAloud = false;
+			// If this message is currently playing, stop it
+			if (isReadingAloud && globalTTSState.audio) {
+				globalTTSState.audio.pause();
+				if (globalTTSState.audioUrl) {
+					URL.revokeObjectURL(globalTTSState.audioUrl);
+				}
+				globalTTSState = { audio: null, messageId: null, audioUrl: null };
 				return;
 			}
 
-			isReadingAloud = true;
+			// Prevent multiple concurrent requests
+			if (isTTSLoading) {
+				return;
+			}
 
 			// Use content without think blocks for TTS
 			const textToRead = contentWithoutThink;
 
 			if (!textToRead || textToRead.trim().length === 0) {
 				console.warn('No content to read aloud');
-				isReadingAloud = false;
 				return;
 			}
+
+			isTTSLoading = true;
 
 			const response = await fetch(`${BACKEND_URL}/api/speech/synthesize`, {
 				method: 'POST',
@@ -156,29 +171,37 @@
 			const audioBlob = await response.blob();
 			const audioUrl = URL.createObjectURL(audioBlob);
 
-			currentAudio = new Audio(audioUrl);
+			const audio = new Audio(audioUrl);
+			
+			// Set global state before playing
+			globalTTSState = { audio: audio, messageId: message.id, audioUrl: audioUrl };
+			isTTSLoading = false;
 			
 			// Handle audio end
-			currentAudio.onended = () => {
+			audio.onended = () => {
 				URL.revokeObjectURL(audioUrl);
-				currentAudio = null;
-				isReadingAloud = false;
+				if (globalTTSState.messageId === message.id) {
+					globalTTSState = { audio: null, messageId: null, audioUrl: null };
+				}
 			};
 
 			// Handle audio errors
-			currentAudio.onerror = () => {
+			audio.onerror = () => {
 				URL.revokeObjectURL(audioUrl);
-				currentAudio = null;
-				isReadingAloud = false;
+				if (globalTTSState.messageId === message.id) {
+					globalTTSState = { audio: null, messageId: null, audioUrl: null };
+				}
 				console.error('Audio playback failed');
 			};
 
-			await currentAudio.play();
+			await audio.play();
 
 		} catch (err) {
 			console.error('Read aloud failed:', err);
-			isReadingAloud = false;
-			currentAudio = null;
+			isTTSLoading = false;
+			if (globalTTSState.messageId === message.id) {
+				globalTTSState = { audio: null, messageId: null, audioUrl: null };
+			}
 		}
 	}
 
@@ -433,14 +456,21 @@
 					</div>
 				{/if}
 				{#if !isLast || !loading}
-					<CopyToClipBoardBtn
-						onClick={() => {
-							isCopied = true;
-						}}
-						classNames="btn rounded-sm p-1 text-sm text-gray-400 hover:text-gray-500 focus:ring-0 dark:text-gray-400 dark:hover:text-gray-300"
-						value={contentWithoutThink}
-						iconClassNames="text-xs"
-					/>
+					<div class="relative">
+						<CopyToClipBoardBtn
+							onClick={() => { isCopied = true; }}
+							classNames="btn rounded-sm p-1 text-sm text-gray-400 hover:text-gray-500 focus:ring-0 dark:text-gray-400 dark:hover:text-gray-300"
+							value={contentWithoutThink}
+							iconClassNames="text-xs"
+						/>
+						{#if isTTSLoading}
+							<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+								<div class="size-3">
+									<IconLoading classNames="loading" />
+								</div>
+							</div>
+						{/if}
+					</div>
 					<button
 						class="btn rounded-sm p-1 text-xs text-gray-400 hover:text-gray-500 focus:ring-0 dark:text-gray-400 dark:hover:text-gray-300"
 						title="Read Aloud"
