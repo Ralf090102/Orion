@@ -416,5 +416,6 @@
     "name_english": "English",
     "country_english": "United States"
   },
-  "dataset": "amy"
+  "dataset": "amy",
+  "gender": "female"
 }

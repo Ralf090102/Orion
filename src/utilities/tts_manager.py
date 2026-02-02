@@ -139,6 +139,7 @@ class TTSManager:
                     "quality": quality,
                     "description": f"{dataset.capitalize()} voice - {quality} quality" if dataset else "",
                     "sample_rate": data.get("audio", {}).get("sample_rate", 22050),
+                    "gender": data.get("gender", "neutral"),
                 }
         except Exception as e:
             logger.debug(f"Could not load metadata from {json_path}: {e}")

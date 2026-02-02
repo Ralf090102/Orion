@@ -815,16 +815,16 @@
 						</div>
 						<input 
 							type="range" 
-							min="0.5" 
+							min="0.0" 
 							max="2.0" 
 							step="0.1"
 							bind:value={ttsConfig.default_speed}
 							class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 accent-purple-600"
 						/>
 						<div class="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
-							<span>0.5x (Slower)</span>
+							<span>0.0x (Slowest)</span>
 							<span>1.0x (Normal)</span>
-							<span>2.0x (Faster)</span>
+							<span>2.0x (Fastest)</span>
 						</div>
 					</div>
 
