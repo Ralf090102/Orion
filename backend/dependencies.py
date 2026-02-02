@@ -24,6 +24,7 @@ _config: Optional[OrionConfig] = None
 _session_manager: Optional[SessionManager] = None
 _retriever: Optional[OrionRetriever] = None
 _generator: Optional[AnswerGenerator] = None
+_tts_manager: Optional["TTSManager"] = None  # Forward reference for lazy import
 
 
 # ========== INITIALIZATION & CLEANUP ==========
@@ -260,3 +261,59 @@ def get_database_stats() -> dict:
     """
     session_manager = get_session_manager_dependency()
     return session_manager.get_database_stats()
+
+
+def get_tts_manager() -> "TTSManager":
+    """
+    Dependency: Get TTS manager instance.
+    
+    Returns:
+        TTSManager instance
+        
+    Raises:
+        HTTPException: If TTS not enabled or initialization fails
+    """
+    global _tts_manager
+    
+    if _tts_manager is None:
+        config = get_config_dependency()
+        
+        if not config.tts.enabled:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="TTS service is disabled in configuration",
+            )
+        
+        try:
+            # Lazy import to avoid dependency issues
+            from src.utilities.tts_manager import TTSManager
+            
+            _tts_manager = TTSManager(config)
+            logger.info("✓ TTS manager lazy-loaded successfully")
+        except ImportError as e:
+            logger.error(f"Failed to import TTSManager: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="TTS service unavailable. Piper TTS may not be installed.",
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize TTS manager: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"TTS service unavailable: {str(e)}",
+            )
+    
+    return _tts_manager
+
+
+def reset_tts_manager():
+    """
+    Reset TTS manager instance (useful for config changes).
+    
+    Call this after updating TTS configuration to force re-initialization.
+    """
+    global _tts_manager
+    if _tts_manager is not None:
+        _tts_manager.unload()  # Unload current voice
+    _tts_manager = None
+    logger.info("TTS manager instance reset")

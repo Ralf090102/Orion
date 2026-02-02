@@ -15,12 +15,17 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
 
-from backend.dependencies import get_config_dependency
+from backend.dependencies import get_config_dependency, get_tts_manager, reset_tts_manager
 from backend.models.speech import (
     SpeechHealthResponse,
     TranscriptionResponse,
+    TTSConfigResponse,
+    TTSConfigUpdate,
+    TTSPreviewRequest,
     TTSRequest,
     TTSResponse,
+    TTSVoiceUpdate,
+    VoiceListResponse,
     WhisperConfigResponse,
     WhisperConfigUpdate,
 )
@@ -163,76 +168,6 @@ async def transcribe_audio(
                 logger.debug(f"Cleaned up temporary file: {temp_path}")
             except Exception as e:
                 logger.warning(f"Failed to cleanup temporary file: {e}")
-
-
-# ========== TEXT-TO-SPEECH (TTS) ENDPOINTS ==========
-@router.post(
-    "/synthesize",
-    summary="Synthesize speech from text",
-    description="Convert text to speech audio using TTS engine",
-    response_class=Response,
-)
-async def synthesize_speech(
-    request: TTSRequest,
-    config: OrionConfig = Depends(get_config_dependency),
-):
-    """
-    Convert text to speech audio.
-    
-    This is a placeholder endpoint for TTS functionality.
-    Future implementation will support various TTS engines (Piper, Coqui TTS, etc.).
-    
-    Args:
-        request: TTS request with text and parameters
-        config: Configuration dependency (injected)
-    
-    Returns:
-        Audio file in requested format
-    
-    Raises:
-        HTTPException 501: Not implemented yet
-        
-    Example:
-        ```javascript
-        const response = await fetch('/api/speech/synthesize', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                text: 'Hello, this is a test.',
-                language: 'en',
-                speed: 1.0,
-                format: 'mp3'
-            })
-        });
-        
-        const audioBlob = await response.blob();
-        const audioUrl = URL.createObjectURL(audioBlob);
-        ```
-    """
-    # TODO: Implement TTS using Piper, Coqui TTS, or other engines
-    # This is a placeholder for future implementation
-    
-    logger.warning("TTS endpoint called but not yet implemented")
-    raise HTTPException(
-        status_code=501,
-        detail="Text-to-Speech (TTS) is not yet implemented. Coming soon!"
-    )
-    
-    # Future implementation outline:
-    # 1. Validate text length
-    # 2. Load TTS model based on language/voice
-    # 3. Synthesize audio
-    # 4. Convert to requested format
-    # 5. Return audio stream
-    
-    # Example response (when implemented):
-    # return StreamingResponse(
-    #     audio_stream,
-    #     media_type=f"audio/{request.format}",
-    #     headers={
-    #         "Content-Disposition": f"attachment; filename=speech.{request.format}"
-    #     }
-    # )
 
 
 # ========== WHISPER CONFIGURATION ENDPOINTS ==========
@@ -391,9 +326,15 @@ async def speech_health(
         stt_available = False
         whisper_loaded = False
     
-    # TTS check (placeholder for future implementation)
-    tts_available = False  # Will be True when TTS is implemented
-    tts_engine = None
+    # TTS check
+    try:
+        tts_manager = get_tts_manager()
+        tts_available = True
+        tts_engine = config.tts.engine
+    except Exception as e:
+        logger.debug(f"TTS not available: {e}")
+        tts_available = False
+        tts_engine = None
     
     # Determine overall status
     if stt_available and tts_available:
@@ -417,3 +358,340 @@ async def speech_health(
         },
         tts_engine=tts_engine,
     )
+
+
+# ========== TEXT-TO-SPEECH (TTS) ENDPOINTS ==========
+@router.post(
+    "/synthesize",
+    summary="Synthesize speech from text",
+    description="Convert text to speech audio using Piper TTS",
+)
+async def synthesize_speech(
+    request: TTSRequest,
+    config: OrionConfig = Depends(get_config_dependency),
+) -> Response:
+    """
+    Convert text to speech.
+    
+    Returns audio stream in requested format (WAV/MP3).
+    
+    Args:
+        request: TTS request with text and options
+        config: Configuration dependency (injected)
+    
+    Returns:
+        Response with audio bytes
+    
+    Raises:
+        HTTPException 400: Invalid text or parameters
+        HTTPException 503: TTS service unavailable
+        HTTPException 500: Synthesis failed
+    """
+    try:
+        # Validate text
+        if not request.text or len(request.text.strip()) == 0:
+            raise HTTPException(status_code=400, detail="Text cannot be empty")
+        
+        if len(request.text) > 5000:
+            raise HTTPException(
+                status_code=400,
+                detail="Text too long (max 5000 characters)"
+            )
+        
+        # Get TTS manager
+        tts_manager = get_tts_manager()
+        
+        # Synthesize speech
+        audio_bytes = tts_manager.synthesize(
+            text=request.text,
+            voice_id=request.voice,
+            speed=request.speed,
+            output_format=request.format,
+        )
+        
+        # Determine media type
+        media_types = {
+            "wav": "audio/wav",
+            "mp3": "audio/mpeg",
+            "opus": "audio/opus",
+        }
+        media_type = media_types.get(request.format, "audio/wav")
+        
+        # Return audio stream
+        return Response(
+            content=audio_bytes,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename=speech.{request.format}",
+                "Content-Length": str(len(audio_bytes)),
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"TTS synthesis failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Synthesis failed: {str(e)}"
+        )
+
+
+@router.get(
+    "/voices",
+    response_model=VoiceListResponse,
+    summary="List available TTS voices",
+    description="Get list of all available Piper TTS voices",
+)
+async def list_voices(
+    language: Optional[str] = None,
+) -> VoiceListResponse:
+    """
+    List available TTS voices, optionally filtered by language.
+    
+    Args:
+        language: Optional language filter (e.g., 'en_US')
+    
+    Returns:
+        VoiceListResponse with voice list
+    
+    Raises:
+        HTTPException 503: TTS service unavailable
+        HTTPException 500: Failed to list voices
+    """
+    try:
+        tts_manager = get_tts_manager()
+        voices = tts_manager.list_voices(language_filter=language)
+        
+        return VoiceListResponse(
+            status="success",
+            voices=voices,
+            count=len(voices),
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list voices: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list voices: {str(e)}"
+        )
+
+
+@router.get(
+    "/config/tts",
+    response_model=TTSConfigResponse,
+    summary="Get TTS configuration",
+    description="Retrieve current TTS configuration settings",
+)
+async def get_tts_config(
+    config: OrionConfig = Depends(get_config_dependency),
+) -> TTSConfigResponse:
+    """
+    Get current TTS configuration.
+    
+    Args:
+        config: Configuration dependency (injected)
+    
+    Returns:
+        TTSConfigResponse with current settings
+    """
+    return TTSConfigResponse(
+        status="success",
+        message="TTS configuration retrieved successfully",
+        config={
+            "enabled": config.tts.enabled,
+            "engine": config.tts.engine,
+            "default_voice": config.tts.default_voice,
+            "audio_format": config.tts.audio_format,
+            "default_speed": config.tts.default_speed,
+            "use_gpu": config.tts.use_gpu,
+            "sample_rate": config.tts.sample_rate,
+            "auto_download_voices": config.tts.auto_download_voices,
+        },
+    )
+
+
+@router.patch(
+    "/config/tts",
+    response_model=TTSConfigResponse,
+    summary="Update TTS configuration",
+    description="Update TTS settings (excluding voice selection)",
+)
+async def update_tts_config(
+    updates: TTSConfigUpdate,
+    config: OrionConfig = Depends(get_config_dependency),
+) -> TTSConfigResponse:
+    """
+    Update TTS configuration settings.
+    
+    Note: This updates config in memory only. Voice changes use separate endpoint.
+    
+    Args:
+        updates: Configuration updates
+        config: Configuration dependency (injected)
+    
+    Returns:
+        TTSConfigResponse with updated settings
+    
+    Raises:
+        HTTPException 400: Invalid configuration values
+    """
+    try:
+        # Update configuration
+        updated_fields = []
+        
+        if updates.audio_format is not None:
+            config.tts.audio_format = updates.audio_format
+            updated_fields.append("audio_format")
+        
+        if updates.default_speed is not None:
+            config.tts.default_speed = updates.default_speed
+            updated_fields.append("default_speed")
+        
+        if updates.use_gpu is not None:
+            config.tts.use_gpu = updates.use_gpu
+            updated_fields.append("use_gpu")
+            # GPU change requires TTS manager reset
+            reset_tts_manager()
+        
+        message = f"Updated: {', '.join(updated_fields)}" if updated_fields else "No changes"
+        
+        return TTSConfigResponse(
+            status="success",
+            message=message,
+            config={
+                "enabled": config.tts.enabled,
+                "engine": config.tts.engine,
+                "default_voice": config.tts.default_voice,
+                "audio_format": config.tts.audio_format,
+                "default_speed": config.tts.default_speed,
+                "use_gpu": config.tts.use_gpu,
+                "sample_rate": config.tts.sample_rate,
+                "auto_download_voices": config.tts.auto_download_voices,
+            },
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to update TTS config: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Configuration update failed: {str(e)}"
+        )
+
+
+@router.patch(
+    "/voice",
+    response_model=TTSConfigResponse,
+    summary="Change TTS voice",
+    description="Update the default TTS voice",
+)
+async def update_tts_voice(
+    voice_update: TTSVoiceUpdate,
+    config: OrionConfig = Depends(get_config_dependency),
+) -> TTSConfigResponse:
+    """
+    Change the default TTS voice.
+    
+    Args:
+        voice_update: Voice update request
+        config: Configuration dependency (injected)
+    
+    Returns:
+        TTSConfigResponse with updated settings
+    
+    Raises:
+        HTTPException 400: Invalid voice ID
+        HTTPException 404: Voice not found
+    """
+    try:
+        # Verify voice exists
+        tts_manager = get_tts_manager()
+        voices = tts_manager.list_voices()
+        voice_ids = [v.voice_id for v in voices]
+        
+        if voice_update.voice_id not in voice_ids:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Voice '{voice_update.voice_id}' not found. Available voices: {', '.join(voice_ids[:5])}"
+            )
+        
+        # Update default voice
+        config.tts.default_voice = voice_update.voice_id
+        
+        return TTSConfigResponse(
+            status="success",
+            message=f"Default voice changed to '{voice_update.voice_id}'",
+            config={
+                "enabled": config.tts.enabled,
+                "engine": config.tts.engine,
+                "default_voice": config.tts.default_voice,
+                "audio_format": config.tts.audio_format,
+                "default_speed": config.tts.default_speed,
+                "use_gpu": config.tts.use_gpu,
+                "sample_rate": config.tts.sample_rate,
+                "auto_download_voices": config.tts.auto_download_voices,
+            },
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update voice: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Voice update failed: {str(e)}"
+        )
+
+
+@router.post(
+    "/preview-voice",
+    summary="Preview a TTS voice",
+    description="Generate a short audio sample with the specified voice",
+)
+async def preview_voice(
+    preview: TTSPreviewRequest,
+) -> Response:
+    """
+    Preview a voice with sample text.
+    
+    Args:
+        preview: Preview request with voice ID and optional text
+    
+    Returns:
+        Response with audio bytes (WAV format)
+    
+    Raises:
+        HTTPException 404: Voice not found
+        HTTPException 500: Preview generation failed
+    """
+    try:
+        tts_manager = get_tts_manager()
+        
+        # Synthesize preview
+        audio_bytes = tts_manager.synthesize(
+            text=preview.text,
+            voice_id=preview.voice_id,
+            speed=1.0,
+            output_format="wav",
+        )
+        
+        return Response(
+            content=audio_bytes,
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f"attachment; filename=preview_{preview.voice_id}.wav",
+                "Content-Length": str(len(audio_bytes)),
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Voice preview failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Preview generation failed: {str(e)}"
+        )
+

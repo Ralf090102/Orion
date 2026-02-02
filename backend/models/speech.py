@@ -221,3 +221,147 @@ class SpeechHealthResponse(BaseModel):
                 "tts_engine": "piper",
             }
         }
+
+
+# ========== TTS VOICE MODELS ==========
+class VoiceInfo(BaseModel):
+    """Information about a TTS voice."""
+    
+    voice_id: str = Field(..., description="Unique voice identifier")
+    name: str = Field(..., description="Human-readable voice name")
+    language: str = Field(..., description="Language code (e.g., 'en_US')")
+    gender: str = Field(..., description="Voice gender: male, female, neutral")
+    quality: str = Field(..., description="Quality level: low, medium, high")
+    description: str = Field(..., description="Voice description")
+    model_size: str = Field(..., description="Model file size")
+    sample_rate: int = Field(..., description="Audio sample rate")
+    is_downloaded: bool = Field(default=False, description="Whether voice model is cached locally")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "voice_id": "en_US-lessac-medium",
+                "name": "Lessac",
+                "language": "en_US",
+                "gender": "male",
+                "quality": "medium",
+                "description": "American English, neutral tone",
+                "model_size": "8.5MB",
+                "sample_rate": 22050,
+                "is_downloaded": True,
+            }
+        }
+
+
+class VoiceListResponse(BaseModel):
+    """Response model for voice listing."""
+    
+    status: str = Field(..., description="Operation status")
+    voices: list[VoiceInfo] = Field(..., description="List of available voices")
+    count: int = Field(..., description="Total number of voices")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "voices": [
+                    {
+                        "voice_id": "en_US-lessac-medium",
+                        "name": "Lessac",
+                        "language": "en_US",
+                        "gender": "male",
+                        "quality": "medium",
+                        "description": "American English, neutral tone",
+                        "model_size": "8.5MB",
+                        "sample_rate": 22050,
+                        "is_downloaded": True,
+                    }
+                ],
+                "count": 1,
+            }
+        }
+
+
+class TTSVoiceUpdate(BaseModel):
+    """Request model for updating TTS default voice."""
+    
+    voice_id: str = Field(..., description="Voice ID to set as default")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "voice_id": "en_US-amy-medium",
+            }
+        }
+
+
+class TTSConfigUpdate(BaseModel):
+    """Request model for updating TTS configuration (excluding voice)."""
+    
+    audio_format: Optional[str] = Field(
+        default=None,
+        description="Audio format: wav, mp3",
+        pattern="^(wav|mp3)$",
+    )
+    default_speed: Optional[float] = Field(
+        default=None,
+        ge=0.5,
+        le=2.0,
+        description="Speech speed (0.5-2.0)",
+    )
+    use_gpu: Optional[bool] = Field(
+        default=None,
+        description="Enable GPU acceleration",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "audio_format": "wav",
+                "default_speed": 1.0,
+                "use_gpu": False,
+            }
+        }
+
+
+class TTSConfigResponse(BaseModel):
+    """Response model for TTS configuration."""
+    
+    status: str = Field(..., description="Operation status")
+    message: str = Field(..., description="Status message")
+    config: dict = Field(..., description="Current TTS configuration")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "message": "TTS configuration retrieved successfully",
+                "config": {
+                    "enabled": True,
+                    "engine": "piper",
+                    "default_voice": "en_US-lessac-medium",
+                    "audio_format": "wav",
+                    "default_speed": 1.0,
+                    "use_gpu": False,
+                },
+            }
+        }
+
+
+class TTSPreviewRequest(BaseModel):
+    """Request model for voice preview."""
+    
+    voice_id: str = Field(..., description="Voice ID to preview")
+    text: Optional[str] = Field(
+        default="Hello, this is a voice preview.",
+        description="Sample text to synthesize",
+        max_length=200,
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "voice_id": "en_US-amy-medium",
+                "text": "Hello, this is a voice preview.",
+            }
+        }
