@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 import io
+import tempfile
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -243,52 +245,56 @@ class TTSManager:
         
         # Synthesize speech
         try:
-            # Create in-memory WAV file
-            wav_buffer = io.BytesIO()
+            # Get voice info for sample rate
+            voice_info = self.voice_catalog[voice_id]
             
-            with self._wave_module.open(wav_buffer, 'wb') as wav_file:
-                # Get voice info for sample rate
-                voice_info = self.voice_catalog[voice_id]
-                wav_file.setnchannels(1)  # Mono
-                wav_file.setsampwidth(2)  # 16-bit
-                wav_file.setframerate(voice_info.sample_rate)
-                
-                # Synthesize
-                # Piper's synth API has varied across releases. Try common signatures
-                tried_calls = []
+            # Create temp WAV file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmpf:
+                tmp_path = tmpf.name
+            
+            try:
+                # Import synthesis config
                 try:
-                    self.piper_voice.synthesize(
-                        text,
-                        wav_file,
+                    from piper.config import SynthesisConfig
+                    
+                    # Configure synthesis (speed control)
+                    syn_config = SynthesisConfig(
                         length_scale=1.0 / speed  # Piper uses inverse speed
                     )
-                except TypeError as e1:
-                    tried_calls.append("length_scale=...")
-                    logger.debug(f"Piper synth signature rejected length_scale kwarg: {e1}")
+                except (ImportError, TypeError):
+                    # Older version or no config support
+                    syn_config = None
+                    logger.debug("Piper version doesn't support SynthesisConfig")
+                
+                # Piper's synthesize returns an iterable of audio chunks
+                with self._wave_module.open(tmp_path, 'wb') as wav_file:
+                    # Configure WAV file parameters
+                    wav_file.setnchannels(1)  # Mono
+                    wav_file.setsampwidth(2)  # 16-bit
+                    wav_file.setframerate(voice_info.sample_rate)
+                    
+                    # Generate and write audio chunks
+                    for audio_chunk in self.piper_voice.synthesize(text, syn_config):
+                        wav_file.writeframes(audio_chunk.audio_int16_bytes)
+                
+                # Read the generated WAV file
+                with open(tmp_path, 'rb') as f:
+                    wav_data = f.read()
+                
+                # Verify we got actual audio data (not just header)
+                if len(wav_data) <= 44:
+                    raise ValueError(f"Generated audio is empty (only {len(wav_data)} bytes)")
+                
+                logger.debug(f"Generated {len(wav_data)} bytes of audio for: {text[:50]}...")
+                    
+            finally:
+                # Clean up temp file
+                if os.path.exists(tmp_path):
                     try:
-                        # positional third arg (length_scale)
-                        self.piper_voice.synthesize(text, wav_file, 1.0 / speed)
-                    except TypeError as e2:
-                        tried_calls.append("positional length_scale")
-                        logger.debug(f"Piper synth positional third-arg failed: {e2}")
-                        try:
-                            # some versions accept `speed=` kwarg
-                            self.piper_voice.synthesize(text, wav_file, speed=speed)
-                        except TypeError as e3:
-                            tried_calls.append("speed=...")
-                            logger.debug(f"Piper synth speed kwarg failed: {e3}")
-                            try:
-                                # fallback: call with only text and file
-                                self.piper_voice.synthesize(text, wav_file)
-                            except Exception as e4:
-                                logger.error(
-                                    f"All attempted Piper synth call signatures failed ({tried_calls}): {e4}"
-                                )
-                                raise
-            
-            # Get WAV data
-            wav_data = wav_buffer.getvalue()
-            
+                        os.unlink(tmp_path)
+                    except Exception as e:
+                        logger.warning(f"Could not delete temp file {tmp_path}: {e}")
+
             # Convert to requested format
             if output_format == "mp3":
                 return self._convert_to_mp3(wav_data)
