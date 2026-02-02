@@ -3,7 +3,7 @@
 	import CarbonChevronRight from "~icons/carbon/chevron-right";
 	import CarbonDocumentTasks from "~icons/carbon/document-tasks";
 	import CarbonUpload from "~icons/carbon/upload";
-	import CarbonVolumeMute from "~icons/carbon/volume-mute";
+	import CarbonVolumeUp from "~icons/carbon/volume-up";
 
 	const settingsCategories = [
 		{
@@ -26,7 +26,7 @@
 			id: 'speech',
 			title: 'Speech & Audio',
 			description: 'Configure speech-to-text (STT) and text-to-speech (TTS) settings',
-			icon: CarbonVolumeMute,
+			icon: CarbonVolumeUp,
 			path: '/settings/speech',
 			enabled: true
 		},

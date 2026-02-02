@@ -13,7 +13,6 @@ from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 import io
 import tempfile
-import os
 
 logger = logging.getLogger(__name__)
 

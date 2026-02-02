@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import CarbonVolumeMute from "~icons/carbon/volume-mute";
+	import CarbonTextToSpeech from "~icons/carbon/ibm-watson-text-to-speech";
 	import CarbonMicrophone from "~icons/carbon/microphone";
 	import CarbonSave from "~icons/carbon/save";
 	import CarbonRenew from "~icons/carbon/renew";
@@ -20,11 +20,19 @@
 		model_cache_dir: ''
 	});
 
-	// TTS configuration (placeholder for future implementation)
-	let ttsEnabled = $state(false);
-	let ttsEngine = $state('system');
-	let ttsVoice = $state('default');
-	let ttsSpeed = $state(1.0);
+	// TTS configuration
+	let ttsConfig = $state({
+		default_voice: 'en_US-amy-low',
+		audio_format: 'wav',
+		default_speed: 1.0,
+		use_gpu: false
+	});
+
+	let availableVoices = $state<any[]>([]);
+	let savingTTS = $state(false);
+	let loadingVoices = $state(false);
+	let previewingVoice = $state(false);
+	let currentPreviewAudio: HTMLAudioElement | null = null;
 
 	// UI state
 	let loading = $state(false);
@@ -102,6 +110,165 @@
 			console.error('Failed to load Whisper config:', err);
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadTTSConfig() {
+		try {
+			loading = true;
+			error = null;
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/config/tts`);
+			
+			if (!response.ok) {
+				throw new Error('Failed to load TTS configuration');
+			}
+
+			const data = await response.json();
+			ttsConfig = {
+				default_voice: data.config.default_voice,
+				audio_format: data.config.audio_format,
+				default_speed: data.config.default_speed,
+				use_gpu: data.config.use_gpu
+			};
+		} catch (err) {
+			error = (err as Error).message;
+			console.error('Failed to load TTS config:', err);
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function loadAvailableVoices() {
+		try {
+			loadingVoices = true;
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/voices`);
+			
+			if (!response.ok) {
+				throw new Error('Failed to load voices');
+			}
+
+			const data = await response.json();
+			availableVoices = data.voices || [];
+
+			// If the configured default voice isn't present, pick the first available voice
+			if (availableVoices.length > 0) {
+				const found = availableVoices.find(v => v.voice_id === ttsConfig.default_voice);
+				if (!found) {
+					ttsConfig = { ...ttsConfig, default_voice: availableVoices[0].voice_id };
+				}
+			}
+		} catch (err) {
+			console.error('Failed to load voices:', err);
+		} finally {
+			loadingVoices = false;
+		}
+	}
+
+	async function saveTTSConfig() {
+		try {
+			savingTTS = true;
+			error = null;
+			success = null;
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/config/tts`, {
+				method: 'PATCH',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify(ttsConfig),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.detail || 'Failed to save TTS configuration');
+			}
+
+			const data = await response.json();
+			success = data.message;
+
+			// Reload config to get updated values
+			await loadTTSConfig();
+		} catch (err) {
+			error = (err as Error).message;
+			console.error('Failed to save TTS config:', err);
+		} finally {
+			savingTTS = false;
+		}
+	}
+
+	async function changeVoice() {
+		try {
+			error = null;
+			success = null;
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/voice`, {
+				method: 'PATCH',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({
+					voice_id: ttsConfig.default_voice
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.detail || 'Failed to change voice');
+			}
+
+			const data = await response.json();
+			success = data.message;
+		} catch (err) {
+			error = (err as Error).message;
+			console.error('Failed to change voice:', err);
+		}
+	}
+
+	async function previewVoice() {
+		try {
+			previewingVoice = true;
+			error = null;
+
+			// Stop current preview if playing
+			if (currentPreviewAudio) {
+				currentPreviewAudio.pause();
+				currentPreviewAudio = null;
+			}
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/preview-voice`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({
+					voice_id: ttsConfig.default_voice,
+					text: 'Hello, this is a voice preview. How does this sound?'
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.detail || 'Failed to preview voice');
+			}
+
+			const audioBlob = await response.blob();
+			const audioUrl = URL.createObjectURL(audioBlob);
+			
+			currentPreviewAudio = new Audio(audioUrl);
+			currentPreviewAudio.play();
+
+			// Clean up URL when audio finishes
+			currentPreviewAudio.onended = () => {
+				URL.revokeObjectURL(audioUrl);
+			};
+
+		} catch (err) {
+			error = (err as Error).message;
+			console.error('Failed to preview voice:', err);
+		} finally {
+			previewingVoice = false;
 		}
 	}
 
@@ -219,6 +386,8 @@
 
 	onMount(() => {
 		loadWhisperConfig();
+		loadTTSConfig();
+		loadAvailableVoices();
 		checkHealth();
 	});
 </script>
@@ -457,28 +626,187 @@
 			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
 				<div class="flex items-center gap-3 mb-6">
 					<div class="rounded-lg bg-purple-100 p-3 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400">
-						<CarbonVolumeMute class="size-6" />
+						<CarbonTextToSpeech class="size-6" />
 					</div>
 					<div>
 						<h2 class="text-lg font-semibold">Text-to-Speech Configuration</h2>
 						<p class="text-sm text-gray-600 dark:text-gray-400">
-							Configure text-to-speech settings
+							Configure Piper TTS voices and audio settings
 						</p>
 					</div>
 				</div>
 
-				<!-- Coming Soon Notice -->
-				<div class="rounded-lg border border-gray-200 bg-gray-50 p-8 text-center dark:border-gray-700 dark:bg-gray-900/50">
-					<div class="mx-auto mb-4 w-fit rounded-full bg-gray-200 p-4 dark:bg-gray-700">
-						<CarbonVolumeMute class="size-8 text-gray-400" />
+				<div class="space-y-6">
+					<!-- Voice Selection -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Default Voice
+						</label>
+						<div class="flex gap-3">
+							<select
+								bind:value={ttsConfig.default_voice}
+								onchange={changeVoice}
+								disabled={loadingVoices}
+								class="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+							>
+								{#if loadingVoices}
+									<option>Loading voices...</option>
+								{:else if availableVoices.length === 0}
+									<option>No voices available</option>
+								{:else}
+									{#each availableVoices as voice}
+										<option value={voice.voice_id}>
+											{voice.name} ({voice.language}) - {voice.quality}
+											{#if voice.is_downloaded}✓{/if}
+										</option>
+									{/each}
+								{/if}
+							</select>
+							<button
+								onclick={previewVoice}
+								disabled={previewingVoice || loadingVoices || availableVoices.length === 0}
+								class="rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50 dark:bg-purple-500 dark:hover:bg-purple-600 whitespace-nowrap"
+							>
+								<div class="flex items-center gap-2">
+									{#if previewingVoice}
+										<div class="size-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+									{:else}
+										<CarbonPlay class="size-4" />
+									{/if}
+									Preview
+								</div>
+							</button>
+						</div>
+						<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+							Select a voice and click Preview to hear a sample. Voices marked with ✓ are downloaded locally.
+						</p>
 					</div>
-					<h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300">
-						TTS Coming Soon
-					</h3>
-					<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
-						Text-to-speech functionality will be available in a future update.
-						It will support multiple TTS engines and customizable voices.
-					</p>
+
+					<!-- Voice Info -->
+					{#if !loadingVoices && availableVoices.length > 0}
+						{@const selectedVoice = availableVoices.find(v => v.voice_id === ttsConfig.default_voice)}
+						{#if selectedVoice}
+							<div class="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/50">
+								<div class="grid grid-cols-2 gap-4 text-sm">
+									<div>
+										<span class="text-gray-600 dark:text-gray-400">Gender:</span>
+										<span class="ml-2 font-medium text-gray-900 dark:text-gray-100 capitalize">{selectedVoice.gender}</span>
+									</div>
+									<div>
+										<span class="text-gray-600 dark:text-gray-400">Quality:</span>
+										<span class="ml-2 font-medium text-gray-900 dark:text-gray-100 capitalize">{selectedVoice.quality}</span>
+									</div>
+									<div>
+										<span class="text-gray-600 dark:text-gray-400">Language:</span>
+										<span class="ml-2 font-medium text-gray-900 dark:text-gray-100">{selectedVoice.language}</span>
+									</div>
+									<div>
+										<span class="text-gray-600 dark:text-gray-400">Model Size:</span>
+										<span class="ml-2 font-medium text-gray-900 dark:text-gray-100">{selectedVoice.model_size}</span>
+									</div>
+								</div>
+								<p class="text-xs text-gray-600 dark:text-gray-400 mt-3">
+									{selectedVoice.description}
+								</p>
+							</div>
+						{/if}
+					{/if}
+
+					<!-- Speed Control -->
+					<div>
+						<div class="flex justify-between items-center mb-2">
+							<label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+								Speech Speed
+							</label>
+							<span class="text-sm font-mono text-gray-600 dark:text-gray-400">
+								{ttsConfig.default_speed.toFixed(1)}x
+							</span>
+						</div>
+						<input 
+							type="range" 
+							min="0.5" 
+							max="2.0" 
+							step="0.1"
+							bind:value={ttsConfig.default_speed}
+							class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 accent-purple-600"
+						/>
+						<div class="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
+							<span>0.5x (Slower)</span>
+							<span>1.0x (Normal)</span>
+							<span>2.0x (Faster)</span>
+						</div>
+					</div>
+
+					<!-- Audio Format -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Audio Format
+						</label>
+						<select
+							bind:value={ttsConfig.audio_format}
+							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+						>
+							<option value="wav">WAV (Uncompressed, Higher Quality)</option>
+							<option value="mp3">MP3 (Compressed, Smaller Size)</option>
+						</select>
+						<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+							WAV provides best quality but larger file sizes. MP3 is compressed and more efficient.
+						</p>
+					</div>
+
+					<!-- GPU Acceleration -->
+					<div class="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/50">
+						<label class="flex items-start gap-3 cursor-pointer">
+							<input 
+								type="checkbox" 
+								bind:checked={ttsConfig.use_gpu}
+								class="mt-0.5 size-4 rounded border-gray-300 text-purple-600 focus:ring-2 focus:ring-purple-500 dark:border-gray-600 dark:bg-gray-700"
+							/>
+							<div class="flex-1">
+								<div class="font-medium text-gray-900 dark:text-gray-100">
+									Enable GPU Acceleration (CUDA)
+								</div>
+								<p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+									Use GPU for faster TTS synthesis. Requires NVIDIA GPU with CUDA support.
+									Disable if you encounter errors or don't have a compatible GPU.
+								</p>
+							</div>
+						</label>
+					</div>
+				</div>
+
+				<!-- Save Button -->
+				<div class="mt-8 flex justify-end">
+					<button
+						onclick={saveTTSConfig}
+						disabled={savingTTS || loading}
+						class="rounded-lg bg-purple-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50 dark:bg-purple-500 dark:hover:bg-purple-600"
+					>
+						<div class="flex items-center gap-2">
+							{#if savingTTS}
+								<div class="size-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+							{:else}
+								<CarbonSave class="size-4" />
+							{/if}
+							{savingTTS ? 'Saving...' : 'Save Configuration'}
+						</div>
+					</button>
+				</div>
+			</div>
+
+			<!-- Info Box -->
+			<div class="rounded-lg border border-purple-200 bg-purple-50 p-4 dark:border-purple-800 dark:bg-purple-900/20">
+				<div class="flex items-start gap-3">
+					<CarbonDocument class="size-5 text-purple-600 dark:text-purple-400 flex-shrink-0 mt-0.5" />
+					<div class="flex-1">
+						<h3 class="font-semibold text-purple-900 dark:text-purple-200 text-sm">
+							About Piper TTS
+						</h3>
+						<p class="text-sm text-purple-800 dark:text-purple-300 mt-1">
+							Piper is a fast, local neural text-to-speech system. Voice models are automatically loaded on first use.
+							The system supports multiple languages and voice qualities. For best performance on CPU, use low or medium quality voices.
+						</p>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -537,13 +865,25 @@
 
 						<div class="flex items-center justify-between rounded-lg border p-4 dark:border-gray-700">
 							<div class="flex items-center gap-3">
-								<div class="size-3 rounded-full bg-gray-400"></div>
-								<div>
-									<p class="font-medium">TTS Engine</p>
-									<p class="text-sm text-gray-600 dark:text-gray-400">
-										Coming soon
-									</p>
-								</div>
+								{#if healthStatus && healthStatus.tts_available !== undefined}
+									{#if healthStatus.tts_available}
+										<div class="size-3 rounded-full bg-green-500"></div>
+									{:else}
+										<div class="size-3 rounded-full bg-red-500"></div>
+									{/if}
+									<div>
+										<p class="font-medium">{healthStatus.tts_engine || 'Piper-TTS'}</p>
+										<p class="text-sm text-gray-600 dark:text-gray-400">
+											{healthStatus.tts_available ? 'Active' : 'Not available'}
+										</p>
+									</div>
+								{:else}
+									<div class="size-3 rounded-full bg-green-500"></div>
+									<div>
+										<p class="font-medium">Piper-TTS</p>
+										<p class="text-sm text-gray-600 dark:text-gray-400">Active</p>
+									</div>
+								{/if}
 							</div>
 						</div>
 					</div>
