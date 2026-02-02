@@ -7,6 +7,7 @@
 	import CopyToClipBoardBtn from "../CopyToClipBoardBtn.svelte";
 	import IconLoading from "../icons/IconLoading.svelte";
 	import CarbonRotate360 from "~icons/carbon/rotate-360";
+	import CarbonTextToSpeech from "~icons/carbon/ibm-watson-text-to-speech";
 	// import CarbonDownload from "~icons/carbon/download";
 
 	import CarbonPen from "~icons/carbon/pen";
@@ -52,6 +53,10 @@
 	let isCopied = $state(false);
 	let messageWidth: number = $state(0);
 	let messageInfoWidth: number = $state(0);
+	let isReadingAloud = $state(false);
+	let currentAudio: HTMLAudioElement | null = null;
+
+	const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
 	$effect(() => {
 		// referenced to appease linter for currently-unused props
@@ -108,6 +113,73 @@
 		event.preventDefault();
 		event.clipboardData.setData("text/html", html);
 		event.clipboardData.setData("text/plain", text);
+	}
+
+	async function readAloud() {
+		try {
+			// Stop current audio if playing
+			if (currentAudio) {
+				currentAudio.pause();
+				currentAudio = null;
+				isReadingAloud = false;
+				return;
+			}
+
+			isReadingAloud = true;
+
+			// Use content without think blocks for TTS
+			const textToRead = contentWithoutThink;
+
+			if (!textToRead || textToRead.trim().length === 0) {
+				console.warn('No content to read aloud');
+				isReadingAloud = false;
+				return;
+			}
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/synthesize`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({
+					text: textToRead,
+					voice: null,  // Use backend's configured default voice
+					format: 'mp3'
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json().catch(() => ({ detail: 'TTS failed' }));
+				throw new Error(errorData.detail || 'Failed to synthesize speech');
+			}
+
+			const audioBlob = await response.blob();
+			const audioUrl = URL.createObjectURL(audioBlob);
+
+			currentAudio = new Audio(audioUrl);
+			
+			// Handle audio end
+			currentAudio.onended = () => {
+				URL.revokeObjectURL(audioUrl);
+				currentAudio = null;
+				isReadingAloud = false;
+			};
+
+			// Handle audio errors
+			currentAudio.onerror = () => {
+				URL.revokeObjectURL(audioUrl);
+				currentAudio = null;
+				isReadingAloud = false;
+				console.error('Audio playback failed');
+			};
+
+			await currentAudio.play();
+
+		} catch (err) {
+			console.error('Read aloud failed:', err);
+			isReadingAloud = false;
+			currentAudio = null;
+		}
 	}
 
 	let editContentEl: HTMLTextAreaElement | undefined = $state();
@@ -369,6 +441,21 @@
 						value={contentWithoutThink}
 						iconClassNames="text-xs"
 					/>
+					<button
+						class="btn rounded-sm p-1 text-xs text-gray-400 hover:text-gray-500 focus:ring-0 dark:text-gray-400 dark:hover:text-gray-300"
+						title="Read Aloud"
+						type="button"
+						onclick={readAloud}
+						disabled={!contentWithoutThink || contentWithoutThink.trim().length === 0}
+					>
+						{#if isReadingAloud}
+							<div class="size-3 animate-pulse">
+								<CarbonTextToSpeech />
+							</div>
+						{:else}
+							<CarbonTextToSpeech />
+						{/if}
+					</button>
 					<button
 						class="btn rounded-sm p-1 text-xs text-gray-400 hover:text-gray-500 focus:ring-0 dark:text-gray-400 dark:hover:text-gray-300"
 						title="Retry"
