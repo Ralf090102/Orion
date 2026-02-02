@@ -142,25 +142,57 @@
 	async function loadAvailableVoices() {
 		try {
 			loadingVoices = true;
+			console.log('Loading voices from:', `${BACKEND_URL}/api/speech/voices`);
 
 			const response = await fetch(`${BACKEND_URL}/api/speech/voices`);
 			
-			if (!response.ok) {
-				throw new Error('Failed to load voices');
-			}
+				if (!response.ok) {
+					let serverMsg = '';
+					try {
+						const errJson = await response.json();
+						serverMsg = errJson.detail || JSON.stringify(errJson);
+					} catch (e) {
+						serverMsg = await response.text();
+					}
+					console.error('Voice loading failed:', response.status, serverMsg);
+					error = `Failed to load voices: ${serverMsg}`;
+					return;
+				}
 
-			const data = await response.json();
-			availableVoices = data.voices || [];
+				const data = await response.json();
+				console.log('Voices loaded:', data);
+
+				if (!data || !Array.isArray(data.voices)) {
+					console.error('Unexpected voices payload', data);
+					error = 'Unexpected voices payload from server';
+					availableVoices = [];
+					return;
+				}
+
+				// Normalize voice entries to a consistent shape so the UI can rely on fields
+				availableVoices = data.voices.map((v: any) => ({
+					voice_id: v.voice_id ?? v.id ?? v.name,
+					name: v.name ?? v.voice_id ?? v.id ?? 'Unknown',
+					language: v.language ?? v.lang ?? 'unknown',
+					quality: v.quality ?? v.tier ?? 'medium',
+					is_downloaded: v.is_downloaded ?? v.downloaded ?? v.local ?? false,
+					model_size: v.model_size ?? v.size ?? '',
+					gender: v.gender ?? '',
+					description: v.description ?? v.note ?? ''
+				}));
+				console.log('Available voices count:', availableVoices.length);
 
 			// If the configured default voice isn't present, pick the first available voice
 			if (availableVoices.length > 0) {
 				const found = availableVoices.find(v => v.voice_id === ttsConfig.default_voice);
 				if (!found) {
+					console.log('Default voice not found, using:', availableVoices[0].voice_id);
 					ttsConfig = { ...ttsConfig, default_voice: availableVoices[0].voice_id };
 				}
 			}
 		} catch (err) {
 			console.error('Failed to load voices:', err);
+			error = 'Failed to load TTS voices. Please check if backend is running.';
 		} finally {
 			loadingVoices = false;
 		}
@@ -602,20 +634,79 @@
 				</div>
 			</div>
 
-			<!-- Info Box -->
-			<div class="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
-				<div class="flex items-start gap-3">
-					<CarbonDocument class="size-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
-					<div class="flex-1">
-						<h3 class="font-semibold text-blue-900 dark:text-blue-200 text-sm">
-							About Whisper STT
-						</h3>
-						<p class="text-sm text-blue-800 dark:text-blue-300 mt-1">
-							Whisper is OpenAI's automatic speech recognition system. The first time you use a model size,
-							it will be downloaded automatically. Larger models provide better accuracy but require more
-							resources. The 'base' model is a good balance for most users.
-						</p>
+			<!-- Test Transcription -->
+			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
+				<div class="mb-6">
+					<h2 class="text-lg font-semibold">Test Transcription</h2>
+					<p class="text-sm text-gray-600 dark:text-gray-400">
+						Upload an audio file to test the Whisper STT system
+					</p>
+				</div>
+
+				<div class="space-y-4">
+					<!-- File Upload -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Audio File
+						</label>
+						<input
+							type="file"
+							accept="audio/*,.webm,.wav,.mp3,.m4a,.ogg,.flac"
+							onchange={handleFileSelect}
+							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 file:mr-4 file:rounded file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-blue-700 hover:file:bg-blue-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:file:bg-blue-900/30 dark:file:text-blue-400"
+						/>
+						{#if testAudioFile}
+							<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+								Selected: {testAudioFile.name} ({(testAudioFile.size / 1024).toFixed(1)} KB)
+							</p>
+						{/if}
 					</div>
+
+					<!-- Test Button -->
+					<button
+						onclick={testTranscribe}
+						disabled={!testAudioFile || testing}
+						class="w-full rounded-lg bg-green-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 dark:bg-green-500 dark:hover:bg-green-600"
+					>
+						<div class="flex items-center justify-center gap-2">
+							{#if testing}
+								<div class="size-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+							{:else}
+								<CarbonPlay class="size-4" />
+							{/if}
+							{testing ? 'Transcribing...' : 'Test Transcription'}
+						</div>
+					</button>
+
+					<!-- Transcription Result -->
+					{#if testTranscription}
+						<div class="rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
+							<p class="text-sm font-medium text-green-800 dark:text-green-200 mb-2">
+								Transcription Result:
+							</p>
+							<p class="text-sm text-green-700 dark:text-green-300 whitespace-pre-wrap">
+								{testTranscription}
+							</p>
+						</div>
+					{/if}
+				</div>
+			</div>
+		</div>
+
+
+		<!-- Info Box -->
+		<div class="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
+			<div class="flex items-start gap-3">
+				<CarbonDocument class="size-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+				<div class="flex-1">
+					<h3 class="font-semibold text-blue-900 dark:text-blue-200 text-sm">
+						About Whisper STT
+					</h3>
+					<p class="text-sm text-blue-800 dark:text-blue-300 mt-1">
+						Whisper is OpenAI's automatic speech recognition system. The first time you use a model size,
+						it will be downloaded automatically. Larger models provide better accuracy but require more
+						resources. The 'base' model is a good balance for most users.
+					</p>
 				</div>
 			</div>
 		</div>
@@ -884,68 +975,15 @@
 										<p class="text-sm text-gray-600 dark:text-gray-400">Active</p>
 									</div>
 								{/if}
-							</div>
-						</div>
+							</div>						<button
+							class="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-700 disabled:opacity-50 dark:bg-purple-500 dark:hover:bg-purple-600"
+							disabled
+							title="Engine switching coming soon (Qwen3-TTS)"
+						>
+							Change Engine
+						</button>						</div>
 					</div>
 				{/if}
-			</div>
-
-			<!-- Transcription Test -->
-			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
-				<div class="mb-6">
-					<h2 class="text-lg font-semibold">Test Transcription</h2>
-					<p class="text-sm text-gray-600 dark:text-gray-400">
-						Upload an audio file to test the Whisper STT system
-					</p>
-				</div>
-
-				<div class="space-y-4">
-					<!-- File Upload -->
-					<div>
-						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-							Audio File
-						</label>
-						<input
-							type="file"
-							accept="audio/*,.webm,.wav,.mp3,.m4a,.ogg,.flac"
-							onchange={handleFileSelect}
-							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 file:mr-4 file:rounded file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-blue-700 hover:file:bg-blue-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:file:bg-blue-900/30 dark:file:text-blue-400"
-						/>
-						{#if testAudioFile}
-							<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
-								Selected: {testAudioFile.name} ({(testAudioFile.size / 1024).toFixed(1)} KB)
-							</p>
-						{/if}
-					</div>
-
-					<!-- Test Button -->
-					<button
-						onclick={testTranscribe}
-						disabled={!testAudioFile || testing}
-						class="w-full rounded-lg bg-green-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 dark:bg-green-500 dark:hover:bg-green-600"
-					>
-						<div class="flex items-center justify-center gap-2">
-							{#if testing}
-								<div class="size-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
-							{:else}
-								<CarbonPlay class="size-4" />
-							{/if}
-							{testing ? 'Transcribing...' : 'Test Transcription'}
-						</div>
-					</button>
-
-					<!-- Transcription Result -->
-					{#if testTranscription}
-						<div class="rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
-							<p class="text-sm font-medium text-green-800 dark:text-green-200 mb-2">
-								Transcription Result:
-							</p>
-							<p class="text-sm text-green-700 dark:text-green-300 whitespace-pre-wrap">
-								{testTranscription}
-							</p>
-						</div>
-					{/if}
-				</div>
 			</div>
 		</div>
 	{/if}

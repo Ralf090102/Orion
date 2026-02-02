@@ -9,6 +9,7 @@ Provides REST API for:
 
 import logging
 import tempfile
+from dataclasses import is_dataclass, asdict
 from pathlib import Path
 from typing import Optional
 
@@ -463,9 +464,35 @@ async def list_voices(
         tts_manager = get_tts_manager()
         voices = tts_manager.list_voices(language_filter=language)
         
+        # Convert VoiceInfo or other model objects to plain dicts for proper serialization
+        voice_dicts = []
+        for v in voices:
+            try:
+                # Pydantic v2 models
+                if hasattr(v, 'model_dump'):
+                    voice_dicts.append(v.model_dump())
+                # Pydantic v1 models
+                elif hasattr(v, 'dict'):
+                    voice_dicts.append(v.dict())
+                # Dataclass (TTSManager uses dataclass VoiceInfo)
+                elif is_dataclass(v):
+                    voice_dicts.append(asdict(v))
+                # Plain dict already
+                elif isinstance(v, dict):
+                    voice_dicts.append(v)
+                else:
+                    # As last resort, try to coerce via vars()
+                    try:
+                        voice_dicts.append(vars(v))
+                    except Exception:
+                        voice_dicts.append(v)
+            except Exception:
+                # Fallback: append the object as-is
+                voice_dicts.append(v)
+        
         return VoiceListResponse(
             status="success",
-            voices=voices,
+            voices=voice_dicts,
             count=len(voices),
         )
         
@@ -609,7 +636,20 @@ async def update_tts_voice(
         # Verify voice exists
         tts_manager = get_tts_manager()
         voices = tts_manager.list_voices()
-        voice_ids = [v.voice_id for v in voices]
+        # Normalize possible model or dict entries
+        voice_ids = []
+        for v in voices:
+            if hasattr(v, 'voice_id'):
+                voice_ids.append(getattr(v, 'voice_id'))
+            elif isinstance(v, dict) and 'voice_id' in v:
+                voice_ids.append(v['voice_id'])
+            elif hasattr(v, 'model_dump'):
+                try:
+                    d = v.model_dump()
+                    if 'voice_id' in d:
+                        voice_ids.append(d['voice_id'])
+                except Exception:
+                    continue
         
         if voice_update.voice_id not in voice_ids:
             raise HTTPException(
