@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+import json
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -31,7 +32,7 @@ from src.generation.session_manager import get_session_manager
 from src.retrieval.retriever import OrionRetriever
 from src.retrieval.vector_store import create_vector_store
 from src.utilities.config import get_config
-from src.utilities.utils import log_error, log_info
+from src.utilities.utils import log_error, log_info, log_warning, log_success
 
 app = typer.Typer(
     name="orion",
@@ -109,6 +110,67 @@ def print_config_summary():
     table.add_row("GPU Enabled", "✓" if config.gpu.enabled else "✗")
 
     console.print(table)
+    
+# ========== SOURCES COMMAND ==========
+@app.command()
+def sources(
+    source_file: Optional[str] = typer.Option(None, "--file", "-f", help="Show chunks from specific source file"),
+    json_output: bool = typer.Option(False, "--json", help="Output results as JSON"),
+    config_env: bool = typer.Option(False, "--env", help="Load configuration from environment variables"),
+):
+    """List all sources in the knowledge base or show chunks from a specific source."""
+    print_banner()
+
+    config = get_config(from_env=config_env)
+
+    try:
+        vector_store = create_vector_store(config=config)
+
+        if source_file:
+            chunks = vector_store.get_chunks_by_source(source_file)
+
+            if not chunks:
+                log_info(f"No chunks found for source: {source_file}", config=config)
+                return
+
+            if json_output:
+                console.print(json.dumps(chunks, indent=2, ensure_ascii=False))
+            else:
+                log_success(f"Found {len(chunks)} chunks from {source_file}", config=config)
+                for i, chunk in enumerate(chunks, 1):
+                    console.print(f"\n[bold cyan]Chunk {i}:[/bold cyan]")
+                    content = chunk.get("content") or chunk.get("document") or chunk.get("text") or ""
+                    console.print(content[:200] + "..." if len(content) > 200 else content)
+                    console.print(f"Metadata: {chunk.get('metadata', {})}")
+
+        else:
+            sources = vector_store.list_all_sources()
+
+            if not sources:
+                log_info("No documents found in knowledge base", config=config)
+                return
+
+            if json_output:
+                console.print(json.dumps(sources, indent=2, ensure_ascii=False))
+            else:
+                total_files = len(sources)
+                total_chunks = sum(s.get("chunk_count", 0) for s in sources)
+
+                table = Table(title=f"Knowledge Base Sources ({total_files} files)", show_header=True, header_style="bold magenta")
+                table.add_column("Source File", style="cyan")
+                table.add_column("File Name", style="white")
+                table.add_column("Type", style="green")
+                table.add_column("Chunks", style="green", justify="right")
+
+                for s in sorted(sources, key=lambda x: x.get("file_name", "")):
+                    table.add_row(s.get("source_file", ""), s.get("file_name", ""), s.get("file_type", ""), str(s.get("chunk_count", 0)))
+
+                console.print(table)
+                log_success(f"Total: {total_files} source files, {total_chunks} chunks", config=config)
+
+    except Exception as e:
+        log_error(f"Failed to retrieve sources: {e}", config=config)
+        raise typer.Exit(1)
 
 
 # ========== INGEST COMMAND ==========

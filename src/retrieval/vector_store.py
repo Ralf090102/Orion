@@ -278,6 +278,8 @@ class ChromaVectorStore:
         Returns:
             Metadata dictionary compatible with Chroma
         """
+        # Normalize and resolve the file path to ensure consistent stored paths
+        file_path = Path(file_path).resolve()
         file_type = self.get_file_type(file_path)
         file_hash = self.compute_file_hash(file_path)
         stats = file_path.stat()
