@@ -448,7 +448,8 @@ class DocumentMetadata:
     file_size: int
     file_hash: str
     chunk_count: int
-    ingestion_timestamp: str
+    total_documents: int = 0
+    ingestion_timestamp: str = ""
     source_directory: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -460,6 +461,7 @@ class DocumentMetadata:
             "file_size": self.file_size,
             "file_hash": self.file_hash,
             "chunk_count": self.chunk_count,
+            "total_documents": self.total_documents,
             "ingestion_timestamp": self.ingestion_timestamp,
             "source_directory": self.source_directory,
         }
@@ -503,6 +505,8 @@ class DocumentProcessor:
         try:
             loader = loader_class(str(file_path))
             documents = loader.load()
+            
+            file_hash = self.get_file_hash(file_path)
 
             # Enrich metadata
             for doc in documents:
@@ -916,6 +920,7 @@ class DocumentIngestor:
         directory_path: str | Path,
         recursive: bool = True,
         max_workers: int = 4,
+        skip_existing: bool = False,
     ) -> IngestionStats:
         """
         Ingest all supported files from a directory.
@@ -951,6 +956,42 @@ class DocumentIngestor:
         log_info(f"Found {len(files)} files to ingest from {directory_path}", self.config)
 
         stats = IngestionStats(total_files=len(files))
+
+        # Optionally skip files already present in the vector store
+        if skip_existing:
+            try:
+                existing = self.vector_store.get_existing_file_identifiers()
+                existing_hashes = existing.get("hashes", set())
+                existing_paths = existing.get("paths", set())
+
+                filtered_files = []
+                skipped_count = 0
+
+                for f in files:
+                    fpath = Path(f)
+                    resolved = str(fpath.resolve())
+
+                    # Skip if path already exists in vector store
+                    if resolved in existing_paths:
+                        skipped_count += 1
+                        continue
+
+                    # Skip if file content hash matches an existing hash
+                    try:
+                        file_hash = self.processor.get_file_hash(fpath)
+                        if file_hash in existing_hashes:
+                            skipped_count += 1
+                            continue
+                    except Exception as e:
+                        log_warning(f"Could not compute hash for {f}: {e}", self.config)
+
+                    filtered_files.append(f)
+
+                log_info(f"skip_existing enabled: skipped {skipped_count} files", self.config)
+                files = filtered_files
+                stats.total_files = len(files)
+            except Exception as e:
+                log_warning(f"Failed to check existing files for skip_existing: {e}", self.config)
 
         # Process files in parallel
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -994,6 +1035,8 @@ class DocumentIngestor:
         self,
         source_path: str | Path,
         clear_existing: bool = False,
+        skip_existing: bool = False,
+        recursive: bool = True,
     ) -> IngestionStats:
         """
         Ingest files from knowledge base path(s).
@@ -1025,7 +1068,7 @@ class DocumentIngestor:
             return stats
 
         elif source_path.is_dir():
-            return self.ingest_directory(source_path, recursive=True)
+            return self.ingest_directory(source_path, recursive=recursive, skip_existing=skip_existing)
 
         else:
             log_error(f"Path not found: {source_path}", self.config)
@@ -1041,6 +1084,8 @@ def ingest_documents(
     source_path: str | Path,
     config: Optional["OrionConfig"] = None,
     clear_existing: bool = False,
+    skip_existing: bool = False,
+    recursive: bool = True,
 ) -> IngestionStats:
     """
     Convenience function to ingest documents.
@@ -1064,7 +1109,9 @@ def ingest_documents(
         stats = ingest_documents("path/to/kb", clear_existing=True)
     """
     ingestor = DocumentIngestor(config=config)
-    return ingestor.ingest_knowledge_base(source_path, clear_existing)
+    return ingestor.ingest_knowledge_base(
+        source_path, clear_existing=clear_existing, skip_existing=skip_existing, recursive=recursive
+    )
 
 
 def get_supported_formats() -> dict[str, str]:

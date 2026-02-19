@@ -543,6 +543,45 @@ class ChromaVectorStore:
         except Exception as e:
             log_error(f"Failed to get collection stats: {e}", config=self.config)
             return {"document_count": 0, "error": str(e)}
+        
+    def get_existing_file_identifiers(self) -> dict[str, set]:
+        """
+        Get file hashes and paths of all files already in the vector store.
+        
+        Returns:
+            Dictionary with 'hashes' and 'paths' sets for quick lookup
+        """
+        if self.collection is None:
+            self._get_or_create_collection()
+            
+        try:
+            # Get all unique file hashes and paths from metadata
+            all_data = self.collection.get(include=["metadatas"])
+            
+            hashes = set()
+            paths = set()
+            
+            if all_data and all_data.get("metadatas"):
+                for metadata in all_data["metadatas"]:
+                    if not metadata:
+                        continue
+                    
+                    # Collect file hashes
+                    file_hash = metadata.get("file_hash")
+                    if file_hash:
+                        hashes.add(file_hash)
+                    
+                    # Collect resolved paths
+                    source_file = metadata.get("source_file")
+                    if source_file:
+                        paths.add(source_file)
+            
+            log_debug(f"Found {len(hashes)} unique file hashes, {len(paths)} unique paths", self.config)
+            return {"hashes": hashes, "paths": paths}
+            
+        except Exception as e:
+            log_error(f"Failed to get existing file identifiers: {e}", config=self.config)
+            return {"hashes": set(), "paths": set()}
 
     def list_all_sources(self) -> list[dict[str, Any]]:
         """

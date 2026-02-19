@@ -118,6 +118,7 @@ def ingest(
     clear: bool = typer.Option(False, "--clear", "-c", help="Clear existing knowledge base first"),
     watch: bool = typer.Option(False, "--watch", "-w", help="Watch for file changes and auto-ingest"),
     recursive: bool = typer.Option(True, "--recursive/--no-recursive", "-r/-R", help="Recursively scan directories"),
+    skip_existing: bool = typer.Option(True, "--skip-existing", help="Skip files already present in the vector store"),
     gpu: bool = typer.Option(None, "--gpu/--no-gpu", help="Enable/disable GPU acceleration"),
 ):
     """
@@ -171,7 +172,13 @@ def ingest(
         start_time = time.time()
 
         try:
-            stats = ingest_documents(path, config=config, clear_existing=clear)
+            stats = ingest_documents(
+                path,
+                config=config,
+                clear_existing=clear,
+                skip_existing=skip_existing,
+                recursive=recursive,
+            )
 
             elapsed = time.time() - start_time
 
@@ -205,7 +212,6 @@ def ingest(
         except Exception as e:
             console.print(f"\n❌ Ingestion failed: {e}", style="bold red")
             raise typer.Exit(1)
-
 
 # ========== QUERY COMMAND ==========
 @app.command()

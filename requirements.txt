@@ -71,6 +71,9 @@ piper-tts==1.3.0
 onnxruntime
 onnxruntime-gpu
 
+# Speech Qwen3-TTS (optional, for Qwen TTS support) | https://github.com/QwenLM/Qwen3-TTS
+# qwen3-tts
+# pip install -U flash-attn --no-build-isolation
 
 # ================================
 # WARNING
