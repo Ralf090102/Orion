@@ -487,18 +487,18 @@ class TTSConfig(BaseConfig):
     """Text-to-Speech configuration"""
     
     enabled: bool = True
-    engine: str = "piper"  # "piper" (only supported for now)
+    default_engine: str = "piper"  # "piper" or "qwen3" (if enabled)
     
     # Piper-specific settings
     default_voice: str = "en_US-lessac-medium"
     model_cache_dir: Path = field(default_factory=lambda: Path.home() / ".cache" / "piper")
     
-    # Audio settings
+    # Audio settings (shared across engines)
     sample_rate: int = 22050
     default_speed: float = 1.0
     audio_format: str = "wav"  # "wav", "mp3"
     
-    # GPU settings
+    # GPU settings (Piper-specific)
     use_gpu: bool = False
     device: str = "auto"  # "auto", "cpu", "cuda"
     
@@ -506,14 +506,25 @@ class TTSConfig(BaseConfig):
     auto_download_voices: bool = True
     max_cached_voices: int = 3  # Limit memory usage
     
+    # Audio cache settings (for TTSCache)
+    enable_cache: bool = True
+    cache_dir: Path = field(default_factory=lambda: Path("./data/tts/cache"))
+    cache_max_entries: int = 1000
+    cache_max_size_mb: int = 500
+    
+    # Queue settings (for TTSQueue - async synthesis)
+    enable_queue: bool = True
+    queue_max_concurrent: int = 1  # Qwen3 is slow, process one at a time
+    
     @classmethod
     def from_env(cls) -> "TTSConfig":
         """Load TTS configuration from environment variables."""
         cache_dir_str = get_env_str("TTS_MODEL_CACHE_DIR", str(Path.home() / ".cache" / "piper"))
+        audio_cache_dir_str = get_env_str("TTS_CACHE_DIR", "./data/tts/cache")
         
         return cls(
             enabled=get_env_bool("TTS_ENABLED", True),
-            engine=get_env_str("TTS_ENGINE", "piper"),
+            default_engine=get_env_str("TTS_DEFAULT_ENGINE", "piper"),
             default_voice=get_env_str("TTS_DEFAULT_VOICE", "en_US-lessac-medium"),
             model_cache_dir=Path(cache_dir_str),
             sample_rate=get_env_int("TTS_SAMPLE_RATE", 22050),
@@ -523,12 +534,18 @@ class TTSConfig(BaseConfig):
             device=get_env_str("TTS_DEVICE", "auto"),
             auto_download_voices=get_env_bool("TTS_AUTO_DOWNLOAD_VOICES", True),
             max_cached_voices=get_env_int("TTS_MAX_CACHED_VOICES", 3),
+            enable_cache=get_env_bool("TTS_ENABLE_CACHE", True),
+            cache_dir=Path(audio_cache_dir_str),
+            cache_max_entries=get_env_int("TTS_CACHE_MAX_ENTRIES", 1000),
+            cache_max_size_mb=get_env_int("TTS_CACHE_MAX_SIZE_MB", 500),
+            enable_queue=get_env_bool("TTS_ENABLE_QUEUE", True),
+            queue_max_concurrent=get_env_int("TTS_QUEUE_MAX_CONCURRENT", 1),
         )
     
     def validate(self) -> None:
         """Validate TTS configuration values."""
-        valid_engines = ["piper"]
-        if self.engine not in valid_engines:
+        valid_engines = ["piper", "qwen3"]
+        if self.default_engine not in valid_engines:
             raise ValueError(f"TTS engine must be one of {valid_engines}")
         
         if self.default_speed <= 0 or self.default_speed > 3.0:
@@ -537,6 +554,98 @@ class TTSConfig(BaseConfig):
         valid_formats = ["wav", "mp3"]
         if self.audio_format not in valid_formats:
             raise ValueError(f"Audio format must be one of {valid_formats}")
+        
+        if self.cache_max_entries <= 0:
+            raise ValueError(f"Cache max entries must be positive, got {self.cache_max_entries}")
+        
+        if self.cache_max_size_mb <= 0:
+            raise ValueError(f"Cache max size must be positive, got {self.cache_max_size_mb}")
+        
+        if self.queue_max_concurrent <= 0:
+            raise ValueError(f"Queue max concurrent must be positive, got {self.queue_max_concurrent}")
+        
+        if self.max_cached_voices <= 0:
+            raise ValueError(f"max_cached_voices must be positive, got {self.max_cached_voices}")
+
+
+@dataclass
+class Qwen3Config(BaseConfig):
+    """Qwen3-TTS configuration for voice cloning"""
+    
+    enabled: bool = False  # Disabled by default (requires GPU)
+    
+    # Model settings
+    model_name: str = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"  # Official model name
+    model_cache_dir: Path = field(default_factory=lambda: Path.home() / ".cache" / "qwen3-tts")
+    model_precision: str = "float16"  # "float16" or "float32"
+    
+    # Device settings
+    device: str = "auto"  # "auto", "cuda", "cpu"
+    min_vram_gb: float = 4.0  # Minimum VRAM required (GB)
+    
+    # Voice cloning settings
+    min_audio_duration: float = 3.0  # Minimum seconds for voice sample
+    max_audio_duration: float = 15.0  # Maximum seconds
+    voice_sample_rate: int = 16000  # Recommended by Qwen3-TTS
+    
+    # Synthesis settings
+    default_language: str = "en"  # "en", "zh", "ja", "ko", etc.
+    max_text_length: int = 1000  # Characters per synthesis
+    batch_size: int = 1  # Future: batch processing
+    
+    # Performance settings
+    auto_unload: bool = True  # Unload model after idle time
+    unload_timeout_seconds: int = 300  # 5 minutes idle timeout
+    
+    # Cache settings
+    cache_embeddings: bool = True  # Cache voice embeddings
+    max_cached_voices: int = 10  # Maximum voices in memory
+    
+    @classmethod
+    def from_env(cls) -> "Qwen3Config":
+        """Load Qwen3 configuration from environment variables."""
+        cache_dir_str = get_env_str("QWEN3_MODEL_CACHE_DIR", str(Path.home() / ".cache" / "qwen3-tts"))
+        
+        return cls(
+            enabled=get_env_bool("QWEN3_ENABLED", False),
+            model_name=get_env_str("QWEN3_MODEL_NAME", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"),
+            model_cache_dir=Path(cache_dir_str),
+            model_precision=get_env_str("QWEN3_MODEL_PRECISION", "float16"),
+            device=get_env_str("QWEN3_DEVICE", "auto"),
+            min_vram_gb=get_env_float("QWEN3_MIN_VRAM_GB", 4.0),
+            min_audio_duration=get_env_float("QWEN3_MIN_AUDIO_DURATION", 3.0),
+            max_audio_duration=get_env_float("QWEN3_MAX_AUDIO_DURATION", 15.0),
+            voice_sample_rate=get_env_int("QWEN3_VOICE_SAMPLE_RATE", 16000),
+            default_language=get_env_str("QWEN3_DEFAULT_LANGUAGE", "en"),
+            max_text_length=get_env_int("QWEN3_MAX_TEXT_LENGTH", 1000),
+            batch_size=get_env_int("QWEN3_BATCH_SIZE", 1),
+            auto_unload=get_env_bool("QWEN3_AUTO_UNLOAD", True),
+            unload_timeout_seconds=get_env_int("QWEN3_UNLOAD_TIMEOUT", 300),
+            cache_embeddings=get_env_bool("QWEN3_CACHE_EMBEDDINGS", True),
+            max_cached_voices=get_env_int("QWEN3_MAX_CACHED_VOICES", 10),
+        )
+    
+    def validate(self) -> None:
+        """Validate Qwen3 configuration values."""
+        valid_precisions = ["float16", "float32"]
+        if self.model_precision not in valid_precisions:
+            raise ValueError(f"model_precision must be one of {valid_precisions}")
+        
+        valid_devices = ["auto", "cuda", "cpu"]
+        if self.device not in valid_devices:
+            raise ValueError(f"device must be one of {valid_devices}")
+        
+        if self.min_audio_duration <= 0:
+            raise ValueError(f"min_audio_duration must be positive, got {self.min_audio_duration}")
+        
+        if self.max_audio_duration <= self.min_audio_duration:
+            raise ValueError(f"max_audio_duration must be greater than min_audio_duration")
+        
+        if self.max_text_length <= 0:
+            raise ValueError(f"max_text_length must be positive, got {self.max_text_length}")
+        
+        if self.unload_timeout_seconds < 0:
+            raise ValueError(f"unload_timeout_seconds must be non-negative, got {self.unload_timeout_seconds}")
         
         if self.max_cached_voices <= 0:
             raise ValueError(f"max_cached_voices must be positive, got {self.max_cached_voices}")
@@ -785,6 +894,7 @@ class OrionConfig(BaseConfig):
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     whisper: WhisperConfig = field(default_factory=WhisperConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
+    qwen3: Qwen3Config = field(default_factory=Qwen3Config)
     version: str = "1.0.0"
 
     @classmethod
@@ -798,6 +908,7 @@ class OrionConfig(BaseConfig):
             logging=LoggingConfig.from_env(),
             whisper=WhisperConfig.from_env(),
             tts=TTSConfig.from_env(),
+            qwen3=Qwen3Config.from_env(),
             version=get_env_str("ORION_VERSION", "1.0.0"),
         )
         config.validate()
@@ -844,6 +955,11 @@ class OrionConfig(BaseConfig):
         except Exception as e:
             log_error(f"TTS config validation failed: {e}")
             raise
+        try:
+            self.qwen3.validate()
+        except Exception as e:
+            log_error(f"Qwen3 config validation failed: {e}")
+            raise
         
 
 def get_config(from_env: bool = False) -> OrionConfig:
@@ -884,6 +1000,34 @@ def get_config(from_env: bool = False) -> OrionConfig:
             ORION_SYSTEM_REQUIRE_OLLAMA=true
             ORION_GPU_ENABLED=true
             ORION_LOGGING_LEVEL="info"
+        
+        TTS (Piper) Configuration:
+            TTS_ENABLED=true
+            TTS_DEFAULT_ENGINE="piper"
+            TTS_DEFAULT_VOICE="en_US-lessac-medium"
+            TTS_MODEL_CACHE_DIR="~/.cache/piper"
+            TTS_SAMPLE_RATE=22050
+            TTS_DEFAULT_SPEED=1.0
+            TTS_AUDIO_FORMAT="wav"
+            TTS_USE_GPU=false
+            TTS_DEVICE="auto"
+            TTS_AUTO_DOWNLOAD_VOICES=true
+            TTS_MAX_CACHED_VOICES=3
+            TTS_ENABLE_CACHE=true
+            TTS_CACHE_DIR="./data/tts/cache"
+            TTS_CACHE_MAX_ENTRIES=1000
+            TTS_CACHE_MAX_SIZE_MB=500
+            TTS_ENABLE_QUEUE=true
+            TTS_QUEUE_MAX_CONCURRENT=1
+        
+        Qwen3-TTS Configuration:
+            QWEN3_ENABLED=false
+            QWEN3_MODEL_NAME="Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+            QWEN3_DEVICE="auto"
+            QWEN3_MODEL_PRECISION="float16"
+            QWEN3_MIN_VRAM_GB=4.0
+            QWEN3_AUTO_UNLOAD=true
+            QWEN3_UNLOAD_TIMEOUT=300
     """
     if from_env:
         return OrionConfig.from_env()

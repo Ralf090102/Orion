@@ -24,11 +24,11 @@ _config: Optional[OrionConfig] = None
 _session_manager: Optional[SessionManager] = None
 _retriever: Optional[OrionRetriever] = None
 _generator: Optional[AnswerGenerator] = None
-_tts_manager: Optional["TTSManager"] = None  # Forward reference for lazy import
+_tts_manager: Optional["UnifiedTTSManager"] = None  # Forward reference for lazy import
 
 if TYPE_CHECKING:
     # Import for type checkers only (avoids runtime import side-effects)
-    from src.utilities.tts_manager import TTSManager
+    from utilities.tts.tts_manager import UnifiedTTSManager
 
 
 # ========== INITIALIZATION & CLEANUP ==========
@@ -267,12 +267,12 @@ def get_database_stats() -> dict:
     return session_manager.get_database_stats()
 
 
-def get_tts_manager() -> "TTSManager":
+def get_tts_manager() -> "UnifiedTTSManager":
     """
-    Dependency: Get TTS manager instance.
+    Dependency: Get UnifiedTTSManager instance.
     
     Returns:
-        TTSManager instance
+        UnifiedTTSManager instance
         
     Raises:
         HTTPException: If TTS not enabled or initialization fails
@@ -290,12 +290,12 @@ def get_tts_manager() -> "TTSManager":
         
         try:
             # Lazy import to avoid dependency issues
-            from src.utilities.tts_manager import TTSManager
+            from utilities.tts.tts_manager import UnifiedTTSManager
             
-            _tts_manager = TTSManager(config)
+            _tts_manager = UnifiedTTSManager(config)
             logger.info("✓ TTS manager lazy-loaded successfully")
         except ImportError as e:
-            logger.error(f"Failed to import TTSManager: {e}")
+            logger.error(f"Failed to import UnifiedTTSManager: {e}")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="TTS service unavailable. Piper TTS may not be installed.",

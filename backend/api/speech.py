@@ -331,7 +331,7 @@ async def speech_health(
     try:
         tts_manager = get_tts_manager()
         tts_available = True
-        tts_engine = config.tts.engine
+        tts_engine = config.tts.default_engine
     except Exception as e:
         logger.debug(f"TTS not available: {e}")
         tts_available = False
@@ -529,7 +529,7 @@ async def get_tts_config(
         message="TTS configuration retrieved successfully",
         config={
             "enabled": config.tts.enabled,
-            "engine": config.tts.engine,
+            "engine": config.tts.default_engine,
             "default_voice": config.tts.default_voice,
             "audio_format": config.tts.audio_format,
             "default_speed": config.tts.default_speed,
@@ -590,7 +590,7 @@ async def update_tts_config(
             message=message,
             config={
                 "enabled": config.tts.enabled,
-                "engine": config.tts.engine,
+                "engine": config.tts.default_engine,
                 "default_voice": config.tts.default_voice,
                 "audio_format": config.tts.audio_format,
                 "default_speed": config.tts.default_speed,
@@ -665,7 +665,7 @@ async def update_tts_voice(
             message=f"Default voice changed to '{voice_update.voice_id}'",
             config={
                 "enabled": config.tts.enabled,
-                "engine": config.tts.engine,
+                "engine": config.tts.default_engine,
                 "default_voice": config.tts.default_voice,
                 "audio_format": config.tts.audio_format,
                 "default_speed": config.tts.default_speed,
