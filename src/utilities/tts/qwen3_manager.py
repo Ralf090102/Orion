@@ -151,17 +151,16 @@ class Qwen3Manager:
             # Determine dtype
             dtype = torch.float16 if self.qwen3_config.model_precision == "float16" else torch.float32
             
-            # Load model (don't pass device here, will move afterwards)
+            # Load model with device_map
+            # Note: Qwen3TTSModel is a wrapper, not a PyTorch model, so no .to() method
             self.model = Qwen3TTSModel.from_pretrained(
                 self.qwen3_config.model_name,
+                device_map=self.device if self.device != "cpu" else None,
                 dtype=dtype,
                 attn_implementation=attn_impl,
             )
             
-            # Move model to device after loading
-            if self.device != "cpu":
-                logger.info(f"Moving model to {self.device}...")
-                self.model = self.model.to(self.device)
+            logger.info(f"Model loaded on device: {self.model.device}")
             
             self.model_loaded_at = time.time()
             self.last_used_at = time.time()
@@ -221,17 +220,20 @@ class Qwen3Manager:
         self,
         voice_id: str,
         audio_path: Path,
-        sample_rate: int = 16000,
+        ref_text: Optional[str] = None,
     ) -> VoiceEmbedding:
-        """Extract voice embedding from audio sample for cloning.
+        """Store voice audio reference for cloning.
+        
+        Note: Qwen3-TTS handles embedding extraction internally during synthesis.
+        This method just stores the audio file path and metadata for later use.
         
         Args:
             voice_id: Unique identifier for this voice
             audio_path: Path to audio file (3-15 seconds recommended)
-            sample_rate: Target sample rate (16000 recommended)
+            ref_text: Optional reference text transcript of the audio
         
         Returns:
-            VoiceEmbedding object
+            VoiceEmbedding object with audio path stored
         
         Raises:
             ValueError: If audio duration is invalid
@@ -240,15 +242,11 @@ class Qwen3Manager:
         if not audio_path.exists():
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
         
-        logger.info(f"Extracting voice embedding: {voice_id} from {audio_path.name}")
+        logger.info(f"Storing voice reference: {voice_id} from {audio_path.name}")
         
         try:
-            # Load audio
+            # Load audio to validate and get metadata
             audio_data, sr = sf.read(str(audio_path))
-            
-            # Resample if needed (TODO: use librosa.resample for better quality)
-            if sr != sample_rate:
-                logger.warning(f"Audio sample rate {sr}Hz != {sample_rate}Hz (resampling not implemented)")
             
             # Validate duration
             duration = len(audio_data) / sr
@@ -261,20 +259,24 @@ class Qwen3Manager:
                     f"Audio too long: {duration:.1f}s > {self.qwen3_config.max_audio_duration}s"
                 )
             
-            # For Qwen3-TTS Base model, we store the audio data directly
-            # The model uses it as a reference during synthesis
+            # Store the audio file path (Qwen3-TTS will load it during synthesis)
+            # We store the path as a string in the embedding field
             embedding = VoiceEmbedding(
                 voice_id=voice_id,
-                embedding=audio_data,
+                embedding=np.array([str(audio_path)], dtype=object),  # Store path
                 sample_rate=sr,
                 duration=duration,
                 created_at=time.time(),
             )
             
+            # Store reference text if provided
+            if ref_text:
+                embedding.ref_text = ref_text  # Add dynamic attribute
+            
             # Cache embedding
             if self.qwen3_config.cache_embeddings:
                 self.voice_embeddings[voice_id] = embedding
-                logger.info(f"✓ Voice embedding cached: {voice_id} ({duration:.1f}s)")
+                logger.info(f"✓ Voice reference cached: {voice_id} ({duration:.1f}s)")
                 
                 # Evict old embeddings if cache is full
                 if len(self.voice_embeddings) > self.qwen3_config.max_cached_voices:
@@ -285,7 +287,7 @@ class Qwen3Manager:
             return embedding
             
         except Exception as e:
-            logger.error(f"Failed to extract voice embedding: {e}")
+            logger.error(f"Failed to store voice reference: {e}")
             raise
     
     def synthesize(
@@ -326,47 +328,35 @@ class Qwen3Manager:
         if self.model is None:
             self.load_model()
         
-        # Get voice embedding
+        # Get voice embedding (required for Base model)
         embedding = self.voice_embeddings.get(voice_id) if voice_id else None
         
-        logger.info(f"Synthesizing: {len(text)} chars, voice={voice_id or 'default'}, lang={language}")
+        if embedding is None:
+            raise ValueError(
+                f"Qwen3-TTS Base model requires a voice reference for synthesis. "
+                f"Use extract_voice_embedding() to create a voice first, or specify a valid voice_id. "
+                f"Available voices: {list(self.voice_embeddings.keys())}"
+            )
+        
+        logger.info(f"Synthesizing: {len(text)} chars, voice={voice_id}, lang={language}")
         start_time = time.time()
         
         try:
-            # Synthesize with Qwen3-TTS
-            # Note: The exact API depends on which model variant is used
-            # Base model: requires voice reference audio
-            # CustomVoice model: uses pre-built speaker names
-            # VoiceDesign model: uses text descriptions
+            # Get audio file path and reference text from embedding
+            ref_audio_path = str(embedding.embedding[0])
+            ref_text = getattr(embedding, 'ref_text', None)
             
-            if embedding is not None:
-                # Voice cloning mode (Base model)
-                # Save reference audio to temp file for model
-                import tempfile
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
-                    sf.write(tmp_file.name, embedding.embedding, embedding.sample_rate)
-                    ref_audio_path = tmp_file.name
-                
-                try:
-                    # Call Qwen3-TTS with reference audio
-                    # API may vary - check official docs for exact method
-                    wavs, sr = self.model.generate(
-                        text=text,
-                        language=language,
-                        reference_audio=ref_audio_path,
-                        # speed=speed,  # May not be supported directly
-                    )
-                finally:
-                    # Clean up temp file
-                    Path(ref_audio_path).unlink(missing_ok=True)
-            else:
-                # No voice cloning (use default voice)
-                wavs, sr = self.model.generate(
-                    text=text,
-                    language=language,
-                )
+            # Call generate_voice_clone with reference audio
+            # x_vector_only_mode=False enables ICL mode (better quality with ref_text)
+            wavs, sr = self.model.generate_voice_clone(
+                text=text,
+                language=language,
+                ref_audio=ref_audio_path,
+                ref_text=ref_text,
+                x_vector_only_mode=(ref_text is None),  # Use ICL if ref_text provided
+            )
             
-            # Extract audio (assume first result)
+            # Extract audio (list of numpy arrays)
             audio = wavs[0] if isinstance(wavs, list) else wavs
             
             # Apply speed adjustment if needed

@@ -18,6 +18,7 @@ import os
 import time
 import tempfile
 import numpy as np
+import soundfile as sf
 from pathlib import Path
 
 # Add project root to path
@@ -58,14 +59,37 @@ def test_1_qwen3_manager():
         load_time = time.time() - start
         print(f"✓ Model loaded in {load_time:.1f}s")
         
-        # Synthesize test text (without voice cloning - using default voice)
+        # Create a quick voice reference (needed for Base model)
+        print("\nCreating test voice reference...")
+        import tempfile
+        
+        # Create synthetic audio sample (5s)
+        sample_rate = 16000
+        duration = 5.0
+        audio_data = np.random.randn(int(sample_rate * duration)) * 0.1
+        
+        # Save to temp file
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        
+        sf.write(str(tmp_path), audio_data, sample_rate)
+        
+        # Extract voice embedding
+        embedding = manager.extract_voice_embedding(
+            voice_id="test_voice_1",
+            audio_path=tmp_path,
+            ref_text="This is a test audio sample.",
+        )
+        print(f"✓ Voice reference created: {embedding.voice_id}")
+        
+        # Synthesize test text (with voice cloning)
         print("\nSynthesizing test text: 'Hello world, this is a test.'")
         text = "Hello world, this is a test."
         
         start = time.time()
         audio_array, sample_rate = manager.synthesize(
             text=text,
-            voice_id=None,  # No cloned voice yet
+            voice_id="test_voice_1",  # Use the cloned voice
             speed=1.0,
             language="en",
         )
@@ -78,6 +102,9 @@ def test_1_qwen3_manager():
         print(f"  - Real-time factor: {rtf:.2f}x")
         print(f"  - Sample rate: {sample_rate} Hz")
         print(f"  - Audio shape: {audio_array.shape}")
+        
+        # Cleanup
+        tmp_path.unlink(missing_ok=True)
         
         # Unload model
         manager.unload_model()
@@ -102,7 +129,6 @@ def test_2_voice_cloning():
     try:
         from src.utilities.tts.qwen3_manager import Qwen3Manager
         from src.utilities.config import get_config
-        import soundfile as sf
         
         # Create synthetic audio sample (5 seconds of noise - just for testing)
         print("\nCreating synthetic audio sample (5s)...")
@@ -128,7 +154,8 @@ def test_2_voice_cloning():
         start = time.time()
         embedding = manager.extract_voice_embedding(
             voice_id="test_voice",
-            audio_path=tmp_path,
+            audio_path=Path(tmp_path),
+            ref_text="This is test audio for voice cloning.",  # Reference text for ICL mode
         )
         extract_time = time.time() - start
         
