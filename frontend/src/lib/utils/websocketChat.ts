@@ -26,7 +26,7 @@ export class WebSocketChat {
 	}
 
 	connect() {
-		const wsUrl = this.options.backendUrl || import.meta.env.PUBLIC_BACKEND_WS || 'ws://localhost:8000';
+		const wsUrl = this.options.backendUrl || import.meta.env.VITE_BACKEND_WS || 'ws://localhost:8000';
 		const url = `${wsUrl}/ws/chat/${this.options.sessionId}`;
 
 		// Reset reconnection flag when explicitly connecting

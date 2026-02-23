@@ -20,6 +20,7 @@
 	let { data = $bindable() } = $props();
 
 	const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+	const BACKEND_WS = import.meta.env.VITE_BACKEND_WS || BACKEND_URL.replace(/^http/, 'ws');
 	const settings = useSettingsStore();
 	
 	let pending = $state(false);
@@ -82,6 +83,7 @@
 
 		wsChat = new WebSocketChat({
 			sessionId: page.params.id,
+			backendUrl: BACKEND_WS,
 			onMessage: (content, done) => {
 				if (done) {
 					$loading = false;
