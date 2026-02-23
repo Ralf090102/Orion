@@ -542,3 +542,40 @@ class TTSTaskStatus(BaseModel):
                 "error": None,
             }
         }
+
+
+# ========== TTS ENGINE SELECTION MODELS ==========
+class EngineSelectRequest(BaseModel):
+    """Request model for switching TTS engine."""
+    
+    engine: str = Field(
+        ...,
+        description="TTS engine to activate: piper or qwen3",
+        pattern="^(piper|qwen3)$",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "engine": "qwen3",
+            }
+        }
+
+
+class EngineSelectResponse(BaseModel):
+    """Response model for engine switch operation."""
+    
+    status: str = Field(..., description="Operation status")
+    message: str = Field(..., description="Status message")
+    active_engine: str = Field(..., description="Currently active TTS engine")
+    previous_engine: str = Field(..., description="Previously active engine")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "message": "TTS engine switched to qwen3",
+                "active_engine": "qwen3",
+                "previous_engine": "piper",
+            }
+        }

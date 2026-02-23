@@ -20,6 +20,8 @@ from backend.dependencies import get_config_dependency, get_tts_manager, reset_t
 from backend.models.speech import (
     ClonedVoiceInfo,
     ClonedVoicesListResponse,
+    EngineSelectRequest,
+    EngineSelectResponse,
     SpeechHealthResponse,
     TranscriptionResponse,
     TTSAsyncRequest,
@@ -379,11 +381,104 @@ async def speech_health(
     )
 
 
+# ========== TTS ENGINE SELECTION ENDPOINT ==========
+@router.patch(
+    "/engine",
+    response_model=EngineSelectResponse,
+    summary="Switch TTS engine",
+    description="Change active TTS engine between Piper (fast) and Qwen3 (voice cloning)",
+)
+async def switch_tts_engine(
+    request: EngineSelectRequest,
+    config: OrionConfig = Depends(get_config_dependency),
+) -> EngineSelectResponse:
+    """
+    Switch between Piper and Qwen3 TTS engines.
+    
+    - **piper**: Fast synthesis, pre-built voices, CPU-friendly
+    - **qwen3**: Voice cloning, slower, requires GPU
+    
+    Args:
+        request: Engine selection request
+        config: Configuration dependency (injected)
+    
+    Returns:
+        EngineSelectResponse with switch confirmation
+    
+    Raises:
+        HTTPException 400: Invalid engine or Qwen3 not available
+    
+    Example:
+        ```javascript
+        // Switch to Qwen3 for voice cloning
+        await fetch('/api/speech/engine', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ engine: 'qwen3' })
+        });
+        
+        // Switch back to Piper for speed
+        await fetch('/api/speech/engine', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ engine: 'piper' })
+        });
+        ```
+    """
+    try:
+        previous_engine = config.tts.default_engine
+        
+        # Validate engine choice
+        if request.engine == "qwen3":
+            # Check if Qwen3 is available
+            if not config.qwen3.enabled:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Qwen3-TTS is not enabled. Set QWEN3_ENABLED=true in config."
+                )
+            
+            tts_manager = get_tts_manager()
+            if not hasattr(tts_manager, 'qwen3_manager'):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Qwen3-TTS is not available in this TTS manager instance."
+                )
+            
+            # Preload Qwen3 model for voice cloning (may take 7-13 seconds on GPU)
+            logger.info("Preloading Qwen3 model for voice cloning...")
+            try:
+                tts_manager.qwen3_manager.load_model()
+                logger.info("Qwen3 model loaded successfully")
+            except Exception as e:
+                logger.warning(f"Failed to preload Qwen3 model (will lazy load later): {e}")
+        
+        # Switch engine
+        config.tts.default_engine = request.engine
+        
+        logger.info(f"TTS engine switched: {previous_engine} → {request.engine}")
+        
+        return EngineSelectResponse(
+            status="success",
+            message=f"TTS engine switched to {request.engine}",
+            active_engine=request.engine,
+            previous_engine=previous_engine,
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to switch TTS engine: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Engine switch failed: {str(e)}"
+        )
+
+
 # ========== TEXT-TO-SPEECH (TTS) ENDPOINTS ==========
 @router.post(
     "/synthesize",
     summary="Synthesize speech from text",
-    description="Convert text to speech audio using Piper TTS",
+    description="Convert text to speech audio using active TTS engine (Piper or Qwen3)",
 )
 async def synthesize_speech(
     request: TTSRequest,
@@ -460,25 +555,38 @@ async def synthesize_speech(
     "/voices",
     response_model=VoiceListResponse,
     summary="List available TTS voices",
-    description="Get list of all available Piper TTS voices",
+    description="Get list of all available Piper TTS voices (Piper engine only)",
 )
 async def list_voices(
     language: Optional[str] = None,
+    config: OrionConfig = Depends(get_config_dependency),
 ) -> VoiceListResponse:
     """
-    List available TTS voices, optionally filtered by language.
+    List available Piper TTS voices, optionally filtered by language.
+    
+    **Note**: This endpoint is only available when Piper engine is active.
+    For Qwen3 cloned voices, use GET /cloned-voices instead.
     
     Args:
         language: Optional language filter (e.g., 'en_US')
+        config: Configuration dependency (injected)
     
     Returns:
         VoiceListResponse with voice list
     
     Raises:
+        HTTPException 400: Wrong engine active (use Piper)
         HTTPException 503: TTS service unavailable
         HTTPException 500: Failed to list voices
     """
     try:
+        # Guard: Piper-only endpoint
+        if config.tts.default_engine != "piper":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Voice listing is only available for Piper TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
+            )
+        
         tts_manager = get_tts_manager()
         voices = tts_manager.list_voices(language_filter=language)
         
@@ -706,25 +814,37 @@ async def update_tts_voice(
 @router.post(
     "/preview-voice",
     summary="Preview a TTS voice",
-    description="Generate a short audio sample with the specified voice",
+    description="Generate a short audio sample with the specified Piper voice (Piper engine only)",
 )
 async def preview_voice(
     preview: TTSPreviewRequest,
+    config: OrionConfig = Depends(get_config_dependency),
 ) -> Response:
     """
-    Preview a voice with sample text.
+    Preview a Piper voice with sample text.
+    
+    **Note**: This endpoint is only available when Piper engine is active.
     
     Args:
         preview: Preview request with voice ID and optional text
+        config: Configuration dependency (injected)
     
     Returns:
         Response with audio bytes (WAV format)
     
     Raises:
+        HTTPException 400: Wrong engine active (use Piper)
         HTTPException 404: Voice not found
         HTTPException 500: Preview generation failed
     """
     try:
+        # Guard: Piper-only endpoint
+        if config.tts.default_engine != "piper":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Voice preview is only available for Piper TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
+            )
+        
         tts_manager = get_tts_manager()
         
         # Synthesize preview
@@ -759,7 +879,7 @@ async def preview_voice(
     "/clone-voice",
     response_model=VoiceCloneResponse,
     summary="Clone a voice from audio sample",
-    description="Extract voice embedding from uploaded audio for Qwen3-TTS cloning",
+    description="Extract voice embedding from uploaded audio for Qwen3-TTS cloning (Qwen3 engine only)",
 )
 async def clone_voice(
     voice_name: str = Form(..., description="Unique name for this voice"),
@@ -774,6 +894,8 @@ async def clone_voice(
     for use with Qwen3-TTS synthesis. Optionally provide reference text for
     better quality (ICL mode).
     
+    **Note**: This endpoint is only available when Qwen3 engine is active.
+    
     Args:
         voice_name: Unique identifier for this voice
         ref_text: Optional transcript of the audio
@@ -784,11 +906,18 @@ async def clone_voice(
         VoiceCloneResponse with created voice info
     
     Raises:
-        HTTPException 400: Invalid audio or voice name already exists
+        HTTPException 400: Invalid audio, voice name exists, or wrong engine
         HTTPException 503: Qwen3-TTS not available
         HTTPException 500: Voice cloning failed
     """
     try:
+        # Guard: Qwen3-only endpoint
+        if config.tts.default_engine != "qwen3":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Voice cloning requires Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
+            )
+        
         # Check if Qwen3 is enabled
         if not config.qwen3.enabled:
             raise HTTPException(
@@ -847,19 +976,34 @@ async def clone_voice(
     "/cloned-voices",
     response_model=ClonedVoicesListResponse,
     summary="List cloned voices",
-    description="Get list of all voices cloned with Qwen3-TTS",
+    description="Get list of all voices cloned with Qwen3-TTS (Qwen3 engine only)",
 )
-async def list_cloned_voices() -> ClonedVoicesListResponse:
+async def list_cloned_voices(
+    config: OrionConfig = Depends(get_config_dependency),
+) -> ClonedVoicesListResponse:
     """
     List all cloned voices available for Qwen3-TTS synthesis.
+    
+    **Note**: This endpoint is only available when Qwen3 engine is active.
+    
+    Args:
+        config: Configuration dependency (injected)
     
     Returns:
         ClonedVoicesListResponse with voice list
     
     Raises:
+        HTTPException 400: Wrong engine active (use Qwen3)
         HTTPException 503: Qwen3-TTS not available
     """
     try:
+        # Guard: Qwen3-only endpoint
+        if config.tts.default_engine != "qwen3":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cloned voice listing requires Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
+            )
+        
         tts_manager = get_tts_manager()
         
         if not hasattr(tts_manager, 'qwen3_manager'):
@@ -899,23 +1043,36 @@ async def list_cloned_voices() -> ClonedVoicesListResponse:
 @router.delete(
     "/cloned-voices/{voice_id}",
     summary="Delete a cloned voice",
-    description="Remove a cloned voice from cache",
+    description="Remove a cloned voice from cache (Qwen3 engine only)",
 )
-async def delete_cloned_voice(voice_id: str):
+async def delete_cloned_voice(
+    voice_id: str,
+    config: OrionConfig = Depends(get_config_dependency),
+):
     """
     Delete a cloned voice.
     
+    **Note**: This endpoint is only available when Qwen3 engine is active.
+    
     Args:
         voice_id: Voice ID to delete
+        config: Configuration dependency (injected)
     
     Returns:
         Success message
     
     Raises:
+        HTTPException 400: Wrong engine active (use Qwen3)
         HTTPException 404: Voice not found
         HTTPException 503: Qwen3-TTS not available
     """
     try:
+        # Guard: Qwen3-only endpoint
+        if config.tts.default_engine != "qwen3":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cloned voice deletion requires Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
+            )
         tts_manager = get_tts_manager()
         
         if not hasattr(tts_manager, 'qwen3_manager'):
@@ -948,7 +1105,7 @@ async def delete_cloned_voice(voice_id: str):
 @router.post(
     "/synthesize-qwen3",
     summary="Synthesize speech with cloned voice",
-    description="Use Qwen3-TTS to synthesize speech with a cloned voice (may be slow)",
+    description="Use Qwen3-TTS to synthesize speech with a cloned voice (Qwen3 engine only, may be slow)",
 )
 async def synthesize_qwen3(
     request: TTSAsyncRequest,
@@ -960,6 +1117,8 @@ async def synthesize_qwen3(
     This endpoint performs synchronous synthesis (blocks until complete).
     For long text, consider using async synthesis endpoint instead.
     
+    **Note**: This endpoint is only available when Qwen3 engine is active.
+    
     Args:
         request: TTS request with text and cloned voice_id
         config: Configuration dependency (injected)
@@ -968,11 +1127,17 @@ async def synthesize_qwen3(
         Response with audio bytes (WAV format)
     
     Raises:
-        HTTPException 400: Invalid text or voice_id
+        HTTPException 400: Invalid text, voice_id, or wrong engine
         HTTPException 503: Qwen3-TTS not available
         HTTPException 500: Synthesis failed
     """
     try:
+        # Guard: Qwen3-only endpoint
+        if config.tts.default_engine != "qwen3":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Qwen3 synthesis requires Qwen3-TTS engine. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
+            )
         if not config.qwen3.enabled:
             raise HTTPException(
                 status_code=503,
@@ -1026,16 +1191,32 @@ async def synthesize_qwen3(
 @router.get(
     "/qwen3/stats",
     summary="Get Qwen3-TTS statistics",
-    description="Get synthesis statistics and cache info for Qwen3-TTS",
+    description="Get synthesis statistics and cache info for Qwen3-TTS (Qwen3 engine only)",
 )
-async def get_qwen3_stats():
+async def get_qwen3_stats(
+    config: OrionConfig = Depends(get_config_dependency),
+):
     """
     Get Qwen3-TTS performance statistics.
     
+    **Note**: This endpoint is only available when Qwen3 engine is active.
+    
+    Args:
+        config: Configuration dependency (injected)
+    
     Returns:
         Statistics dictionary
+    
+    Raises:
+        HTTPException 400: Wrong engine active (use Qwen3)
     """
     try:
+        # Guard: Qwen3-only endpoint
+        if config.tts.default_engine != "qwen3":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Qwen3 statistics require Qwen3-TTS engine. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
+            )
         tts_manager = get_tts_manager()
         
         if not hasattr(tts_manager, 'qwen3_manager'):
