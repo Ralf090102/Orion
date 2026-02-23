@@ -80,6 +80,11 @@ class Qwen3Manager:
         # Voice cache
         self.voice_embeddings: Dict[str, VoiceEmbedding] = {}
         
+        # Storage directory for cloned voice audio samples
+        self.voices_dir = Path(__file__).parent.parent.parent.parent / "data" / "tts" / "cloned_voices"
+        self.voices_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Cloned voices directory: {self.voices_dir}")
+        
         # Stats
         self.synthesis_count = 0
         self.total_synthesis_time = 0.0
@@ -227,11 +232,11 @@ class Qwen3Manager:
         """Store voice audio reference for cloning.
         
         Note: Qwen3-TTS handles embedding extraction internally during synthesis.
-        This method just stores the audio file path and metadata for later use.
+        This method copies the audio file to permanent storage and saves metadata.
         
         Args:
             voice_id: Unique identifier for this voice
-            audio_path: Path to audio file (3-15 seconds recommended)
+            audio_path: Path to audio file (3-15 seconds recommended, can be temp file)
             ref_text: Optional reference text transcript of the audio
         
         Returns:
@@ -261,11 +266,19 @@ class Qwen3Manager:
                     f"Audio too long: {duration:.1f}s > {self.qwen3_config.max_audio_duration}s"
                 )
             
-            # Store the audio file path (Qwen3-TTS will load it during synthesis)
+            # Copy audio to permanent storage (in case source is a temp file)
+            # Use voice_id as filename to make it easy to find
+            permanent_path = self.voices_dir / f"{voice_id}.wav"
+            
+            # Save audio to permanent location
+            sf.write(str(permanent_path), audio_data, sr)
+            logger.info(f"Saved voice audio to: {permanent_path}")
+            
+            # Store the permanent audio file path (Qwen3-TTS will load it during synthesis)
             # We store the path as a string in the embedding field
             embedding = VoiceEmbedding(
                 voice_id=voice_id,
-                embedding=np.array([str(audio_path)], dtype=object),  # Store path
+                embedding=np.array([str(permanent_path)], dtype=object),  # Store permanent path
                 sample_rate=sr,
                 duration=duration,
                 created_at=time.time(),
@@ -397,7 +410,7 @@ class Qwen3Manager:
         return self.voice_embeddings.copy()
     
     def delete_voice(self, voice_id: str) -> bool:
-        """Delete a cloned voice from cache.
+        """Delete a cloned voice from cache and storage.
         
         Args:
             voice_id: Voice identifier to delete
@@ -406,7 +419,19 @@ class Qwen3Manager:
             True if deleted, False if not found
         """
         if voice_id in self.voice_embeddings:
+            # Delete from cache
+            embedding = self.voice_embeddings[voice_id]
             del self.voice_embeddings[voice_id]
+            
+            # Delete audio file from storage
+            try:
+                audio_path = Path(str(embedding.embedding[0]))
+                if audio_path.exists():
+                    audio_path.unlink()
+                    logger.info(f"Deleted voice audio file: {audio_path}")
+            except Exception as e:
+                logger.warning(f"Failed to delete audio file for {voice_id}: {e}")
+            
             logger.info(f"Deleted voice: {voice_id}")
             return True
         return False

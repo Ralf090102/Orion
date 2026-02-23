@@ -979,6 +979,7 @@ async def clone_voice(
             )
         
         # Save uploaded audio to temp file
+        # Note: extract_voice_embedding will copy it to permanent storage
         with tempfile.NamedTemporaryFile(suffix=Path(audio.filename or "audio.wav").suffix, delete=False) as tmp:
             tmp_path = Path(tmp.name)
             audio_bytes = await audio.read()
@@ -996,6 +997,7 @@ async def clone_voice(
                     detail="Qwen3-TTS manager failed to initialize. Check logs for details. Ensure qwen-tts package is installed."
                 )
             
+            # This will copy the temp file to permanent storage
             embedding = qwen3_manager.extract_voice_embedding(
                 voice_id=voice_name,
                 audio_path=tmp_path,
@@ -1010,7 +1012,7 @@ async def clone_voice(
                 sample_rate=embedding.sample_rate,
             )
         finally:
-            # Cleanup temp file
+            # Cleanup temp file (permanent copy was made by extract_voice_embedding)
             tmp_path.unlink(missing_ok=True)
     
     except HTTPException:
