@@ -28,7 +28,7 @@ _tts_manager: Optional["UnifiedTTSManager"] = None  # Forward reference for lazy
 
 if TYPE_CHECKING:
     # Import for type checkers only (avoids runtime import side-effects)
-    from utilities.tts.tts_manager import UnifiedTTSManager
+    from src.utilities.tts.tts_manager import UnifiedTTSManager
 
 
 # ========== INITIALIZATION & CLEANUP ==========
@@ -290,7 +290,7 @@ def get_tts_manager() -> "UnifiedTTSManager":
         
         try:
             # Lazy import to avoid dependency issues
-            from utilities.tts.tts_manager import UnifiedTTSManager
+            from src.utilities.tts.tts_manager import UnifiedTTSManager
             
             _tts_manager = UnifiedTTSManager(config)
             logger.info("✓ TTS manager lazy-loaded successfully")

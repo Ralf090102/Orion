@@ -431,7 +431,16 @@ async def switch_tts_engine(
         # Validate engine choice
         if request.engine == "qwen3":
             # Validate Qwen3 availability and auto-enable if possible
-            tts_manager = get_tts_manager()
+            
+            # Get TTS manager with better error handling
+            try:
+                tts_manager = get_tts_manager()
+            except Exception as e:
+                logger.error(f"Failed to get TTS manager: {e}", exc_info=True)
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"TTS service initialization failed: {str(e)}. Check logs for details."
+                )
             
             # Check if TTS manager has Qwen3 support
             if not hasattr(tts_manager, 'qwen3_manager'):
@@ -475,6 +484,16 @@ async def switch_tts_engine(
                 logger.info("Qwen3 model loaded successfully")
             except Exception as e:
                 logger.warning(f"Failed to preload Qwen3 model (will lazy load later): {e}")
+        elif request.engine == "piper":
+            # Just validate Piper is available (lightweight check)
+            try:
+                tts_manager = get_tts_manager()
+            except Exception as e:
+                logger.error(f"Failed to get TTS manager for Piper: {e}", exc_info=True)
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"TTS service initialization failed: {str(e)}. Ensure Piper TTS is installed."
+                )
         
         # Switch engine
         config.tts.default_engine = request.engine
