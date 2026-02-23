@@ -92,6 +92,11 @@ class Qwen3Manager:
         logger.info(f"Qwen3Manager initialized (device: {self.device})")
         logger.info(f"Auto-unload: {self.qwen3_config.auto_unload} "
                    f"(timeout: {self.qwen3_config.unload_timeout_seconds}s)")
+        
+        # Scan disk for existing cloned voices so they survive restarts
+        loaded = self._scan_cloned_voices()
+        if loaded:
+            logger.info(f"✓ Auto-loaded {loaded} cloned voice(s) from disk")
     
     def _get_device(self) -> str:
         """Determine compute device (CUDA/CPU).
@@ -408,6 +413,41 @@ class Qwen3Manager:
             Dictionary mapping voice_id to VoiceEmbedding
         """
         return self.voice_embeddings.copy()
+    
+    def _scan_cloned_voices(self) -> int:
+        """Scan voices_dir for .wav files and load any not already in voice_embeddings.
+        
+        Called at startup and can be called again to pick up externally added files.
+        
+        Returns:
+            Number of voices newly loaded from disk
+        """
+        if not self.voices_dir.exists():
+            return 0
+        
+        loaded = 0
+        for wav_file in sorted(self.voices_dir.glob("*.wav")):
+            voice_id = wav_file.stem
+            if voice_id in self.voice_embeddings:
+                continue  # Already in memory
+            try:
+                audio_data, sr = sf.read(str(wav_file))
+                duration = len(audio_data) / sr
+                embedding = VoiceEmbedding(
+                    voice_id=voice_id,
+                    embedding=np.array([str(wav_file)], dtype=object),
+                    sample_rate=sr,
+                    duration=duration,
+                    created_at=wav_file.stat().st_mtime,
+                    ref_text=None,
+                )
+                self.voice_embeddings[voice_id] = embedding
+                loaded += 1
+                logger.info(f"Loaded cloned voice from disk: {voice_id} ({duration:.1f}s, {sr}Hz)")
+            except Exception as e:
+                logger.warning(f"Failed to load voice file {wav_file.name}: {e}")
+        
+        return loaded
     
     def delete_voice(self, voice_id: str) -> bool:
         """Delete a cloned voice from cache and storage.

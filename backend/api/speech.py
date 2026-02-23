@@ -1076,6 +1076,21 @@ async def clone_voice(
                 ref_text=ref_text,
             )
             
+            from src.utilities.tts.tts_manager import VoiceInfo
+            tts_manager.voice_catalog[voice_name] = VoiceInfo(
+                voice_id=voice_name,
+                name=voice_name.replace("_", " ").title(),
+                language="multi",
+                gender="neutral",
+                quality="high",
+                description=f"Cloned voice ({embedding.duration:.1f}s sample)",
+                model_size=f"{len(embedding.embedding) * 4 / 1024:.1f}KB",
+                sample_rate=embedding.sample_rate,
+                engine="qwen3",
+                is_downloaded=True,
+            )
+            logger.info(f"Registered '{voice_name}' in TTS voice catalog")
+            
             return VoiceCloneResponse(
                 status="success",
                 message=f"Voice '{voice_name}' cloned successfully",

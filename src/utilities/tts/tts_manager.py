@@ -354,9 +354,15 @@ class UnifiedTTSManager:
             # No specific voice — respect the configured default engine
             return self.tts_config.default_engine
         
-        # Check catalog
+        # Check catalog first (fast path)
         if voice_id in self.voice_catalog:
             return self.voice_catalog[voice_id].engine
+        
+        # Not in catalog — check qwen3_manager's in-memory embeddings directly.
+        # This handles voices that are on disk but weren't in the catalog at init
+        # (e.g. lazy-loaded qwen3, or voices added without catalog registration).
+        if self._qwen3_manager is not None and voice_id in self._qwen3_manager.voice_embeddings:
+            return "qwen3"
         
         # Default to Piper
         return "piper"
