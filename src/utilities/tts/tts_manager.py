@@ -518,6 +518,14 @@ class UnifiedTTSManager:
         if not self.qwen3_manager:
             raise RuntimeError("Qwen3-TTS is not enabled or not available")
         
+        # Qwen3 requires full language names; map ISO codes → full names
+        _LANG_MAP = {
+            "en": "english", "zh": "chinese", "ja": "japanese",
+            "ko": "korean",  "fr": "french",  "de": "german",
+            "es": "spanish", "it": "italian", "pt": "portuguese",
+            "ru": "russian",
+        }
+        language = _LANG_MAP.get(language.lower(), language.lower())
         try:
             # Synthesize with Qwen3
             audio_array, sample_rate = self.qwen3_manager.synthesize(
