@@ -205,6 +205,14 @@ class SpeechHealthResponse(BaseModel):
         default=None,
         description="TTS engine identifier",
     )
+    qwen3_available: bool = Field(
+        default=False,
+        description="Whether Qwen3-TTS voice cloning is available",
+    )
+    qwen3_loaded: bool = Field(
+        default=False,
+        description="Whether Qwen3 model is loaded in memory",
+    )
 
     class Config:
         json_schema_extra = {
@@ -219,6 +227,8 @@ class SpeechHealthResponse(BaseModel):
                     "compute_type": "int8",
                 },
                 "tts_engine": "piper",
+                "qwen3_available": True,
+                "qwen3_loaded": False,
             }
         }
 
@@ -363,5 +373,172 @@ class TTSPreviewRequest(BaseModel):
             "example": {
                 "voice_id": "en_US-amy-medium",
                 "text": "Hello, this is a voice preview.",
+            }
+        }
+
+
+# ========== QWEN3-TTS VOICE CLONING MODELS ==========
+class VoiceCloneRequest(BaseModel):
+    """Request model for creating a cloned voice."""
+    
+    voice_name: str = Field(
+        ...,
+        description="Unique name for this cloned voice",
+        min_length=1,
+        max_length=50,
+    )
+    ref_text: Optional[str] = Field(
+        default=None,
+        description="Reference text transcript (required for ICL mode, improves quality)",
+        max_length=500,
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "voice_name": "my_voice",
+                "ref_text": "This is a sample of my voice speaking clearly.",
+            }
+        }
+
+
+class VoiceCloneResponse(BaseModel):
+    """Response model for voice cloning operation."""
+    
+    status: str = Field(..., description="Operation status")
+    message: str = Field(..., description="Status message")
+    voice_id: str = Field(..., description="Created voice ID")
+    duration: float = Field(..., description="Audio duration in seconds")
+    sample_rate: int = Field(..., description="Audio sample rate")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "message": "Voice cloned successfully",
+                "voice_id": "my_voice",
+                "duration": 5.2,
+                "sample_rate": 16000,
+            }
+        }
+
+
+class ClonedVoiceInfo(BaseModel):
+    """Information about a cloned voice."""
+    
+    voice_id: str = Field(..., description="Voice identifier")
+    duration: float = Field(..., description="Reference audio duration")
+    sample_rate: int = Field(..., description="Sample rate")
+    created_at: float = Field(..., description="Unix timestamp of creation")
+    has_ref_text: bool = Field(..., description="Whether reference text is available (ICL mode)")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "voice_id": "my_voice",
+                "duration": 5.2,
+                "sample_rate": 16000,
+                "created_at": 1708704000.0,
+                "has_ref_text": True,
+            }
+        }
+
+
+class ClonedVoicesListResponse(BaseModel):
+    """Response model for listing cloned voices."""
+    
+    status: str = Field(..., description="Operation status")
+    voices: list[ClonedVoiceInfo] = Field(..., description="List of cloned voices")
+    count: int = Field(..., description="Total count")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "voices": [
+                    {
+                        "voice_id": "my_voice",
+                        "duration": 5.2,
+                        "sample_rate": 16000,
+                        "created_at": 1708704000.0,
+                        "has_ref_text": True,
+                    }
+                ],
+                "count": 1,
+            }
+        }
+
+
+class TTSAsyncRequest(BaseModel):
+    """Request model for async TTS synthesis (Qwen3)."""
+    
+    text: str = Field(
+        ...,
+        description="Text to synthesize",
+        min_length=1,
+        max_length=5000,
+    )
+    voice_id: str = Field(
+        ...,
+        description="Cloned voice ID to use",
+    )
+    language: str = Field(
+        default="english",
+        description="Full language name (english, chinese, japanese, etc.)",
+    )
+    speed: float = Field(
+        default=1.0,
+        description="Speech speed multiplier",
+        ge=0.5,
+        le=2.0,
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "text": "Hello, this uses my cloned voice.",
+                "voice_id": "my_voice",
+                "language": "english",
+                "speed": 1.0,
+            }
+        }
+
+
+class TTSTaskResponse(BaseModel):
+    """Response model for async TTS task creation."""
+    
+    status: str = Field(..., description="Operation status")
+    task_id: str = Field(..., description="Task ID for polling")
+    message: str = Field(..., description="Status message")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "task_id": "abc123",
+                "message": "Synthesis task started",
+            }
+        }
+
+
+class TTSTaskStatus(BaseModel):
+    """Response model for TTS task status."""
+    
+    task_id: str = Field(..., description="Task ID")
+    status: str = Field(..., description="Task status: pending, running, completed, failed, cancelled")
+    progress: float = Field(..., description="Progress percentage (0-100)")
+    message: Optional[str] = Field(default=None, description="Status message")
+    audio_url: Optional[str] = Field(default=None, description="Audio URL when completed")
+    error: Optional[str] = Field(default=None, description="Error message if failed")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "task_id": "abc123",
+                "status": "completed",
+                "progress": 100.0,
+                "message": "Synthesis complete",
+                "audio_url": "/api/speech/task/abc123/audio",
+                "error": None,
             }
         }

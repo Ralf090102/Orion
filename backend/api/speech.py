@@ -18,14 +18,21 @@ from fastapi.responses import Response, StreamingResponse
 
 from backend.dependencies import get_config_dependency, get_tts_manager, reset_tts_manager
 from backend.models.speech import (
+    ClonedVoiceInfo,
+    ClonedVoicesListResponse,
     SpeechHealthResponse,
     TranscriptionResponse,
+    TTSAsyncRequest,
     TTSConfigResponse,
     TTSConfigUpdate,
     TTSPreviewRequest,
     TTSRequest,
     TTSResponse,
+    TTSTaskResponse,
+    TTSTaskStatus,
     TTSVoiceUpdate,
+    VoiceCloneRequest,
+    VoiceCloneResponse,
     VoiceListResponse,
     WhisperConfigResponse,
     WhisperConfigUpdate,
@@ -332,10 +339,19 @@ async def speech_health(
         tts_manager = get_tts_manager()
         tts_available = True
         tts_engine = config.tts.default_engine
+        
+        # Check Qwen3 availability
+        qwen3_available = False
+        qwen3_loaded = False
+        if hasattr(tts_manager, 'qwen3_manager') and config.qwen3.enabled:
+            qwen3_available = True
+            qwen3_loaded = tts_manager.qwen3_manager.model is not None
     except Exception as e:
         logger.debug(f"TTS not available: {e}")
         tts_available = False
         tts_engine = None
+        qwen3_available = False
+        qwen3_loaded = False
     
     # Determine overall status
     if stt_available and tts_available:
@@ -358,6 +374,8 @@ async def speech_health(
             "language": config.whisper.language,
         },
         tts_engine=tts_engine,
+        qwen3_available=qwen3_available,
+        qwen3_loaded=qwen3_loaded,
     )
 
 
@@ -734,4 +752,311 @@ async def preview_voice(
             status_code=500,
             detail=f"Preview generation failed: {str(e)}"
         )
+
+
+# ========== QWEN3-TTS VOICE CLONING ENDPOINTS ==========
+@router.post(
+    "/clone-voice",
+    response_model=VoiceCloneResponse,
+    summary="Clone a voice from audio sample",
+    description="Extract voice embedding from uploaded audio for Qwen3-TTS cloning",
+)
+async def clone_voice(
+    voice_name: str = Form(..., description="Unique name for this voice"),
+    ref_text: Optional[str] = Form(None, description="Reference text transcript (improves quality)"),
+    audio: UploadFile = File(..., description="Reference audio file (3-15 seconds, WAV/MP3)"),
+    config: OrionConfig = Depends(get_config_dependency),
+) -> VoiceCloneResponse:
+    """
+    Create a cloned voice from audio sample.
+    
+    Uploads an audio file (3-15 seconds) and extracts voice characteristics
+    for use with Qwen3-TTS synthesis. Optionally provide reference text for
+    better quality (ICL mode).
+    
+    Args:
+        voice_name: Unique identifier for this voice
+        ref_text: Optional transcript of the audio
+        audio: Audio file (WAV, MP3, etc.)
+        config: Configuration dependency (injected)
+    
+    Returns:
+        VoiceCloneResponse with created voice info
+    
+    Raises:
+        HTTPException 400: Invalid audio or voice name already exists
+        HTTPException 503: Qwen3-TTS not available
+        HTTPException 500: Voice cloning failed
+    """
+    try:
+        # Check if Qwen3 is enabled
+        if not config.qwen3.enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS voice cloning is not enabled. Enable in configuration."
+            )
+        
+        # Get TTS manager (should be UnifiedTTSManager)
+        tts_manager = get_tts_manager()
+        
+        # Check if manager has Qwen3 support
+        if not hasattr(tts_manager, 'qwen3_manager'):
+            raise HTTPException(
+                status_code=503,
+                detail="Voice cloning requires Qwen3-TTS. Please check configuration."
+            )
+        
+        # Save uploaded audio to temp file
+        with tempfile.NamedTemporaryFile(suffix=Path(audio.filename or "audio.wav").suffix, delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+            audio_bytes = await audio.read()
+            tmp.write(audio_bytes)
+            tmp.flush()
+        
+        try:
+            # Extract voice embedding using Qwen3Manager
+            qwen3_manager = tts_manager.qwen3_manager
+            embedding = qwen3_manager.extract_voice_embedding(
+                voice_id=voice_name,
+                audio_path=tmp_path,
+                ref_text=ref_text,
+            )
+            
+            return VoiceCloneResponse(
+                status="success",
+                message=f"Voice '{voice_name}' cloned successfully",
+                voice_id=embedding.voice_id,
+                duration=embedding.duration,
+                sample_rate=embedding.sample_rate,
+            )
+        finally:
+            # Cleanup temp file
+            tmp_path.unlink(missing_ok=True)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Voice cloning failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Voice cloning failed: {str(e)}"
+        )
+
+
+@router.get(
+    "/cloned-voices",
+    response_model=ClonedVoicesListResponse,
+    summary="List cloned voices",
+    description="Get list of all voices cloned with Qwen3-TTS",
+)
+async def list_cloned_voices() -> ClonedVoicesListResponse:
+    """
+    List all cloned voices available for Qwen3-TTS synthesis.
+    
+    Returns:
+        ClonedVoicesListResponse with voice list
+    
+    Raises:
+        HTTPException 503: Qwen3-TTS not available
+    """
+    try:
+        tts_manager = get_tts_manager()
+        
+        if not hasattr(tts_manager, 'qwen3_manager'):
+            return ClonedVoicesListResponse(
+                status="success",
+                voices=[],
+                count=0,
+            )
+        
+        qwen3_manager = tts_manager.qwen3_manager
+        embeddings = qwen3_manager.list_cloned_voices()
+        
+        voices = []
+        for voice_id, embedding in embeddings.items():
+            voices.append(ClonedVoiceInfo(
+                voice_id=voice_id,
+                duration=embedding.duration,
+                sample_rate=embedding.sample_rate,
+                created_at=embedding.created_at,
+                has_ref_text=hasattr(embedding, 'ref_text') and embedding.ref_text is not None,
+            ))
+        
+        return ClonedVoicesListResponse(
+            status="success",
+            voices=voices,
+            count=len(voices),
+        )
+    
+    except Exception as e:
+        logger.error(f"Failed to list cloned voices: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list cloned voices: {str(e)}"
+        )
+
+
+@router.delete(
+    "/cloned-voices/{voice_id}",
+    summary="Delete a cloned voice",
+    description="Remove a cloned voice from cache",
+)
+async def delete_cloned_voice(voice_id: str):
+    """
+    Delete a cloned voice.
+    
+    Args:
+        voice_id: Voice ID to delete
+    
+    Returns:
+        Success message
+    
+    Raises:
+        HTTPException 404: Voice not found
+        HTTPException 503: Qwen3-TTS not available
+    """
+    try:
+        tts_manager = get_tts_manager()
+        
+        if not hasattr(tts_manager, 'qwen3_manager'):
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS not available"
+            )
+        
+        qwen3_manager = tts_manager.qwen3_manager
+        success = qwen3_manager.delete_voice(voice_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Voice '{voice_id}' not found"
+            )
+        
+        return {"status": "success", "message": f"Voice '{voice_id}' deleted"}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete voice: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete voice: {str(e)}"
+        )
+
+
+@router.post(
+    "/synthesize-qwen3",
+    summary="Synthesize speech with cloned voice",
+    description="Use Qwen3-TTS to synthesize speech with a cloned voice (may be slow)",
+)
+async def synthesize_qwen3(
+    request: TTSAsyncRequest,
+    config: OrionConfig = Depends(get_config_dependency),
+) -> Response:
+    """
+    Synthesize speech using Qwen3-TTS with a cloned voice.
+    
+    This endpoint performs synchronous synthesis (blocks until complete).
+    For long text, consider using async synthesis endpoint instead.
+    
+    Args:
+        request: TTS request with text and cloned voice_id
+        config: Configuration dependency (injected)
+    
+    Returns:
+        Response with audio bytes (WAV format)
+    
+    Raises:
+        HTTPException 400: Invalid text or voice_id
+        HTTPException 503: Qwen3-TTS not available
+        HTTPException 500: Synthesis failed
+    """
+    try:
+        if not config.qwen3.enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS is not enabled"
+            )
+        
+        tts_manager = get_tts_manager()
+        
+        if not hasattr(tts_manager, 'qwen3_manager'):
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS not available"
+            )
+        
+        # Synthesize using Qwen3
+        qwen3_manager = tts_manager.qwen3_manager
+        audio_array, sample_rate = qwen3_manager.synthesize(
+            text=request.text,
+            voice_id=request.voice_id,
+            speed=request.speed,
+            language=request.language,
+        )
+        
+        # Convert to WAV bytes
+        import io
+        import soundfile as sf
+        
+        buffer = io.BytesIO()
+        sf.write(buffer, audio_array, sample_rate, format='WAV')
+        audio_bytes = buffer.getvalue()
+        
+        return Response(
+            content=audio_bytes,
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f"attachment; filename=qwen3_speech.wav",
+                "Content-Length": str(len(audio_bytes)),
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Qwen3 synthesis failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Synthesis failed: {str(e)}"
+        )
+
+
+@router.get(
+    "/qwen3/stats",
+    summary="Get Qwen3-TTS statistics",
+    description="Get synthesis statistics and cache info for Qwen3-TTS",
+)
+async def get_qwen3_stats():
+    """
+    Get Qwen3-TTS performance statistics.
+    
+    Returns:
+        Statistics dictionary
+    """
+    try:
+        tts_manager = get_tts_manager()
+        
+        if not hasattr(tts_manager, 'qwen3_manager'):
+            return {
+                "status": "unavailable",
+                "message": "Qwen3-TTS not available",
+            }
+        
+        qwen3_manager = tts_manager.qwen3_manager
+        stats = qwen3_manager.get_stats()
+        
+        return {
+            "status": "success",
+            "stats": stats,
+        }
+    
+    except Exception as e:
+        logger.error(f"Failed to get stats: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get statistics: {str(e)}"
+        )
+
 
