@@ -292,6 +292,44 @@
 		}
 	}
 
+	async function diagTestTTS() {
+		if (currentEngine === 'qwen3') {
+			await testSynthesisQwen3();
+			return;
+		}
+
+		// Piper path: synthesize synthesisTest.text and show in audio player
+		try {
+			synthesisTest.synthesizing = true;
+			synthesisTest.audioUrl = null;
+			error = null;
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/preview-voice`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					voice_id: ttsConfig.default_voice,
+					text: synthesisTest.text.trim() || 'Hello, this is a text-to-speech diagnostic test.'
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.detail || 'Synthesis failed');
+			}
+
+			const audioBlob = await response.blob();
+			synthesisTest.audioUrl = URL.createObjectURL(audioBlob);
+
+			const audio = new Audio(synthesisTest.audioUrl);
+			audio.play();
+		} catch (err) {
+			error = (err as Error).message;
+		} finally {
+			synthesisTest.synthesizing = false;
+		}
+	}
+
 	async function previewVoice() {
 		try {
 			previewingVoice = true;
@@ -1562,86 +1600,356 @@
 	{:else if activeSection === 'test'}
 		<!-- Test & Diagnostics -->
 		<div class="space-y-6">
-			<!-- Health Status -->
+
+			<!-- System Health Overview -->
 			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
 				<div class="flex items-center justify-between mb-6">
 					<div>
-						<h2 class="text-lg font-semibold">Speech System Health</h2>
+						<h2 class="text-lg font-semibold">System Health</h2>
 						<p class="text-sm text-gray-600 dark:text-gray-400">
-							Check the status of speech services
+							Live status of all speech services
 						</p>
 					</div>
 					<button
 						onclick={checkHealth}
 						disabled={loading}
-						class="rounded-lg bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50 dark:bg-gray-500 dark:hover:bg-gray-600"
+						class="flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
 					>
-						<div class="flex items-center gap-2">
-							<CarbonRenew class="size-4" />
-							Refresh
-						</div>
+						<CarbonRenew class="size-4 {loading ? 'animate-spin' : ''}" />
+						Refresh
 					</button>
 				</div>
 
 				{#if loading && !healthStatus}
-					<div class="flex items-center justify-center py-12">
-						<div class="size-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent"></div>
+					<div class="flex items-center justify-center py-12 text-gray-500 dark:text-gray-400">
+						<div class="size-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent mr-3"></div>
+						Checking services...
 					</div>
 				{:else if healthStatus}
-					<div class="space-y-4">
-						<div class="flex items-center justify-between rounded-lg border p-4 dark:border-gray-700">
-							<div class="flex items-center gap-3">
-								{#if healthStatus.whisper_available}
-									<div class="size-3 rounded-full bg-green-500"></div>
-								{:else}
-									<div class="size-3 rounded-full bg-red-500"></div>
-								{/if}
-								<div>
-									<p class="font-medium">Whisper STT</p>
-									<p class="text-sm text-gray-600 dark:text-gray-400">
-										{healthStatus.whisper_available ? 'Available' : 'Not available'}
-									</p>
+					<!-- Overall Status Banner -->
+					<div class="mb-5 flex items-center gap-3 rounded-lg px-4 py-3
+						{healthStatus.status === 'ready'
+							? 'bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800'
+							: healthStatus.status === 'degraded'
+							? 'bg-yellow-50 border border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800'
+							: 'bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800'}"
+					>
+						<div class="size-2.5 rounded-full
+							{healthStatus.status === 'ready' ? 'bg-green-500'
+							: healthStatus.status === 'degraded' ? 'bg-yellow-500'
+							: 'bg-red-500'}">
+						</div>
+						<span class="text-sm font-medium
+							{healthStatus.status === 'ready' ? 'text-green-800 dark:text-green-200'
+							: healthStatus.status === 'degraded' ? 'text-yellow-800 dark:text-yellow-200'
+							: 'text-red-800 dark:text-red-200'}">
+							System is {healthStatus.status === 'ready' ? 'fully operational' : healthStatus.status}
+						</span>
+					</div>
+
+					<!-- Service Cards Grid -->
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+						<!-- Whisper STT -->
+						<div class="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+							<div class="flex items-start justify-between">
+								<div class="flex items-center gap-3">
+									<div class="rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30">
+										<CarbonMicrophone class="size-5 text-blue-600 dark:text-blue-400" />
+									</div>
+									<div>
+										<p class="font-medium text-sm">Whisper STT</p>
+										<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+											{healthStatus.whisper_available ? 'Speech-to-text ready' : 'Not available'}
+										</p>
+									</div>
+								</div>
+								<div class="flex flex-col items-end gap-1">
+									<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium
+										{healthStatus.whisper_available
+											? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+											: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}">
+										<div class="size-1.5 rounded-full {healthStatus.whisper_available ? 'bg-green-500' : 'bg-red-500'}"></div>
+										{healthStatus.whisper_available ? 'Available' : 'Unavailable'}
+									</span>
+									{#if healthStatus.whisper_loaded}
+										<span class="text-xs text-blue-600 dark:text-blue-400">Model loaded</span>
+									{:else}
+										<span class="text-xs text-gray-400">Loads on demand</span>
+									{/if}
 								</div>
 							</div>
-							{#if healthStatus.whisper_config}
-								<div class="text-right text-sm text-gray-600 dark:text-gray-400">
-									<p>Model: {healthStatus.whisper_config.model_size}</p>
-									<p>Device: {healthStatus.whisper_config.device}</p>
+							{#if healthStatus.whisper_config && Object.keys(healthStatus.whisper_config).length > 0}
+								<div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 grid grid-cols-2 gap-x-4 gap-y-1">
+									<div class="text-xs text-gray-500 dark:text-gray-400">Model</div>
+									<div class="text-xs font-medium">{healthStatus.whisper_config.model_size || '—'}</div>
+									<div class="text-xs text-gray-500 dark:text-gray-400">Device</div>
+									<div class="text-xs font-medium">{healthStatus.whisper_config.device || '—'}</div>
+									<div class="text-xs text-gray-500 dark:text-gray-400">Precision</div>
+									<div class="text-xs font-medium">{healthStatus.whisper_config.compute_type || '—'}</div>
 								</div>
 							{/if}
 						</div>
 
-						<div class="flex items-center justify-between rounded-lg border p-4 dark:border-gray-700">
-							<div class="flex items-center gap-3">
-								{#if healthStatus && healthStatus.tts_available !== undefined}
-									{#if healthStatus.tts_available}
-										<div class="size-3 rounded-full bg-green-500"></div>
-									{:else}
-										<div class="size-3 rounded-full bg-red-500"></div>
-									{/if}
+						<!-- Active TTS Engine -->
+						<div class="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+							<div class="flex items-start justify-between">
+								<div class="flex items-center gap-3">
+									<div class="rounded-lg p-2
+										{healthStatus.tts_engine === 'qwen3'
+											? 'bg-purple-100 dark:bg-purple-900/30'
+											: 'bg-indigo-100 dark:bg-indigo-900/30'}">
+										<CarbonTextToSpeech class="size-5
+											{healthStatus.tts_engine === 'qwen3'
+												? 'text-purple-600 dark:text-purple-400'
+												: 'text-indigo-600 dark:text-indigo-400'}" />
+									</div>
 									<div>
-										<p class="font-medium">{healthStatus.tts_engine || 'Piper-TTS'}</p>
-										<p class="text-sm text-gray-600 dark:text-gray-400">
-											{healthStatus.tts_available ? 'Active' : 'Not available'}
+										<p class="font-medium text-sm">
+											{healthStatus.tts_engine === 'qwen3' ? 'Qwen3-TTS' : 'Piper TTS'}
+										</p>
+										<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+											{healthStatus.tts_available ? 'Text-to-speech active' : 'Not available'}
 										</p>
 									</div>
-								{:else}
-									<div class="size-3 rounded-full bg-green-500"></div>
-									<div>
-										<p class="font-medium">Piper-TTS</p>
-										<p class="text-sm text-gray-600 dark:text-gray-400">Active</p>
+								</div>
+								<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium
+									{healthStatus.tts_available
+										? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+										: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}">
+									<div class="size-1.5 rounded-full {healthStatus.tts_available ? 'bg-green-500' : 'bg-red-500'}"></div>
+									{healthStatus.tts_available ? 'Active' : 'Unavailable'}
+								</span>
+							</div>
+							<div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 grid grid-cols-2 gap-x-4 gap-y-1">
+								<div class="text-xs text-gray-500 dark:text-gray-400">Engine</div>
+								<div class="text-xs font-medium capitalize">{healthStatus.tts_engine || 'piper'}</div>
+								<div class="text-xs text-gray-500 dark:text-gray-400">Mode</div>
+								<div class="text-xs font-medium">
+									{healthStatus.tts_engine === 'qwen3' ? 'Voice cloning' : 'Pre-built voices'}
+								</div>
+							</div>
+						</div>
+
+						<!-- Qwen3 Voice Cloning -->
+						<div class="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+							<div class="flex items-start justify-between">
+								<div class="flex items-center gap-3">
+									<div class="rounded-lg bg-purple-100 p-2 dark:bg-purple-900/30">
+										<CarbonRecordingFilled class="size-5 text-purple-600 dark:text-purple-400" />
 									</div>
-								{/if}
-							</div>						<button
-							class="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-700 disabled:opacity-50 dark:bg-purple-500 dark:hover:bg-purple-600"
-							disabled
-							title="Engine switching coming soon (Qwen3-TTS)"
-						>
-							Change Engine
-						</button>						</div>
+									<div>
+										<p class="font-medium text-sm">Qwen3 Voice Cloning</p>
+										<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+											{healthStatus.qwen3_available ? 'GPU available' : 'Requires GPU'}
+										</p>
+									</div>
+								</div>
+								<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium
+									{healthStatus.qwen3_available
+										? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+										: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}">
+									<div class="size-1.5 rounded-full {healthStatus.qwen3_available ? 'bg-purple-500' : 'bg-gray-400'}"></div>
+									{healthStatus.qwen3_available ? 'Available' : 'Disabled'}
+								</span>
+							</div>
+							<div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 grid grid-cols-2 gap-x-4 gap-y-1">
+								<div class="text-xs text-gray-500 dark:text-gray-400">Model</div>
+								<div class="text-xs font-medium">{healthStatus.qwen3_loaded ? 'Loaded in GPU' : 'Not loaded'}</div>
+								<div class="text-xs text-gray-500 dark:text-gray-400">Voices</div>
+								<div class="text-xs font-medium">{clonedVoices.length} cloned</div>
+							</div>
+						</div>
+
+						<!-- GPU Status (from /api/status) -->
+						<div class="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+							<div class="flex items-start justify-between">
+								<div class="flex items-center gap-3">
+									<div class="rounded-lg bg-orange-100 p-2 dark:bg-orange-900/30">
+										<CarbonWarning class="size-5 text-orange-600 dark:text-orange-400" />
+									</div>
+									<div>
+										<p class="font-medium text-sm">Hardware</p>
+										<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+											Compute resources
+										</p>
+									</div>
+								</div>
+							</div>
+							<div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 grid grid-cols-2 gap-x-4 gap-y-1">
+								<div class="text-xs text-gray-500 dark:text-gray-400">GPU</div>
+								<div class="text-xs font-medium">
+									{healthStatus.qwen3_available ? 'CUDA available' : 'CPU only'}
+								</div>
+								<div class="text-xs text-gray-500 dark:text-gray-400">Qwen3 engine</div>
+								<div class="text-xs font-medium capitalize">
+									{healthStatus.tts_engine === 'qwen3' ? 'Active' : 'Standby'}
+								</div>
+							</div>
+						</div>
+					</div>
+				{:else}
+					<div class="text-center py-12 text-gray-500 dark:text-gray-400">
+						<CarbonWarning class="size-8 mx-auto mb-2 opacity-50" />
+						<p>Could not reach backend</p>
+						<p class="text-sm mt-1">Check that the backend is running on port 8000</p>
 					</div>
 				{/if}
 			</div>
+
+			<!-- STT Test -->
+			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
+				<div class="flex items-center gap-3 mb-5">
+					<div class="rounded-lg bg-blue-100 p-3 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+						<CarbonMicrophone class="size-6" />
+					</div>
+					<div>
+						<h2 class="text-lg font-semibold">Test Speech-to-Text</h2>
+						<p class="text-sm text-gray-600 dark:text-gray-400">
+							Upload an audio file to verify Whisper transcription
+						</p>
+					</div>
+				</div>
+
+				<div class="space-y-4">
+					<div>
+						<label for="diag-stt-file" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Audio File
+						</label>
+						<input
+							id="diag-stt-file"
+							type="file"
+							accept="audio/*,.webm,.wav,.mp3,.m4a,.ogg,.flac"
+							onchange={handleFileSelect}
+							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 file:mr-4 file:rounded file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-blue-700 hover:file:bg-blue-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:file:bg-blue-900/30 dark:file:text-blue-400"
+						/>
+						{#if testAudioFile}
+							<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+								{testAudioFile.name} · {(testAudioFile.size / 1024).toFixed(1)} KB
+							</p>
+						{/if}
+					</div>
+
+					<button
+						onclick={testTranscribe}
+						disabled={!testAudioFile || testing}
+						class="w-full rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
+					>
+						<div class="flex items-center justify-center gap-2">
+							{#if testing}
+								<div class="size-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+								Transcribing...
+							{:else}
+								<CarbonPlay class="size-4" />
+								Run Transcription Test
+							{/if}
+						</div>
+					</button>
+
+					{#if testTranscription}
+						<div class="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
+							<p class="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wide mb-2">
+								Transcription Output
+							</p>
+							<p class="text-sm text-blue-900 dark:text-blue-100 whitespace-pre-wrap leading-relaxed">
+								{testTranscription}
+							</p>
+						</div>
+					{/if}
+				</div>
+			</div>
+
+			<!-- TTS Quick Test -->
+			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
+				<div class="flex items-center gap-3 mb-5">
+					<div class="rounded-lg p-3
+						{currentEngine === 'qwen3'
+							? 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400'
+							: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400'}">
+						<CarbonTextToSpeech class="size-6" />
+					</div>
+					<div>
+						<h2 class="text-lg font-semibold">Test Text-to-Speech</h2>
+						<p class="text-sm text-gray-600 dark:text-gray-400">
+							{currentEngine === 'qwen3'
+								? 'Quick synthesis test with current Qwen3 voice'
+								: 'Quick synthesis test with current Piper voice'}
+						</p>
+					</div>
+					<span class="ml-auto rounded-full px-2.5 py-1 text-xs font-medium
+						{currentEngine === 'qwen3'
+							? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+							: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300'}">
+						{currentEngine === 'qwen3' ? 'Qwen3' : 'Piper'}
+					</span>
+				</div>
+
+				{#if currentEngine === 'qwen3' && clonedVoices.length === 0}
+					<div class="rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-800 dark:bg-yellow-900/20 text-sm text-yellow-800 dark:text-yellow-200">
+						No cloned voices available. Switch to the TTS tab and clone a voice first.
+					</div>
+				{:else}
+					<div class="space-y-4">
+						{#if currentEngine === 'qwen3'}
+							<div>
+								<label for="diag-voice" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Voice</label>
+								<select
+									id="diag-voice"
+									bind:value={synthesisTest.voice_id}
+									class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+								>
+									<option value="">Select a voice...</option>
+									{#each clonedVoices as voice}
+										<option value={voice.voice_id}>{voice.voice_id} ({voice.duration.toFixed(1)}s)</option>
+									{/each}
+								</select>
+							</div>
+						{/if}
+
+						<div>
+							<label for="diag-tts-text" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+								Text to Speak
+							</label>
+							<textarea
+								id="diag-tts-text"
+								bind:value={synthesisTest.text}
+								placeholder="Hello! This is a test of the text-to-speech system."
+								rows="2"
+								class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+							></textarea>
+						</div>
+
+						<div class="flex items-center gap-4">
+							{#if synthesisTest.audioUrl}
+								<audio src={synthesisTest.audioUrl} controls class="flex-1 h-10"></audio>
+							{:else}
+								<div class="flex-1 text-sm text-gray-500 dark:text-gray-400">
+									{synthesisTest.synthesizing ? 'Generating audio...' : 'Audio output will appear here'}
+								</div>
+							{/if}
+
+							<button
+								onclick={diagTestTTS}
+								disabled={synthesisTest.synthesizing || previewingVoice || !synthesisTest.text.trim() || (currentEngine === 'qwen3' && !synthesisTest.voice_id)}
+								class="flex-shrink-0 rounded-lg px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50
+									{currentEngine === 'qwen3'
+										? 'bg-purple-600 hover:bg-purple-700 dark:bg-purple-500 dark:hover:bg-purple-600'
+										: 'bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600'}"
+							>
+								<div class="flex items-center gap-2">
+									{#if synthesisTest.synthesizing || previewingVoice}
+										<div class="size-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+										Generating...
+									{:else}
+										<CarbonPlay class="size-4" />
+										Synthesize
+									{/if}
+								</div>
+							</button>
+						</div>
+					</div>
+				{/if}
+			</div>
+
 		</div>
 	{/if}
 </div>
