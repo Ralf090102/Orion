@@ -295,7 +295,7 @@ class Qwen3Manager:
         text: str,
         voice_id: Optional[str] = None,
         speed: float = 1.0,
-        language: str = "en",
+        language: str = "english",
     ) -> Tuple[np.ndarray, int]:
         """Synthesize speech using cloned voice.
         
@@ -303,7 +303,9 @@ class Qwen3Manager:
             text: Text to synthesize
             voice_id: ID of cloned voice (must be in voice_embeddings)
             speed: Speech speed multiplier (0.5-2.0)
-            language: Language code ("en", "zh", "ja", "ko", etc.)
+            language: Full language name ("english", "chinese", "japanese", "korean", etc.)
+                     Supported: auto, chinese, english, french, german, italian, japanese,
+                     korean, portuguese, russian, spanish
         
         Returns:
             Tuple of (audio_array, sample_rate)

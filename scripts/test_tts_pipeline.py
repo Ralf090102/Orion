@@ -91,7 +91,7 @@ def test_1_qwen3_manager():
             text=text,
             voice_id="test_voice_1",  # Use the cloned voice
             speed=1.0,
-            language="en",
+            language="english",
         )
         synth_time = time.time() - start
         
@@ -174,7 +174,7 @@ def test_2_voice_cloning():
             text=text,
             voice_id="test_voice",
             speed=1.0,
-            language="en",
+            language="english",
         )
         synth_time = time.time() - start
         
@@ -245,7 +245,7 @@ def test_3_unified_manager():
             voice_id=None,  # Will use Piper default since no Qwen3 voices
             speed=1.0,
             output_format="wav",
-            language="en",
+            language="english",
         )
         qwen3_time = time.time() - start
         
