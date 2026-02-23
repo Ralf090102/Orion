@@ -80,6 +80,10 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:8080",
+        "http://34.142.248.54:3000",  # GCP VM frontend
+        "http://34.142.248.54:5173",  # GCP VM frontend (Vite)
+        "http://34.142.248.54:8000",  # GCP VM backend
+        "http://34.142.248.54:8080",  # GCP VM alternative port
     ],
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP methods

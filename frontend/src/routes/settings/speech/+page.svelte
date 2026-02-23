@@ -8,6 +8,10 @@
 	import CarbonWarning from "~icons/carbon/warning";
 	import CarbonPlay from "~icons/carbon/play";
 	import CarbonDocument from "~icons/carbon/document";
+	import CarbonStop from "~icons/carbon/stop";
+	import CarbonTrash from "~icons/carbon/trash-can";
+	import CarbonUpload from "~icons/carbon/upload";
+	import CarbonRecordingFilled from "~icons/carbon/recording-filled";
 
 	const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
@@ -33,6 +37,27 @@
 	let loadingVoices = $state(false);
 	let previewingVoice = $state(false);
 	let currentPreviewAudio: HTMLAudioElement | null = null;
+
+	// Engine management
+	let currentEngine = $state<'piper' | 'qwen3'>('piper');
+	let switchingEngine = $state(false);
+
+	// Voice cloning state (Qwen3)
+	let clonedVoices = $state<any[]>([]);
+	let loadingClonedVoices = $state(false);
+	let cloningVoice = $state(false);
+	let recording = $state(false);
+	let recordingTime = $state(0);
+	let mediaRecorder: MediaRecorder | null = null;
+	let recordedChunks: Blob[] = [];
+	let recordingInterval: number | null = null;
+	
+	// Voice cloning form
+	let voiceCloneForm = $state({
+		voice_name: '',
+		ref_text: '',
+		audio_file: null as File | null
+	});
 
 	// UI state
 	let loading = $state(false);
@@ -416,11 +441,227 @@
 		}
 	}
 
-	onMount(() => {
-		loadWhisperConfig();
-		loadTTSConfig();
-		loadAvailableVoices();
-		checkHealth();
+	// ========== ENGINE SWITCHING ==========
+	async function switchEngine(newEngine: 'piper' | 'qwen3') {
+		try {
+			switchingEngine = true;
+			error = null;
+			success = null;
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/engine`, {
+				method: 'PATCH',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({ engine: newEngine }),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.detail || 'Failed to switch engine');
+			}
+
+			const data = await response.json();
+			currentEngine = newEngine;
+			success = data.message;
+
+			// Reload appropriate voice lists
+			if (newEngine === 'piper') {
+				await loadAvailableVoices();
+			} else {
+				await loadClonedVoices();
+			}
+		} catch (err) {
+			error = (err as Error).message;
+			console.error('Failed to switch engine:', err);
+		} finally {
+			switchingEngine = false;
+		}
+	}
+
+	// ========== VOICE CLONING ==========
+	async function loadClonedVoices() {
+		try {
+			loadingClonedVoices = true;
+			const response = await fetch(`${BACKEND_URL}/api/speech/cloned-voices`);
+			
+			if (!response.ok) {
+				const errorData = await response.json();
+				// If engine is piper, this is expected (Qwen3 endpoint blocked)
+				if (currentEngine === 'piper') {
+					console.log('Cloned voices not available (Piper engine active)');
+					clonedVoices = [];
+					return;
+				}
+				throw new Error(errorData.detail || 'Failed to load cloned voices');
+			}
+
+			const data = await response.json();
+			clonedVoices = data.voices || [];
+		} catch (err) {
+			if (currentEngine !== 'piper') {
+				console.error('Failed to load cloned voices:', err);
+				error = (err as Error).message;
+			}
+		} finally {
+			loadingClonedVoices = false;
+		}
+	}
+
+	async function startRecording() {
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			mediaRecorder = new MediaRecorder(stream);
+			recordedChunks = [];
+			recordingTime = 0;
+
+			mediaRecorder.ondataavailable = (event) => {
+				if (event.data.size > 0) {
+					recordedChunks.push(event.data);
+				}
+			};
+
+			mediaRecorder.onstop = () => {
+				const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+				const file = new File([blob], 'recording.webm', { type: 'audio/webm' });
+				voiceCloneForm.audio_file = file;
+				
+				// Stop all tracks
+				stream.getTracks().forEach(track => track.stop());
+			};
+
+			mediaRecorder.start();
+			recording = true;
+
+			// Start timer
+			recordingInterval = window.setInterval(() => {
+				recordingTime++;
+				// Auto-stop at 15 seconds
+				if (recordingTime >= 15) {
+					stopRecording();
+				}
+			}, 1000);
+		} catch (err) {
+			error = 'Failed to access microphone. Please check permissions.';
+			console.error('Recording error:', err);
+		}
+	}
+
+	function stopRecording() {
+		if (mediaRecorder && recording) {
+			mediaRecorder.stop();
+			recording = false;
+			if (recordingInterval) {
+				clearInterval(recordingInterval);
+				recordingInterval = null;
+			}
+		}
+	}
+
+	function handleVoiceFileSelect(event: Event) {
+		const target = event.target as HTMLInputElement;
+		if (target.files && target.files[0]) {
+			voiceCloneForm.audio_file = target.files[0];
+			error = null;
+		}
+	}
+
+	async function cloneVoice() {
+		if (!voiceCloneForm.voice_name || !voiceCloneForm.audio_file) {
+			error = 'Please provide a voice name and audio file';
+			return;
+		}
+
+		try {
+			cloningVoice = true;
+			error = null;
+			success = null;
+
+			const formData = new FormData();
+			formData.append('voice_name', voiceCloneForm.voice_name);
+			if (voiceCloneForm.ref_text) {
+				formData.append('ref_text', voiceCloneForm.ref_text);
+			}
+			formData.append('audio', voiceCloneForm.audio_file);
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/clone-voice`, {
+				method: 'POST',
+				body: formData,
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.detail || 'Voice cloning failed');
+			}
+
+			const data = await response.json();
+			success = data.message;
+
+			// Reset form
+			voiceCloneForm = {
+				voice_name: '',
+				ref_text: '',
+				audio_file: null
+			};
+			recordingTime = 0;
+
+			// Reload cloned voices
+			await loadClonedVoices();
+		} catch (err) {
+			error = (err as Error).message;
+			console.error('Voice cloning failed:', err);
+		} finally {
+			cloningVoice = false;
+		}
+	}
+
+	async function deleteClonedVoice(voiceId: string) {
+		if (!confirm(`Delete voice "${voiceId}"? This cannot be undone.`)) {
+			return;
+		}
+
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/speech/cloned-voices/${voiceId}`, {
+				method: 'DELETE',
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.detail || 'Failed to delete voice');
+			}
+
+			success = `Voice "${voiceId}" deleted successfully`;
+			await loadClonedVoices();
+		} catch (err) {
+			error = (err as Error).message;
+			console.error('Failed to delete voice:', err);
+		}
+	}
+
+	async function getEngineStatus() {
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/status`);
+			if (response.ok) {
+				const data = await response.json();
+				currentEngine = data.tts_engine || 'piper';
+			}
+		} catch (err) {
+			console.error('Failed to get engine status:', err);
+		}
+	}
+
+	onMount(async () => {
+		await getEngineStatus();
+		await loadWhisperConfig();
+		await loadTTSConfig();
+		await checkHealth();
+		
+		// Load voices based on current engine
+		if (currentEngine === 'piper') {
+			await loadAvailableVoices();
+		} else {
+			await loadClonedVoices();
+		}
 	});
 </script>
 
@@ -714,13 +955,72 @@
 	{:else if activeSection === 'tts'}
 		<!-- Text-to-Speech Configuration -->
 		<div class="space-y-6">
+			<!-- Engine Selector -->
+			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
+				<div class="mb-4">
+					<h2 class="text-lg font-semibold mb-2">TTS Engine</h2>
+					<p class="text-sm text-gray-600 dark:text-gray-400">
+						Choose between Piper (fast, pre-built voices) and Qwen3 (voice cloning)
+					</p>
+				</div>
+
+				<div class="flex gap-4">
+					<button
+						onclick={() => switchEngine('piper')}
+						disabled={switchingEngine || currentEngine === 'piper'}
+						class="flex-1 flex items-center justify-center gap-3 rounded-lg border-2 px-6 py-4 transition-all
+							{currentEngine === 'piper'
+								? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+								: 'border-gray-300 dark:border-gray-600 hover:border-blue-400'}
+							disabled:opacity-50"
+					>
+						<CarbonPlay class="size-5" />
+						<div class="text-left">
+							<div class="font-semibold">Piper TTS</div>
+							<div class="text-xs text-gray-600 dark:text-gray-400">Fast, CPU-friendly</div>
+						</div>
+						{#if currentEngine === 'piper'}
+							<CarbonCheckmark class="size-5 text-blue-600 dark:text-blue-400 ml-auto" />
+						{/if}
+					</button>
+
+					<button
+						onclick={() => switchEngine('qwen3')}
+						disabled={switchingEngine || currentEngine === 'qwen3'}
+						class="flex-1 flex items-center justify-center gap-3 rounded-lg border-2 px-6 py-4 transition-all
+							{currentEngine === 'qwen3'
+								? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
+								: 'border-gray-300 dark:border-gray-600 hover:border-purple-400'}
+							disabled:opacity-50"
+					>
+						<CarbonMicrophone class="size-5" />
+						<div class="text-left">
+							<div class="font-semibold">Qwen3-TTS</div>
+							<div class="text-xs text-gray-600 dark:text-gray-400">Voice cloning, GPU required</div>
+						</div>
+						{#if currentEngine === 'qwen3'}
+							<CarbonCheckmark class="size-5 text-purple-600 dark:text-purple-400 ml-auto" />
+						{/if}
+					</button>
+				</div>
+
+				{#if switchingEngine}
+					<div class="mt-4 flex items-center justify-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+						<CarbonRenew class="size-4 animate-spin" />
+						<span>Switching engine...</span>
+					</div>
+				{/if}
+			</div>
+
+			<!-- Piper TTS Configuration -->
+			{#if currentEngine === 'piper'}
 			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
 				<div class="flex items-center gap-3 mb-6">
 					<div class="rounded-lg bg-purple-100 p-3 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400">
 						<CarbonTextToSpeech class="size-6" />
 					</div>
 					<div>
-						<h2 class="text-lg font-semibold">Text-to-Speech Configuration</h2>
+						<h2 class="text-lg font-semibold">Piper TTS Configuration</h2>
 						<p class="text-sm text-gray-600 dark:text-gray-400">
 							Configure Piper TTS voices and audio settings
 						</p>
@@ -900,6 +1200,212 @@
 					</div>
 				</div>
 			</div>
+			{/if}
+
+			<!-- Qwen3-TTS Voice Cloning -->
+			{#if currentEngine === 'qwen3'}
+			<!-- Voice Cloning Interface -->
+			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
+				<div class="flex items-center gap-3 mb-6">
+					<div class="rounded-lg bg-purple-100 p-3 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400">
+						<CarbonMicrophone class="size-6" />
+					</div>
+					<div>
+						<h2 class="text-lg font-semibold">Voice Cloning</h2>
+						<p class="text-sm text-gray-600 dark:text-gray-400">
+							Clone a voice from 3-15 second audio sample
+						</p>
+					</div>
+				</div>
+
+				<div class="space-y-6">
+					<!-- Voice Name -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Voice Name <span class="text-red-500">*</span>
+						</label>
+						<input
+							type="text"
+							bind:value={voiceCloneForm.voice_name}
+							placeholder="e.g., my_voice, john_doe"
+							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+						/>
+						<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+							Unique identifier for this voice (letters, numbers, underscores only)
+						</p>
+					</div>
+
+					<!-- Reference Text (Optional) -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Reference Text (Recommended)
+						</label>
+						<textarea
+							bind:value={voiceCloneForm.ref_text}
+							placeholder="The exact text spoken in the audio sample..."
+							rows="3"
+							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+						></textarea>
+						<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+							Providing the transcript improves voice cloning quality (ICL mode)
+						</p>
+					</div>
+
+					<!-- Audio Input -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Audio Sample <span class="text-red-500">*</span>
+						</label>
+
+						<div class="space-y-3">
+							<!-- Record Button -->
+							<div>
+								<button
+									onclick={recording ? stopRecording : startRecording}
+									disabled={cloningVoice}
+									class="w-full flex items-center justify-center gap-3 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 px-6 py-4 hover:border-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/10 transition-colors disabled:opacity-50"
+								>
+									{#if recording}
+										<CarbonStop class="size-5 text-red-600" />
+										<div class="text-left">
+											<div class="font-semibold text-red-600">Recording... {recordingTime}s / 15s</div>
+											<div class="text-xs text-gray-600 dark:text-gray-400">Click to stop</div>
+										</div>
+									{:else}
+										<CarbonRecordingFilled class="size-5 text-purple-600" />
+										<div class="text-left">
+											<div class="font-semibold">Record Audio (3-15s)</div>
+											<div class="text-xs text-gray-600 dark:text-gray-400">Click to start recording</div>
+										</div>
+									{/if}
+								</button>
+								{#if recording}
+									<div class="mt-2 h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+										<div 
+											class="h-full bg-red-600 transition-all duration-1000"
+											style="width: {(recordingTime / 15) * 100}%"
+										></div>
+									</div>
+								{/if}
+							</div>
+
+							<!-- Or Divider -->
+							<div class="flex items-center gap-3">
+								<div class="flex-1 h-px bg-gray-300 dark:bg-gray-600"></div>
+								<span class="text-sm text-gray-500 dark:text-gray-400">or</span>
+								<div class="flex-1 h-px bg-gray-300 dark:bg-gray-600"></div>
+							</div>
+
+							<!-- Upload Button -->
+							<label class="block">
+								<input
+									type="file"
+									accept="audio/*"
+									onchange={handleVoiceFileSelect}
+									disabled={recording || cloningVoice}
+									class="hidden"
+								/>
+								<div class="w-full flex items-center justify-center gap-3 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 px-6 py-4 hover:border-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/10 transition-colors cursor-pointer">
+									<CarbonUpload class="size-5 text-purple-600" />
+									<div class="text-left">
+										<div class="font-semibold">Upload Audio File</div>
+										<div class="text-xs text-gray-600 dark:text-gray-400">
+											{voiceCloneForm.audio_file ? voiceCloneForm.audio_file.name : 'WAV, MP3, or WebM (3-15s)'}
+										</div>
+									</div>
+								</div>
+							</label>
+						</div>
+					</div>
+
+					<!-- Clone Button -->
+					<div class="flex justify-end">
+						<button
+							onclick={cloneVoice}
+							disabled={cloningVoice || !voiceCloneForm.voice_name || !voiceCloneForm.audio_file}
+							class="rounded-lg bg-purple-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50 dark:bg-purple-500 dark:hover:bg-purple-600"
+						>
+							<div class="flex items-center gap-2">
+								{#if cloningVoice}
+									<div class="size-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+								{:else}
+									<CarbonMicrophone class="size-4" />
+								{/if}
+								{cloningVoice ? 'Cloning Voice...' : 'Clone Voice'}
+							</div>
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<!-- Cloned Voices List -->
+			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
+				<div class="flex items-center justify-between mb-4">
+					<h2 class="text-lg font-semibold">Your Cloned Voices</h2>
+					<button
+						onclick={loadClonedVoices}
+						disabled={loadingClonedVoices}
+						class="text-sm text-purple-600 hover:text-purple-700 dark:text-purple-400 flex items-center gap-2"
+					>
+						<CarbonRenew class="size-4 {loadingClonedVoices ? 'animate-spin' : ''}" />
+						Refresh
+					</button>
+				</div>
+
+				{#if loadingClonedVoices}
+					<div class="flex items-center justify-center py-8 text-gray-500 dark:text-gray-400">
+						<CarbonRenew class="size-5 animate-spin mr-2" />
+						Loading voices...
+					</div>
+				{:else if clonedVoices.length === 0}
+					<div class="text-center py-8 text-gray-500 dark:text-gray-400">
+						<CarbonMicrophone class="size-8 mx-auto mb-2 opacity-50" />
+						<p>No cloned voices yet</p>
+						<p class="text-sm mt-1">Record or upload audio above to create your first voice</p>
+					</div>
+				{:else}
+					<div class="space-y-3">
+						{#each clonedVoices as voice}
+							<div class="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+								<div class="flex-1">
+									<div class="font-medium">{voice.voice_id}</div>
+									<div class="text-sm text-gray-600 dark:text-gray-400">
+										{voice.duration.toFixed(1)}s sample • {voice.sample_rate}Hz
+										{#if voice.has_ref_text}
+											• <span class="text-purple-600 dark:text-purple-400">ICL mode</span>
+										{/if}
+									</div>
+								</div>
+								<button
+									onclick={() => deleteClonedVoice(voice.voice_id)}
+									class="text-red-600 hover:text-red-700 dark:text-red-400 p-2"
+									title="Delete voice"
+								>
+									<CarbonTrash class="size-5" />
+								</button>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
+
+			<!-- Qwen3 Info Box -->
+			<div class="rounded-lg border border-purple-200 bg-purple-50 p-4 dark:border-purple-800 dark:bg-purple-900/20">
+				<div class="flex items-start gap-3">
+					<CarbonWarning class="size-5 text-purple-600 dark:text-purple-400 flex-shrink-0 mt-0.5" />
+					<div class="flex-1">
+						<h3 class="font-semibold text-purple-900 dark:text-purple-200 text-sm">
+							About Qwen3-TTS Voice Cloning
+						</h3>
+						<p class="text-sm text-purple-800 dark:text-purple-300 mt-1">
+							Qwen3-TTS requires GPU with CUDA support. Voice cloning quality improves with clear audio (3-15s) and reference text.
+							Synthesis is slower than Piper (~11-12x real-time on A100 GPU) but produces higher quality, personalized voices.
+							Use this for important messages where voice consistency matters.
+						</p>
+					</div>
+				</div>
+			</div>
+			{/if}
 		</div>
 
 	{:else if activeSection === 'test'}
