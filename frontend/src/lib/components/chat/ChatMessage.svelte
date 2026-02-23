@@ -65,7 +65,7 @@
 	// Computed property to check if this message is currently playing
 	let isReadingAloud = $derived(globalTTSState.messageId === message.id);
 
-	const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
+	const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 	$effect(() => {
 		// referenced to appease linter for currently-unused props

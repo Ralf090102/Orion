@@ -518,6 +518,9 @@
 			} else {
 				await loadClonedVoices();
 			}
+
+			// Refresh health panel to reflect new active engine
+			await checkHealth();
 		} catch (err) {
 			error = (err as Error).message;
 			console.error('Failed to switch engine:', err);
