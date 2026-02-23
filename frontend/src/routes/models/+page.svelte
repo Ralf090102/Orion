@@ -3,12 +3,11 @@
 	import CarbonCheckmark from "~icons/carbon/checkmark";
 	import CarbonClose from "~icons/carbon/close";
 	import CarbonOverflowMenuVertical from "~icons/carbon/overflow-menu-vertical";
-	import { env as publicEnv } from "$env/dynamic/public";
 	import { useSettingsStore } from "$lib/stores/settings.js";
 	import ModelParametersModal from "$lib/components/ModelParametersModal.svelte";
 
 	const settings = useSettingsStore();
-	const BACKEND_URL = publicEnv.VITE_BACKEND_URL || "http://localhost:8000";
+	const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
 	let models = $state<Array<{
 		id: string;
