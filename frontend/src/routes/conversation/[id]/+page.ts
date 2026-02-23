@@ -4,6 +4,16 @@ import { base } from "$app/paths";
 import type { PageLoad } from "./$types";
 import { BACKEND_URL } from '$lib/utils/backendUrl';
 
+function generateId(): string {
+	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+		return crypto.randomUUID();
+	}
+	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+		const r = (Math.random() * 16) | 0;
+		return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+	});
+}
+
 export const load: PageLoad = async ({ params, depends, fetch, parent }) => {
 	depends(UrlDependency.Conversation);
 
@@ -22,7 +32,7 @@ export const load: PageLoad = async ({ params, depends, fetch, parent }) => {
 		// Convert to expected format
 		return {
 			messages: sessionData.messages?.map((msg: any) => ({
-				id: crypto.randomUUID(),
+				id: generateId(),
 				from: msg.role === 'user' ? 'user' : 'assistant',
 				content: msg.content,
 				createdAt: new Date(msg.timestamp),
