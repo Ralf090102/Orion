@@ -512,6 +512,9 @@ class TTSConfig(BaseConfig):
     cache_max_entries: int = 1000
     cache_max_size_mb: int = 500
     
+    # Active Qwen3 voice (selected from cloned voice library)
+    active_qwen3_voice: Optional[str] = None
+
     # Queue settings (for TTSQueue - async synthesis)
     enable_queue: bool = True
     queue_max_concurrent: int = 1  # Qwen3 is slow, process one at a time
@@ -540,6 +543,7 @@ class TTSConfig(BaseConfig):
             cache_max_size_mb=get_env_int("TTS_CACHE_MAX_SIZE_MB", 500),
             enable_queue=get_env_bool("TTS_ENABLE_QUEUE", True),
             queue_max_concurrent=get_env_int("TTS_QUEUE_MAX_CONCURRENT", 1),
+            active_qwen3_voice=get_env_str("TTS_ACTIVE_QWEN3_VOICE", None),
         )
     
     def validate(self) -> None:

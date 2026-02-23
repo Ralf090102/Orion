@@ -45,6 +45,7 @@
 	// Voice cloning state (Qwen3)
 	let clonedVoices = $state<any[]>([]);
 	let loadingClonedVoices = $state(false);
+	let activeQwen3Voice = $state<string | null>(null);
 	let cloningVoice = $state(false);
 	let recording = $state(false);
 	let recordingTime = $state(0);
@@ -553,6 +554,9 @@
 			if (clonedVoices.length > 0 && !synthesisTest.voice_id) {
 				synthesisTest.voice_id = clonedVoices[0].voice_id;
 			}
+
+			// Also refresh the active voice indicator
+			await loadActiveVoice();
 		} catch (err) {
 			if (currentEngine !== 'piper') {
 				console.error('Failed to load cloned voices:', err);
@@ -560,6 +564,39 @@
 			}
 		} finally {
 			loadingClonedVoices = false;
+		}
+	}
+
+	async function loadActiveVoice() {
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/speech/active-voice`);
+			if (response.ok) {
+				const data = await response.json();
+				activeQwen3Voice = data.active_voice ?? null;
+			}
+		} catch (err) {
+			console.error('Failed to load active voice:', err);
+		}
+	}
+
+	async function setActiveVoice(voiceId: string) {
+		try {
+			error = null;
+			const response = await fetch(`${BACKEND_URL}/api/speech/active-voice`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ voice_id: voiceId }),
+			});
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.detail || 'Failed to set active voice');
+			}
+			const data = await response.json();
+			activeQwen3Voice = data.active_voice ?? null;
+			success = data.message;
+		} catch (err) {
+			error = (err as Error).message;
+			console.error('Failed to set active voice:', err);
 		}
 	}
 
@@ -763,6 +800,7 @@
 		await loadWhisperConfig();
 		await loadTTSConfig();
 		await checkHealth();
+		await loadActiveVoice();
 		
 		// Load voices based on current engine
 		if (currentEngine === 'piper') {
@@ -1474,9 +1512,17 @@
 				{:else}
 					<div class="space-y-3">
 						{#each clonedVoices as voice}
-							<div class="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+							<div class="flex items-center justify-between rounded-lg border {voice.voice_id === activeQwen3Voice ? 'border-purple-400 dark:border-purple-500 bg-purple-50 dark:bg-purple-900/20' : 'border-gray-200 dark:border-gray-700'} px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
 								<div class="flex-1">
-									<div class="font-medium">{voice.voice_id}</div>
+									<div class="flex items-center gap-2">
+										<span class="font-medium">{voice.voice_id}</span>
+										{#if voice.voice_id === activeQwen3Voice}
+											<span class="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+												<span class="size-1.5 rounded-full bg-purple-500 inline-block"></span>
+												Active
+											</span>
+										{/if}
+									</div>
 									<div class="text-sm text-gray-600 dark:text-gray-400">
 										{voice.duration.toFixed(1)}s sample • {voice.sample_rate}Hz
 										{#if voice.has_ref_text}
@@ -1484,13 +1530,25 @@
 										{/if}
 									</div>
 								</div>
-								<button
-									onclick={() => deleteClonedVoice(voice.voice_id)}
-									class="text-red-600 hover:text-red-700 dark:text-red-400 p-2"
-									title="Delete voice"
-								>
-									<CarbonTrash class="size-5" />
-								</button>
+								<div class="flex items-center gap-1">
+									{#if voice.voice_id !== activeQwen3Voice}
+										<button
+											onclick={() => setActiveVoice(voice.voice_id)}
+											class="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-purple-600 hover:bg-purple-100 dark:text-purple-400 dark:hover:bg-purple-900/30"
+											title="Set as active voice"
+										>
+											<CarbonCheckmark class="size-4" />
+											Set Active
+										</button>
+									{/if}
+									<button
+										onclick={() => deleteClonedVoice(voice.voice_id)}
+										class="text-red-600 hover:text-red-700 dark:text-red-400 p-2"
+										title="Delete voice"
+									>
+										<CarbonTrash class="size-5" />
+									</button>
+								</div>
 							</div>
 						{/each}
 					</div>

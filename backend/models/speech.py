@@ -579,3 +579,28 @@ class EngineSelectResponse(BaseModel):
                 "previous_engine": "piper",
             }
         }
+
+
+class ActiveVoiceRequest(BaseModel):
+    """Request model for setting the active Qwen3 voice."""
+    
+    voice_id: Optional[str] = Field(None, description="Voice ID to set as active, or null to clear")
+
+
+class ActiveVoiceResponse(BaseModel):
+    """Response model for active voice operations."""
+    
+    status: str = Field(..., description="Operation status")
+    active_voice: Optional[str] = Field(None, description="Currently active Qwen3 voice ID")
+    engine: str = Field(..., description="Currently active TTS engine")
+    message: str = Field(..., description="Status message")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "active_voice": "my_cloned_voice",
+                "engine": "qwen3",
+                "message": "Active Qwen3 voice set to my_cloned_voice",
+            }
+        }

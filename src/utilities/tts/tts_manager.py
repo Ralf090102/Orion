@@ -351,8 +351,8 @@ class UnifiedTTSManager:
             Engine name: "piper" or "qwen3"
         """
         if voice_id is None:
-            # Use default
-            return "piper"
+            # No specific voice — respect the configured default engine
+            return self.tts_config.default_engine
         
         # Check catalog
         if voice_id in self.voice_catalog:
@@ -388,7 +388,11 @@ class UnifiedTTSManager:
         """
         # Use defaults if not specified
         if voice_id is None:
-            voice_id = self.tts_config.default_voice
+            if self.tts_config.default_engine == "qwen3":
+                # Use the user-selected active Qwen3 voice (may be None — Qwen3 handles that)
+                voice_id = self.tts_config.active_qwen3_voice
+            else:
+                voice_id = self.tts_config.default_voice
         if speed is None:
             speed = self.tts_config.default_speed
         

@@ -18,6 +18,8 @@ from fastapi.responses import Response, StreamingResponse
 
 from backend.dependencies import get_config_dependency, get_tts_manager, reset_tts_manager
 from backend.models.speech import (
+    ActiveVoiceRequest,
+    ActiveVoiceResponse,
     ClonedVoiceInfo,
     ClonedVoicesListResponse,
     EngineSelectRequest,
@@ -515,6 +517,75 @@ async def switch_tts_engine(
             status_code=500,
             detail=f"Engine switch failed: {str(e)}"
         )
+
+
+# ========== ACTIVE VOICE ENDPOINTS ==========
+@router.get(
+    "/active-voice",
+    response_model=ActiveVoiceResponse,
+    summary="Get the active Qwen3 voice",
+    description="Returns the currently selected Qwen3 voice and the active TTS engine.",
+)
+async def get_active_voice(
+    config: OrionConfig = Depends(get_config_dependency),
+) -> ActiveVoiceResponse:
+    """Return the active Qwen3 voice selection and current engine."""
+    return ActiveVoiceResponse(
+        status="success",
+        active_voice=config.tts.active_qwen3_voice,
+        engine=config.tts.default_engine,
+        message="Active voice retrieved",
+    )
+
+
+@router.patch(
+    "/active-voice",
+    response_model=ActiveVoiceResponse,
+    summary="Set the active Qwen3 voice",
+    description="Select which cloned Qwen3 voice is used when TTS is triggered without an explicit voice.",
+)
+async def set_active_voice(
+    request: ActiveVoiceRequest,
+    config: OrionConfig = Depends(get_config_dependency),
+) -> ActiveVoiceResponse:
+    """Set the active Qwen3 voice for default synthesis."""
+    try:
+        tts_manager = get_tts_manager()
+
+        if request.voice_id is not None:
+            # Validate the voice exists
+            catalog = tts_manager.voice_catalog
+            if request.voice_id not in catalog:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Voice '{request.voice_id}' not found in voice catalog.",
+                )
+            if catalog[request.voice_id].engine != "qwen3":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Voice '{request.voice_id}' is not a Qwen3 voice.",
+                )
+
+        config.tts.active_qwen3_voice = request.voice_id
+        msg = (
+            f"Active Qwen3 voice set to '{request.voice_id}'"
+            if request.voice_id
+            else "Active Qwen3 voice cleared"
+        )
+        logger.info(msg)
+
+        return ActiveVoiceResponse(
+            status="success",
+            active_voice=config.tts.active_qwen3_voice,
+            engine=config.tts.default_engine,
+            message=msg,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to set active voice: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to set active voice: {str(e)}")
 
 
 # ========== TEXT-TO-SPEECH (TTS) ENDPOINTS ==========
