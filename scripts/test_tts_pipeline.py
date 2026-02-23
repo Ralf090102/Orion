@@ -36,14 +36,13 @@ def test_1_qwen3_manager():
     
     try:
         from src.utilities.tts.qwen3_manager import Qwen3Manager
-        from src.utilities.config import Qwen3Config
+        from src.utilities.config import get_config
         
         # Create config with Qwen3 enabled
-        config = Qwen3Config(
-            enabled=True,
-            device="cuda",
-            model_precision="float16",
-        )
+        config = get_config()
+        config.qwen3.enabled = True
+        config.qwen3.device = "cuda"
+        config.qwen3.model_precision = "float16"
         
         print("✓ Qwen3Manager imported successfully")
         
@@ -102,7 +101,7 @@ def test_2_voice_cloning():
     
     try:
         from src.utilities.tts.qwen3_manager import Qwen3Manager
-        from src.utilities.config import Qwen3Config
+        from src.utilities.config import get_config
         import soundfile as sf
         
         # Create synthetic audio sample (5 seconds of noise - just for testing)
@@ -120,7 +119,9 @@ def test_2_voice_cloning():
         
         # Extract voice embedding
         print("\nExtracting voice embedding...")
-        config = Qwen3Config(enabled=True, device="cuda")
+        config = get_config()
+        config.qwen3.enabled = True
+        config.qwen3.device = "cuda"
         manager = Qwen3Manager(config)
         manager.load_model()
         
