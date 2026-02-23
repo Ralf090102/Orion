@@ -92,14 +92,25 @@
 		try {
 			loading = true;
 			error = null;
-			const response = await fetch(`${BACKEND_URL}/api/settings`);
+			const [settingsRes, healthRes] = await Promise.all([
+				fetch(`${BACKEND_URL}/api/settings`),
+				fetch(`${BACKEND_URL}/api/health`),
+			]);
 			
-			if (!response.ok) {
-				throw new Error(`Failed to load settings: ${response.statusText}`);
+			if (!settingsRes.ok) {
+				throw new Error(`Failed to load settings: ${settingsRes.statusText}`);
 			}
 			
-			const data = await response.json();
+			const data = await settingsRes.json();
 			settings = data;
+
+			// Auto-enable GPU if hardware is detected
+			if (healthRes.ok) {
+				const health = await healthRes.json();
+				if (health.gpu_available && !settings.gpu.enabled) {
+					settings.gpu.enabled = true;
+				}
+			}
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load settings';
 			console.error('Failed to load settings:', err);

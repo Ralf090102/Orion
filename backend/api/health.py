@@ -96,17 +96,16 @@ async def get_status(
         # Return empty stats if retriever not initialized
         kb_stats = KnowledgeBaseStats()
     
-    # Check GPU availability
+    # Check GPU availability — always probe hardware regardless of config.gpu.enabled
     gpu_available = False
     gpu_name = None
-    if config.gpu.enabled:
-        try:
-            import torch
-            if torch.cuda.is_available():
-                gpu_available = True
-                gpu_name = torch.cuda.get_device_name(0)
-        except ImportError:
-            logger.warning("PyTorch not installed, GPU unavailable")
+    try:
+        import torch
+        if torch.cuda.is_available():
+            gpu_available = True
+            gpu_name = torch.cuda.get_device_name(0)
+    except ImportError:
+        logger.warning("PyTorch not installed, GPU unavailable")
     
     # Check Ollama connection
     ollama_available = False
