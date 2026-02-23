@@ -272,6 +272,8 @@ class StatusResponse(BaseModel):
     ollama_available: bool = Field(default=False, description="Ollama service status")
     embedding_model: str = Field(default="", description="Current embedding model")
     llm_model: str = Field(default="", description="Current LLM model")
+    tts_engine: Optional[str] = Field(default=None, description="Active TTS engine (piper/qwen3)")
+    qwen3_available: bool = Field(default=False, description="Qwen3-TTS voice cloning availability")
 
     class Config:
         json_schema_extra = {
@@ -291,6 +293,8 @@ class StatusResponse(BaseModel):
                 "ollama_available": True,
                 "embedding_model": "all-MiniLM-L12-v2",
                 "llm_model": "mistral:latest",
+                "tts_engine": "qwen3",
+                "qwen3_available": True,
             }
         }
 

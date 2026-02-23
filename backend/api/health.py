@@ -116,6 +116,10 @@ async def get_status(
         except Exception as e:
             logger.warning(f"Failed to check Ollama connection: {e}")
     
+    # Check TTS status
+    tts_engine = config.tts.default_engine if config.tts.enabled else None
+    qwen3_available = config.qwen3.enabled and gpu_available
+    
     return StatusResponse(
         status="healthy" if ollama_available else "degraded",
         version=config.version,
@@ -125,6 +129,8 @@ async def get_status(
         ollama_available=ollama_available,
         embedding_model=config.rag.embedding.model,
         llm_model=config.rag.llm.model,
+        tts_engine=tts_engine,
+        qwen3_available=qwen3_available,
     )
 
 

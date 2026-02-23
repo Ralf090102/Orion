@@ -430,19 +430,43 @@ async def switch_tts_engine(
         
         # Validate engine choice
         if request.engine == "qwen3":
-            # Check if Qwen3 is available
-            if not config.qwen3.enabled:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Qwen3-TTS is not enabled. Set QWEN3_ENABLED=true in config."
-                )
-            
+            # Validate Qwen3 availability and auto-enable if possible
             tts_manager = get_tts_manager()
+            
+            # Check if TTS manager has Qwen3 support
             if not hasattr(tts_manager, 'qwen3_manager'):
                 raise HTTPException(
                     status_code=400,
-                    detail="Qwen3-TTS is not available in this TTS manager instance."
+                    detail="Qwen3-TTS is not available. UnifiedTTSManager not configured with Qwen3 support."
                 )
+            
+            # Check GPU availability (Qwen3 requires GPU)
+            try:
+                import torch
+                if not torch.cuda.is_available():
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Qwen3-TTS requires GPU (CUDA). No GPU detected on this system."
+                    )
+                
+                # Check minimum VRAM
+                if torch.cuda.is_available():
+                    vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                    if vram_gb < config.qwen3.min_vram_gb:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Qwen3-TTS requires {config.qwen3.min_vram_gb}GB VRAM, but only {vram_gb:.1f}GB available."
+                        )
+            except ImportError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="PyTorch not installed. Qwen3-TTS requires PyTorch with CUDA support."
+                )
+            
+            # Auto-enable Qwen3 if validation passed
+            if not config.qwen3.enabled:
+                logger.info("Auto-enabling Qwen3-TTS after successful validation")
+                config.qwen3.enabled = True
             
             # Preload Qwen3 model for voice cloning (may take 7-13 seconds on GPU)
             logger.info("Preloading Qwen3 model for voice cloning...")
