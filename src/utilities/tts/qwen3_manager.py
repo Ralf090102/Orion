@@ -33,12 +33,14 @@ class VoiceEmbedding:
         sample_rate: Audio sample rate (Hz)
         duration: Duration of reference audio (seconds)
         created_at: Unix timestamp of creation
+        ref_text: Optional reference text transcript for ICL mode
     """
     voice_id: str
     embedding: np.ndarray  # Audio data for Qwen3-TTS Base model
     sample_rate: int
     duration: float
     created_at: float
+    ref_text: Optional[str] = None  # Reference text for ICL mode
 
 
 class Qwen3Manager:
@@ -267,11 +269,8 @@ class Qwen3Manager:
                 sample_rate=sr,
                 duration=duration,
                 created_at=time.time(),
+                ref_text=ref_text,  # Store reference text in dataclass field
             )
-            
-            # Store reference text if provided
-            if ref_text:
-                embedding.ref_text = ref_text  # Add dynamic attribute
             
             # Cache embedding
             if self.qwen3_config.cache_embeddings:
@@ -346,7 +345,7 @@ class Qwen3Manager:
         try:
             # Get audio file path and reference text from embedding
             ref_audio_path = str(embedding.embedding[0])
-            ref_text = getattr(embedding, 'ref_text', None)
+            ref_text = embedding.ref_text  # Now a proper dataclass field
             
             # Call generate_voice_clone with reference audio
             # x_vector_only_mode=False enables ICL mode (better quality with ref_text)

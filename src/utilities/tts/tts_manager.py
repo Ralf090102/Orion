@@ -72,7 +72,7 @@ class UnifiedTTSManager:
         # Engine managers (lazy loading)
         self.piper_voice = None
         self.current_piper_voice: Optional[str] = None
-        self.qwen3_manager = None
+        self._qwen3_manager = None  # Private: use qwen3_manager property for lazy loading
         
         # Cache and queue (optional, set via setters)
         self.cache = None
@@ -122,10 +122,10 @@ class UnifiedTTSManager:
         """Initialize Qwen3-TTS manager."""
         try:
             from .qwen3_manager import Qwen3Manager
-            self.qwen3_manager = Qwen3Manager(self.config)
+            self._qwen3_manager = Qwen3Manager(self.config)
             
             # Add Qwen3 cloned voices to catalog
-            for voice_id, embedding in self.qwen3_manager.list_cloned_voices().items():
+            for voice_id, embedding in self._qwen3_manager.list_cloned_voices().items():
                 self.voice_catalog[voice_id] = VoiceInfo(
                     voice_id=voice_id,
                     name=voice_id.replace("_", " ").title(),
@@ -146,6 +146,38 @@ class UnifiedTTSManager:
         except Exception as e:
             logger.error(f"Failed to initialize Qwen3-TTS: {e}")
             self.qwen3_config.enabled = False
+    
+    @property
+    def qwen3_manager(self):
+        """Lazy-load Qwen3Manager when first accessed.
+        
+        This allows Qwen3 to be initialized even if it was disabled
+        at startup but later enabled via engine switch.
+        
+        Returns:
+            Qwen3Manager instance or None if not available
+        """
+        # If already initialized, return it
+        if self._qwen3_manager is not None:
+            return self._qwen3_manager
+        
+        # Check if Qwen3 is enabled
+        if not self.qwen3_config.enabled:
+            logger.warning(f"Qwen3-TTS access attempted but not enabled in configuration (qwen3.enabled={self.qwen3_config.enabled})")
+            return None
+        
+        # Initialize Qwen3 on first access
+        logger.info("Lazy-loading Qwen3-TTS manager (enabled={}, first access)...".format(self.qwen3_config.enabled))
+        try:
+            self._init_qwen3()
+            if self._qwen3_manager is None:
+                logger.error("Qwen3-TTS initialization completed but manager is still None")
+            else:
+                logger.info(f"✓ Qwen3-TTS manager lazy-loaded successfully")
+            return self._qwen3_manager
+        except Exception as e:
+            logger.error(f"Failed to lazy-load Qwen3-TTS: {e}", exc_info=True)
+            return None
     
     def set_cache(self, cache) -> None:
         """Set TTSCache instance for audio caching.

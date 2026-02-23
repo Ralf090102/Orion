@@ -988,6 +988,14 @@ async def clone_voice(
         try:
             # Extract voice embedding using Qwen3Manager
             qwen3_manager = tts_manager.qwen3_manager
+            
+            # Check if lazy-loading succeeded
+            if qwen3_manager is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Qwen3-TTS manager failed to initialize. Check logs for details. Ensure qwen-tts package is installed."
+                )
+            
             embedding = qwen3_manager.extract_voice_embedding(
                 voice_id=voice_name,
                 audio_path=tmp_path,
