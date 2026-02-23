@@ -19,7 +19,7 @@
 
 	let { data = $bindable() } = $props();
 
-	const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
+	const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 	const settings = useSettingsStore();
 	
 	let pending = $state(false);

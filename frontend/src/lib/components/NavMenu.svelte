@@ -149,10 +149,10 @@
 >
 	<a
 		class="flex select-none items-center rounded-xl text-lg font-semibold transition-opacity hover:opacity-80"
-		href="{publicConfig.PUBLIC_ORIGIN}{base}/"
+		href="{publicConfig.VITE_ORIGIN}{base}/"
 	>
 		<Logo classNames="dark:invert mr-[2px]" />
-		{publicConfig.PUBLIC_APP_NAME}
+		{publicConfig.VITE_APP_NAME}
 	</a>
 	<a
 		href={`${base}/`}

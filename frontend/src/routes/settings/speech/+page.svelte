@@ -13,7 +13,7 @@
 	import CarbonUpload from "~icons/carbon/upload";
 	import CarbonRecordingFilled from "~icons/carbon/recording-filled";
 
-	const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
+	const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 	// Whisper STT configuration
 	let whisperConfig = $state({

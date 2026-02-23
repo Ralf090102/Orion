@@ -71,7 +71,7 @@ export async function fetchMessageUpdates(
 		throw Error("Body not defined");
 	}
 
-	if (!(page.data.publicConfig.PUBLIC_SMOOTH_UPDATES === "true")) {
+	if (!(page.data.publicConfig.VITE_SMOOTH_UPDATES === "true")) {
 		return endpointStreamToIterator(response, abortController);
 	}
 

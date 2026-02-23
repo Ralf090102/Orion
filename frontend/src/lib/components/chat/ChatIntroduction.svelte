@@ -24,27 +24,27 @@
 		class="flex -translate-y-16 select-none items-center rounded-xl text-3xl font-semibold md:-translate-y-12 md:text-5xl"
 	>
 		<Logo classNames="size-12 md:size-20 dark:invert mr-0.5" />
-		{publicConfig.PUBLIC_APP_NAME}
+		{publicConfig.VITE_APP_NAME}
 	</div>
 	<!-- <div class="lg:col-span-1">
 		<div>
 			<div class="mb-3 flex items-center text-2xl font-semibold">
 				<Logo classNames="mr-1 flex-none dark:invert" />
-				{publicConfig.PUBLIC_APP_NAME}
+				{publicConfig.VITE_APP_NAME}
 				<div
 					class="ml-3 flex h-6 items-center rounded-lg border border-gray-100 bg-gray-50 px-2 text-base text-gray-400 dark:border-gray-700/60 dark:bg-gray-800"
 				>
-					{publicConfig.PUBLIC_VERSION}
+					{publicConfig.VITE_VERSION}
 				</div>
 			</div>
 			<p class="text-base text-gray-600 dark:text-gray-400">
-				{publicConfig.PUBLIC_APP_DESCRIPTION ||
+				{publicConfig.VITE_APP_DESCRIPTION ||
 					"Making the community's best AI chat models available to everyone."}
 			</p>
 		</div>
 	</div>
 	<div class="lg:col-span-2 lg:pl-24">
-		{#each JSON5.parse(publicConfig.PUBLIC_ANNOUNCEMENT_BANNERS || "[]") as banner}
+		{#each JSON5.parse(publicConfig.VITE_ANNOUNCEMENT_BANNERS || "[]") as banner}
 			<AnnouncementBanner classNames="mb-4" title={banner.title}>
 				<a
 					target={banner.external ? "_blank" : "_self"}

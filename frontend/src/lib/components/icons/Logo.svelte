@@ -14,6 +14,6 @@
 	width="32"
 	height="32"
 	class={classNames}
-	alt="{publicConfig.PUBLIC_APP_NAME} logo"
+	alt="{publicConfig.VITE_APP_NAME} logo"
 	src="{publicConfig.assetPath}/logo.svg"
 />

@@ -5,8 +5,8 @@ import { page } from "$app/state";
 // If `id` is already a 7-char share id, no network call is made.
 export async function createShareLink(id: string): Promise<string> {
 	const prefix =
-		page.data.publicConfig.PUBLIC_SHARE_PREFIX ||
-		`${page.data.publicConfig.PUBLIC_ORIGIN || page.url.origin}${base}`;
+		page.data.publicConfig.VITE_SHARE_PREFIX ||
+		`${page.data.publicConfig.VITE_ORIGIN || page.url.origin}${base}`;
 
 	if (id.length === 7) {
 		return `${prefix}/r/${id}`;

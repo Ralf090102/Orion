@@ -19,11 +19,11 @@ export const GET = ({ url }) => {
 	}
 	return new Response(
 		JSON.stringify({
-			client_id: new URL(url, config.PUBLIC_ORIGIN || url.origin).toString(),
-			client_name: config.PUBLIC_APP_NAME,
-			client_uri: `${config.PUBLIC_ORIGIN || url.origin}${base}`,
+			client_id: new URL(url, config.VITE_ORIGIN || url.origin).toString(),
+			client_name: config.VITE_APP_NAME,
+			client_uri: `${config.VITE_ORIGIN || url.origin}${base}`,
 			redirect_uris: [
-				new URL(`${base}/login/callback`, config.PUBLIC_ORIGIN || url.origin).toString(),
+				new URL(`${base}/login/callback`, config.VITE_ORIGIN || url.origin).toString(),
 			],
 			token_endpoint_auth_method: "none",
 			scopes: OIDConfig.SCOPES,

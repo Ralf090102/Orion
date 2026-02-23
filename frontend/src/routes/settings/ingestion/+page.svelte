@@ -10,7 +10,7 @@
 	import CarbonFolder from "~icons/carbon/folder";
 	import CarbonDocument from "~icons/carbon/document";
 
-	const BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL || 'http://localhost:8000';
+	const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 	// Ingestion form state
 	let ingestPaths = $state<string[]>([""]);
