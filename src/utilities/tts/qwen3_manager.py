@@ -148,13 +148,20 @@ class Qwen3Manager:
                 logger.warning("FlashAttention not available. Using eager attention (slower).")
                 logger.info("Install with: pip install -U flash-attn --no-build-isolation")
             
-            # Load model
+            # Determine dtype
+            dtype = torch.float16 if self.qwen3_config.model_precision == "float16" else torch.float32
+            
+            # Load model (don't pass device here, will move afterwards)
             self.model = Qwen3TTSModel.from_pretrained(
                 self.qwen3_config.model_name,
-                device=self.device,
-                torch_dtype=torch.float16 if self.qwen3_config.model_precision == "float16" else torch.float32,
+                dtype=dtype,
                 attn_implementation=attn_impl,
             )
+            
+            # Move model to device after loading
+            if self.device != "cpu":
+                logger.info(f"Moving model to {self.device}...")
+                self.model = self.model.to(self.device)
             
             self.model_loaded_at = time.time()
             self.last_used_at = time.time()
