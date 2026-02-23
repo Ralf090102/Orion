@@ -15,6 +15,7 @@
 	import FileDropzone from "./FileDropzone.svelte";
 	import RetryBtn from "../RetryBtn.svelte";
 	import file2base64 from "$lib/utils/file2base64";
+	import { BACKEND_URL } from '$lib/utils/backendUrl';
 	import { base } from "$app/paths";
 	import ChatMessage from "./ChatMessage.svelte";
 	import ScrollToBottomBtn from "../ScrollToBottomBtn.svelte";
@@ -397,7 +398,6 @@
 			formData.append('audio', audioBlob, 'recording.webm');
 			formData.append('language', 'en'); // Optional: specify language
 
-			const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 			const response = await fetch(`${BACKEND_URL}/api/speech/transcribe`, {
 				method: "POST",
 				body: formData,
@@ -434,7 +434,6 @@
 			formData.append('audio', audioBlob, 'recording.webm');
 			formData.append('language', 'en'); // Optional: specify language
 
-			const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 			const response = await fetch(`${BACKEND_URL}/api/speech/transcribe`, {
 				method: "POST",
 				body: formData,

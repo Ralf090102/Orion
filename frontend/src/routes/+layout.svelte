@@ -20,13 +20,13 @@
 	import { isPro } from "$lib/stores/isPro";
 	import IconShare from "$lib/components/icons/IconShare.svelte";
 	import { shareModal } from "$lib/stores/shareModal";
+	import { BACKEND_URL } from '$lib/utils/backendUrl';
 
 	let { data = $bindable(), children } = $props();
 
 	setContext("publicConfig", data.publicConfig);
 
 	const publicConfig = data.publicConfig;
-	const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 	let conversations = $state(data.conversations);
 	$effect(() => {

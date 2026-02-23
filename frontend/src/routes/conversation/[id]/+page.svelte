@@ -19,8 +19,7 @@
 
 	let { data = $bindable() } = $props();
 
-	const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-	const BACKEND_WS = import.meta.env.VITE_BACKEND_WS || BACKEND_URL.replace(/^http/, 'ws');
+	import { BACKEND_URL, BACKEND_WS } from '$lib/utils/backendUrl';
 	const settings = useSettingsStore();
 	
 	let pending = $state(false);
@@ -37,10 +36,21 @@
 		conversations = data.conversations;
 	});
 
+	// UUID generation — crypto.randomUUID() only works in secure contexts (HTTPS/localhost)
+	function generateId(): string {
+		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+			return crypto.randomUUID();
+		}
+		return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+			const r = (Math.random() * 16) | 0;
+			return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+		});
+	}
+
 	// Simple message structure for local use
 	function createMessage(from: 'user' | 'assistant', content: string, msgFiles?: any[]): Message {
 		return {
-			id: crypto.randomUUID(),
+			id: generateId(),
 			from,
 			content,
 			files: msgFiles,

@@ -3,7 +3,7 @@
  * Simple fetch wrappers with proper error handling
  */
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+import { BACKEND_URL } from '$lib/utils/backendUrl';
 
 /**
  * API error class for better error handling

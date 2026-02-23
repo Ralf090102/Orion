@@ -29,7 +29,7 @@
 	import MCPServerManager from "./mcp/MCPServerManager.svelte";
 
 	const publicConfig = usePublicConfig();
-	const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+	import { BACKEND_URL } from '$lib/utils/backendUrl';
 
 	interface Props {
 		conversations: ConvSidebar[];

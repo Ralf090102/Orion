@@ -4,7 +4,7 @@
 	import CarbonReset from "~icons/carbon/reset";
 	import CarbonWarning from "~icons/carbon/warning";
 
-	const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+	import { BACKEND_URL } from '$lib/utils/backendUrl';
 
 	// Settings data - will be loaded from backend
 	let settings = $state({

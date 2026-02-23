@@ -1,11 +1,6 @@
 import { UrlDependency } from "$lib/types/UrlDependency";
 import type { ConvSidebar } from "$lib/types/ConvSidebar";
-import { browser } from '$app/environment';
-
-// Use localhost for server-side fetches (SSR), external IP for client-side (browser)
-const BACKEND_URL = browser 
-	? (import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000')
-	: 'http://localhost:8000';
+import { BACKEND_URL } from '$lib/utils/backendUrl';
 
 export const load = async ({ depends, fetch }) => {
 	depends(UrlDependency.ConversationList);

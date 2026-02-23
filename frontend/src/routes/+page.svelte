@@ -23,7 +23,7 @@
 	let draft = $state("");
 
 	const settings = useSettingsStore();
-	const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+	import { BACKEND_URL } from '$lib/utils/backendUrl';
 
 	async function createConversation(message: string) {
 		try {

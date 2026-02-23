@@ -7,7 +7,7 @@
 	import ModelParametersModal from "$lib/components/ModelParametersModal.svelte";
 
 	const settings = useSettingsStore();
-	const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+	import { BACKEND_URL } from '$lib/utils/backendUrl';
 
 	let models = $state<Array<{
 		id: string;

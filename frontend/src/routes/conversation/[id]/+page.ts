@@ -2,12 +2,7 @@ import { UrlDependency } from "$lib/types/UrlDependency";
 import { redirect } from "@sveltejs/kit";
 import { base } from "$app/paths";
 import type { PageLoad } from "./$types";
-import { browser } from '$app/environment';
-
-// Use localhost for server-side fetches (SSR), external IP for client-side (browser)
-const BACKEND_URL = browser 
-	? (import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000')
-	: 'http://localhost:8000';
+import { BACKEND_URL } from '$lib/utils/backendUrl';
 
 export const load: PageLoad = async ({ params, depends, fetch, parent }) => {
 	depends(UrlDependency.Conversation);
