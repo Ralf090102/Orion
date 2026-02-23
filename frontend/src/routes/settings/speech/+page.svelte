@@ -59,6 +59,15 @@
 		audio_file: null as File | null
 	});
 
+	// Synthesis test state (Qwen3)
+	let synthesisTest = $state({
+		text: '',
+		voice_id: '',
+		synthesizing: false,
+		audioUrl: null as string | null
+	});
+	let currentSynthesisAudio: HTMLAudioElement | null = null;
+
 	// UI state
 	let loading = $state(false);
 	let saving = $state(false);
@@ -498,6 +507,11 @@
 
 			const data = await response.json();
 			clonedVoices = data.voices || [];
+
+			// Auto-select first voice in synthesis test if none selected
+			if (clonedVoices.length > 0 && !synthesisTest.voice_id) {
+				synthesisTest.voice_id = clonedVoices[0].voice_id;
+			}
 		} catch (err) {
 			if (currentEngine !== 'piper') {
 				console.error('Failed to load cloned voices:', err);
@@ -635,6 +649,59 @@
 		} catch (err) {
 			error = (err as Error).message;
 			console.error('Failed to delete voice:', err);
+		}
+	}
+
+	async function testSynthesisQwen3() {
+		if (!synthesisTest.text.trim()) {
+			error = 'Please enter text to synthesize';
+			return;
+		}
+		if (!synthesisTest.voice_id) {
+			error = 'Please select a voice to test';
+			return;
+		}
+
+		try {
+			synthesisTest.synthesizing = true;
+			error = null;
+
+			// Stop any currently playing audio
+			if (currentSynthesisAudio) {
+				currentSynthesisAudio.pause();
+				currentSynthesisAudio = null;
+			}
+			if (synthesisTest.audioUrl) {
+				URL.revokeObjectURL(synthesisTest.audioUrl);
+				synthesisTest.audioUrl = null;
+			}
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/synthesize-qwen3`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					text: synthesisTest.text,
+					voice_id: synthesisTest.voice_id,
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.detail || 'Synthesis failed');
+			}
+
+			const blob = await response.blob();
+			synthesisTest.audioUrl = URL.createObjectURL(blob);
+
+			// Auto-play
+			currentSynthesisAudio = new Audio(synthesisTest.audioUrl);
+			currentSynthesisAudio.play();
+			success = `Synthesized with voice "${synthesisTest.voice_id}"`;
+		} catch (err) {
+			error = (err as Error).message;
+			console.error('Synthesis test failed:', err);
+		} finally {
+			synthesisTest.synthesizing = false;
 		}
 	}
 
@@ -1388,6 +1455,90 @@
 					</div>
 				{/if}
 			</div>
+
+			<!-- Test Synthesis -->
+			{#if clonedVoices.length > 0}
+			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
+				<div class="flex items-center gap-3 mb-5">
+					<div class="rounded-lg bg-green-100 p-3 text-green-600 dark:bg-green-900/30 dark:text-green-400">
+						<CarbonPlay class="size-6" />
+					</div>
+					<div>
+						<h2 class="text-lg font-semibold">Test Synthesis</h2>
+						<p class="text-sm text-gray-600 dark:text-gray-400">
+							Preview how a cloned voice sounds on custom text
+						</p>
+					</div>
+				</div>
+
+				<div class="space-y-4">
+					<!-- Voice Selector -->
+					<div>
+						<label for="synthesis-voice" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Voice
+						</label>
+						<select
+							id="synthesis-voice"
+							bind:value={synthesisTest.voice_id}
+							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+						>
+							<option value="">Select a voice...</option>
+							{#each clonedVoices as voice}
+								<option value={voice.voice_id}>
+									{voice.voice_id} ({voice.duration.toFixed(1)}s{voice.has_ref_text ? ' · ICL' : ''})
+								</option>
+							{/each}
+						</select>
+					</div>
+
+					<!-- Text Input -->
+					<div>
+						<label for="synthesis-text" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Text to Speak
+						</label>
+						<textarea
+							id="synthesis-text"
+							bind:value={synthesisTest.text}
+							placeholder="Enter text to synthesize with the cloned voice..."
+							rows="3"
+							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+						></textarea>
+					</div>
+
+					<!-- Actions Row -->
+					<div class="flex items-center justify-between gap-4">
+						<!-- Audio Player (shows when audio is ready) -->
+						{#if synthesisTest.audioUrl}
+							<audio
+								src={synthesisTest.audioUrl}
+								controls
+								class="flex-1 h-10"
+							></audio>
+						{:else}
+							<div class="flex-1 text-sm text-gray-500 dark:text-gray-400">
+								{synthesisTest.synthesizing ? 'Generating audio — this may take a moment on GPU...' : 'Audio will appear here after synthesis'}
+							</div>
+						{/if}
+
+						<button
+							onclick={testSynthesisQwen3}
+							disabled={synthesisTest.synthesizing || !synthesisTest.voice_id || !synthesisTest.text.trim()}
+							class="flex-shrink-0 rounded-lg bg-green-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 dark:bg-green-500 dark:hover:bg-green-600"
+						>
+							<div class="flex items-center gap-2">
+								{#if synthesisTest.synthesizing}
+									<div class="size-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+									Synthesizing...
+								{:else}
+									<CarbonPlay class="size-4" />
+									Synthesize
+								{/if}
+							</div>
+						</button>
+					</div>
+				</div>
+			</div>
+			{/if}
 
 			<!-- Qwen3 Info Box -->
 			<div class="rounded-lg border border-purple-200 bg-purple-50 p-4 dark:border-purple-800 dark:bg-purple-900/20">
