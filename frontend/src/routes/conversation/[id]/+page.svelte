@@ -73,7 +73,7 @@
 			
 			// Convert backend messages to frontend format
 			messages = sessionData.messages?.map((msg: any) => ({
-				id: crypto.randomUUID(),
+				id: generateId(),
 				from: msg.role === 'user' ? 'user' : 'assistant',
 				content: msg.content,
 				createdAt: new Date(msg.timestamp),

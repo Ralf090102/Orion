@@ -553,17 +553,18 @@ async def set_active_voice(
         tts_manager = get_tts_manager()
 
         if request.voice_id is not None:
-            # Validate the voice exists
-            catalog = tts_manager.voice_catalog
-            if request.voice_id not in catalog:
+            # Validate against the Qwen3 cloned-voice store (not the Piper catalog)
+            if not hasattr(tts_manager, 'qwen3_manager'):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Qwen3 TTS manager is not available.",
+                )
+            cloned = tts_manager.qwen3_manager.list_cloned_voices()
+            if request.voice_id not in cloned:
+                available = list(cloned.keys())
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Voice '{request.voice_id}' not found in voice catalog.",
-                )
-            if catalog[request.voice_id].engine != "qwen3":
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Voice '{request.voice_id}' is not a Qwen3 voice.",
+                    detail=f"Voice '{request.voice_id}' not found. Available: {available}",
                 )
 
         config.tts.active_qwen3_voice = request.voice_id

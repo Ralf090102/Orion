@@ -389,8 +389,14 @@ class UnifiedTTSManager:
         # Use defaults if not specified
         if voice_id is None:
             if self.tts_config.default_engine == "qwen3":
-                # Use the user-selected active Qwen3 voice (may be None — Qwen3 handles that)
+                # Prefer the user-selected active Qwen3 voice
                 voice_id = self.tts_config.active_qwen3_voice
+                # If none selected, auto-pick the first available cloned voice
+                if voice_id is None and hasattr(self, 'qwen3_manager'):
+                    cloned = self.qwen3_manager.list_cloned_voices()
+                    if cloned:
+                        voice_id = next(iter(cloned))
+                        logger.info(f"No active Qwen3 voice set — auto-selecting: {voice_id}")
             else:
                 voice_id = self.tts_config.default_voice
         if speed is None:
