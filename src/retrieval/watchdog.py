@@ -5,6 +5,7 @@ Monitors knowledge base directories for file changes and triggers
 incremental ingestion/deletion operations.
 """
 
+import hashlib
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -199,6 +200,46 @@ class FileWatcher:
         # State tracking
         self._is_watching = False
         self._watched_paths: list[str] = []
+        
+        # Content hash tracking to avoid redundant re-ingestion
+        self._file_hashes: dict[str, str] = {}
+        self._hash_lock = Lock()
+
+    def _compute_file_hash(self, file_path: str) -> str | None:
+        """
+        Compute SHA-256 hash of file content.
+        
+        Args:
+            file_path: Path to file
+            
+        Returns:
+            Hex digest of file hash, or None on error
+        """
+        try:
+            hasher = hashlib.sha256()
+            with open(file_path, "rb") as f:
+                # Read in chunks to handle large files
+                for chunk in iter(lambda: f.read(65536), b""):
+                    hasher.update(chunk)
+            return hasher.hexdigest()
+        except Exception as e:
+            log_warning(f"Failed to compute hash for {file_path}: {e}", config=self.config)
+            return None
+
+    def _get_stored_hash(self, file_path: str) -> str | None:
+        """Get stored hash for a file path."""
+        with self._hash_lock:
+            return self._file_hashes.get(file_path)
+
+    def _store_hash(self, file_path: str, file_hash: str) -> None:
+        """Store hash for a file path."""
+        with self._hash_lock:
+            self._file_hashes[file_path] = file_hash
+
+    def _remove_hash(self, file_path: str) -> None:
+        """Remove stored hash for a file path."""
+        with self._hash_lock:
+            self._file_hashes.pop(file_path, None)
 
     def _handle_file_created(self, file_path: str) -> None:
         """
@@ -208,6 +249,11 @@ class FileWatcher:
             file_path: Path to created file
         """
         log_info(f"File created: {file_path}", config=self.config)
+        
+        # Store hash for new file
+        file_hash = self._compute_file_hash(file_path)
+        if file_hash:
+            self._store_hash(file_path, file_hash)
         
         if self._on_file_added:
             try:
@@ -222,10 +268,22 @@ class FileWatcher:
     def _handle_file_modified(self, file_path: str) -> None:
         """
         Handle file modification event.
+        
+        Uses content hashing to skip re-ingestion if file content unchanged.
 
         Args:
             file_path: Path to modified file
         """
+        # Check if content actually changed using hash comparison
+        new_hash = self._compute_file_hash(file_path)
+        if new_hash:
+            stored_hash = self._get_stored_hash(file_path)
+            if stored_hash == new_hash:
+                log_debug(f"File unchanged (hash match), skipping: {file_path}", self.config)
+                return
+            # Update stored hash
+            self._store_hash(file_path, new_hash)
+        
         log_info(f"File modified: {file_path}", config=self.config)
         
         if self._on_file_modified:
@@ -246,6 +304,9 @@ class FileWatcher:
             file_path: Path to deleted file
         """
         log_info(f"File deleted: {file_path}", config=self.config)
+        
+        # Remove hash tracking for deleted file
+        self._remove_hash(file_path)
         
         # Use custom callback if provided, otherwise use vector store
         if self._on_file_deleted:
@@ -306,6 +367,12 @@ class FileWatcher:
             new_path: New file path after rename/move
         """
         log_info(f"File moved/renamed: {old_path} -> {new_path}", config=self.config)
+        
+        # Update hash tracking: remove old path, add new path
+        with self._hash_lock:
+            old_hash = self._file_hashes.pop(old_path, None)
+            if old_hash:
+                self._file_hashes[new_path] = old_hash
         
         # Use custom callback if provided
         if self._on_file_moved:
