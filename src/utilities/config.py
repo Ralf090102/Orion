@@ -596,6 +596,7 @@ class Qwen3Config(BaseConfig):
     default_language: str = "en"  # "en", "zh", "ja", "ko", etc.
     max_text_length: int = 100_000  # Safety ceiling; chunking handles long texts automatically
     batch_size: int = 1  # Future: batch processing
+    chunk_size: int = 200  # Characters per chunk for streaming synthesis
     
     # Performance settings
     auto_unload: bool = True  # Unload model after idle time
@@ -623,6 +624,7 @@ class Qwen3Config(BaseConfig):
             default_language=get_env_str("QWEN3_DEFAULT_LANGUAGE", "en"),
             max_text_length=get_env_int("QWEN3_MAX_TEXT_LENGTH", 100_000),
             batch_size=get_env_int("QWEN3_BATCH_SIZE", 1),
+            chunk_size=get_env_int("QWEN3_CHUNK_SIZE", 200),
             auto_unload=get_env_bool("QWEN3_AUTO_UNLOAD", True),
             unload_timeout_seconds=get_env_int("QWEN3_UNLOAD_TIMEOUT", 300),
             cache_embeddings=get_env_bool("QWEN3_CACHE_EMBEDDINGS", True),
@@ -647,6 +649,9 @@ class Qwen3Config(BaseConfig):
         
         if self.max_text_length <= 0:
             raise ValueError(f"max_text_length must be positive, got {self.max_text_length}")
+        
+        if self.chunk_size < 50 or self.chunk_size > 500:
+            raise ValueError(f"chunk_size must be between 50-500, got {self.chunk_size}")
         
         if self.unload_timeout_seconds < 0:
             raise ValueError(f"unload_timeout_seconds must be non-negative, got {self.unload_timeout_seconds}")

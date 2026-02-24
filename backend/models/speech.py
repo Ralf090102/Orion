@@ -604,3 +604,58 @@ class ActiveVoiceResponse(BaseModel):
                 "message": "Active Qwen3 voice set to my_cloned_voice",
             }
         }
+
+
+# ========== QWEN3 CONFIGURATION MODELS ==========
+class Qwen3ConfigUpdate(BaseModel):
+    """Request model for updating Qwen3-TTS configuration."""
+    
+    chunk_size: Optional[int] = Field(
+        default=None,
+        ge=50,
+        le=500,
+        description="Characters per chunk for streaming synthesis (50-500)",
+    )
+    auto_unload: Optional[bool] = Field(
+        default=None,
+        description="Automatically unload model after idle timeout",
+    )
+    unload_timeout_seconds: Optional[int] = Field(
+        default=None,
+        ge=60,
+        le=3600,
+        description="Idle timeout in seconds before auto-unload (60-3600)",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "chunk_size": 200,
+                "auto_unload": True,
+                "unload_timeout_seconds": 300,
+            }
+        }
+
+
+class Qwen3ConfigResponse(BaseModel):
+    """Response model for Qwen3-TTS configuration."""
+    
+    status: str = Field(..., description="Operation status")
+    message: str = Field(..., description="Status message")
+    config: dict = Field(..., description="Current Qwen3 configuration")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "message": "Qwen3 configuration retrieved",
+                "config": {
+                    "enabled": True,
+                    "chunk_size": 200,
+                    "auto_unload": True,
+                    "unload_timeout_seconds": 300,
+                    "model_loaded": True,
+                    "device": "cuda",
+                },
+            }
+        }

@@ -24,6 +24,8 @@ from backend.models.speech import (
     ClonedVoicesListResponse,
     EngineSelectRequest,
     EngineSelectResponse,
+    Qwen3ConfigResponse,
+    Qwen3ConfigUpdate,
     SpeechHealthResponse,
     TranscriptionResponse,
     TTSAsyncRequest,
@@ -1378,6 +1380,111 @@ async def synthesize_qwen3(
         raise HTTPException(
             status_code=500,
             detail=f"Synthesis failed: {str(e)}"
+        )
+
+
+# ========== QWEN3 CONFIGURATION ENDPOINTS ==========
+@router.get(
+    "/config/qwen3",
+    response_model=Qwen3ConfigResponse,
+    summary="Get Qwen3-TTS configuration",
+    description="Retrieve current Qwen3-TTS configuration settings",
+)
+async def get_qwen3_config(
+    config: OrionConfig = Depends(get_config_dependency),
+) -> Qwen3ConfigResponse:
+    """
+    Get current Qwen3-TTS configuration.
+    
+    Args:
+        config: Configuration dependency (injected)
+    
+    Returns:
+        Qwen3ConfigResponse with current settings
+    """
+    tts_manager = get_tts_manager()
+    model_loaded = False
+    
+    if hasattr(tts_manager, 'qwen3_manager') and tts_manager.qwen3_manager:
+        model_loaded = tts_manager.qwen3_manager.model is not None
+    
+    return Qwen3ConfigResponse(
+        status="success",
+        message="Qwen3 configuration retrieved",
+        config={
+            "enabled": config.qwen3.enabled,
+            "chunk_size": config.qwen3.chunk_size,
+            "auto_unload": config.qwen3.auto_unload,
+            "unload_timeout_seconds": config.qwen3.unload_timeout_seconds,
+            "device": config.qwen3.device,
+            "model_precision": config.qwen3.model_precision,
+            "model_loaded": model_loaded,
+        },
+    )
+
+
+@router.patch(
+    "/config/qwen3",
+    response_model=Qwen3ConfigResponse,
+    summary="Update Qwen3-TTS configuration",
+    description="Update Qwen3-TTS settings (chunk size, auto-unload, timeout)",
+)
+async def update_qwen3_config(
+    updates: Qwen3ConfigUpdate,
+    config: OrionConfig = Depends(get_config_dependency),
+) -> Qwen3ConfigResponse:
+    """
+    Update Qwen3-TTS configuration.
+    
+    Args:
+        updates: Configuration updates
+        config: Configuration dependency (injected)
+    
+    Returns:
+        Qwen3ConfigResponse with updated settings
+    """
+    try:
+        updated_fields = []
+        
+        if updates.chunk_size is not None:
+            config.qwen3.chunk_size = updates.chunk_size
+            updated_fields.append(f"chunk_size={updates.chunk_size}")
+        
+        if updates.auto_unload is not None:
+            config.qwen3.auto_unload = updates.auto_unload
+            updated_fields.append(f"auto_unload={updates.auto_unload}")
+        
+        if updates.unload_timeout_seconds is not None:
+            config.qwen3.unload_timeout_seconds = updates.unload_timeout_seconds
+            updated_fields.append(f"unload_timeout_seconds={updates.unload_timeout_seconds}")
+        
+        message = f"Updated: {', '.join(updated_fields)}" if updated_fields else "No changes"
+        logger.info(f"Qwen3 config updated: {message}")
+        
+        tts_manager = get_tts_manager()
+        model_loaded = False
+        if hasattr(tts_manager, 'qwen3_manager') and tts_manager.qwen3_manager:
+            model_loaded = tts_manager.qwen3_manager.model is not None
+        
+        return Qwen3ConfigResponse(
+            status="success",
+            message=message,
+            config={
+                "enabled": config.qwen3.enabled,
+                "chunk_size": config.qwen3.chunk_size,
+                "auto_unload": config.qwen3.auto_unload,
+                "unload_timeout_seconds": config.qwen3.unload_timeout_seconds,
+                "device": config.qwen3.device,
+                "model_precision": config.qwen3.model_precision,
+                "model_loaded": model_loaded,
+            },
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to update Qwen3 config: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to update configuration: {str(e)}"
         )
 
 
