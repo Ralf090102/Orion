@@ -24,7 +24,7 @@
 	import { MessageUpdateType, type MessageToolUpdate } from "$lib/types/MessageUpdate";
 	
 	// Import conversation mode for auto-TTS
-	import { conversationModeState, setStatus } from "$lib/stores/conversationMode.svelte";
+	import { convoModeState, setStatus } from "$lib/stores/conversationMode.svelte";
 	import { getActiveVoiceModeController } from "$lib/utils/voiceMode";
 	import { registerTTSStopCallback, clearTTSStopCallback } from "$lib/stores/ttsState.svelte";
 
@@ -103,8 +103,8 @@
 		if (
 			message.from === 'assistant' &&
 			isLast &&
-			conversationModeState.enabled &&
-			conversationModeState.settings.autoTTS
+			convoModeState.enabled &&
+			convoModeState.settings.autoTTS
 		) {
 			console.log('[ChatMessage] Auto-TTS triggered for message:', message.id);
 			autoTTSTriggered = true;
@@ -270,7 +270,7 @@
 			clearTTSStopCallback();
 			
 			// Update conversation mode status
-			if (conversationModeState.enabled) {
+			if (convoModeState.enabled) {
 				setStatus('idle');
 			}
 			

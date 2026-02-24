@@ -1,6 +1,6 @@
 <script lang="ts">
 	import {
-		conversationModeState,
+		convoModeState,
 		updateSettings,
 		resetSettings,
 		type InputMode,
@@ -20,21 +20,21 @@
 	
 	// Local state bound to form controls
 	let localSettings = $state({
-		autoTTS: conversationModeState.settings.autoTTS,
-		inputMode: conversationModeState.settings.inputMode as InputMode,
-		silenceDuration: conversationModeState.settings.silenceDuration,
-		autoResume: conversationModeState.settings.autoResume,
-		disableRAG: conversationModeState.settings.disableRAG,
+		autoTTS: convoModeState.settings.autoTTS,
+		inputMode: convoModeState.settings.inputMode as InputMode,
+		silenceDuration: convoModeState.settings.silenceDuration,
+		autoResume: convoModeState.settings.autoResume,
+		disableRAG: convoModeState.settings.disableRAG,
 	});
 	
 	// Sync local state when store changes
 	$effect(() => {
 		localSettings = {
-			autoTTS: conversationModeState.settings.autoTTS,
-			inputMode: conversationModeState.settings.inputMode as InputMode,
-			silenceDuration: conversationModeState.settings.silenceDuration,
-			autoResume: conversationModeState.settings.autoResume,
-			disableRAG: conversationModeState.settings.disableRAG,
+			autoTTS: convoModeState.settings.autoTTS,
+			inputMode: convoModeState.settings.inputMode as InputMode,
+			silenceDuration: convoModeState.settings.silenceDuration,
+			autoResume: convoModeState.settings.autoResume,
+			disableRAG: convoModeState.settings.disableRAG,
 		};
 	});
 	

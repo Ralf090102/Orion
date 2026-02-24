@@ -19,7 +19,7 @@
 	
 	// Voice mode imports
 	import { 
-		conversationModeState, 
+		convoModeState, 
 		initConversationMode,
 		setStatus,
 	} from "$lib/stores/conversationMode.svelte";
@@ -45,7 +45,7 @@
 	
 	// Voice mode controller
 	let voiceModeController: VoiceModeController | null = null;
-	let voiceModeEnabled = $derived(conversationModeState.enabled);
+	let voiceModeEnabled = $derived(convoModeState.enabled);
 
 	$effect(() => {
 		conversations = data.conversations;

@@ -6,7 +6,7 @@
 	import CarbonInformation from "~icons/carbon/information";
 	
 	import ConvoModeSettings from "$lib/components/ConvoModeSettings.svelte";
-	import { initConversationMode, conversationModeState } from "$lib/stores/conversationMode.svelte";
+	import { initConversationMode, convoModeState } from "$lib/stores/conversationMode.svelte";
 	
 	// Check if we came from a conversation (for back button)
 	let returnPath = $state<string | null>(null);

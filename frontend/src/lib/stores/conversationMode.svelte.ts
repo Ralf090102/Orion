@@ -51,8 +51,8 @@ const DEFAULT_STATE: ConvoModeState = {
 // Current conversation ID being tracked
 let currentConversationId = $state<string | null>(null);
 
-// The actual conversation mode state
-let state = $state<ConvoModeState>({ ...DEFAULT_STATE });
+// The actual conversation mode state - exported for direct reactive access
+export let convoModeState = $state<ConvoModeState>({ ...DEFAULT_STATE });
 
 // ========== LocalStorage Helpers ==========
 function getStorageKey(conversationId: string): string {
@@ -110,12 +110,13 @@ export function initConversationMode(conversationId: string): void {
 	
 	const stored = loadFromStorage(conversationId);
 	if (stored) {
-		state = {
-			...stored,
-			status: stored.enabled ? 'idle' : 'off',
-		};
+		convoModeState.enabled = stored.enabled;
+		convoModeState.status = stored.enabled ? 'idle' : 'off';
+		convoModeState.settings = { ...DEFAULT_SETTINGS, ...stored.settings };
 	} else {
-		state = { ...DEFAULT_STATE };
+		convoModeState.enabled = DEFAULT_STATE.enabled;
+		convoModeState.status = DEFAULT_STATE.status;
+		convoModeState.settings = { ...DEFAULT_SETTINGS };
 	}
 }
 
@@ -128,10 +129,10 @@ export function toggleConversationMode(): void {
 		return;
 	}
 	
-	state.enabled = !state.enabled;
-	state.status = state.enabled ? 'idle' : 'off';
+	convoModeState.enabled = !convoModeState.enabled;
+	convoModeState.status = convoModeState.enabled ? 'idle' : 'off';
 	
-	saveToStorage(currentConversationId, state);
+	saveToStorage(currentConversationId, convoModeState);
 }
 
 /**
@@ -140,10 +141,10 @@ export function toggleConversationMode(): void {
 export function enableConversationMode(): void {
 	if (!currentConversationId) return;
 	
-	state.enabled = true;
-	state.status = 'idle';
+	convoModeState.enabled = true;
+	convoModeState.status = 'idle';
 	
-	saveToStorage(currentConversationId, state);
+	saveToStorage(currentConversationId, convoModeState);
 }
 
 /**
@@ -152,10 +153,10 @@ export function enableConversationMode(): void {
 export function disableConversationMode(): void {
 	if (!currentConversationId) return;
 	
-	state.enabled = false;
-	state.status = 'off';
+	convoModeState.enabled = false;
+	convoModeState.status = 'off';
 	
-	saveToStorage(currentConversationId, state);
+	saveToStorage(currentConversationId, convoModeState);
 }
 
 /**
@@ -163,10 +164,10 @@ export function disableConversationMode(): void {
  */
 export function setStatus(newStatus: ConvoModeStatus): void {
 	// Can't change status if disabled
-	if (!state.enabled && newStatus !== 'off') {
+	if (!convoModeState.enabled && newStatus !== 'off') {
 		return;
 	}
-	state.status = newStatus;
+	convoModeState.status = newStatus;
 }
 
 /**
@@ -175,12 +176,12 @@ export function setStatus(newStatus: ConvoModeStatus): void {
 export function updateSettings(newSettings: Partial<ConvoModeSettings>): void {
 	if (!currentConversationId) return;
 	
-	state.settings = {
-		...state.settings,
+	convoModeState.settings = {
+		...convoModeState.settings,
 		...newSettings,
 	};
 	
-	saveToStorage(currentConversationId, state);
+	saveToStorage(currentConversationId, convoModeState);
 }
 
 /**
@@ -189,43 +190,44 @@ export function updateSettings(newSettings: Partial<ConvoModeSettings>): void {
 export function resetSettings(): void {
 	if (!currentConversationId) return;
 	
-	state.settings = { ...DEFAULT_SETTINGS };
-	saveToStorage(currentConversationId, state);
+	convoModeState.settings = { ...DEFAULT_SETTINGS };
+	saveToStorage(currentConversationId, convoModeState);
 }
 
 /**
  * Get current state (read-only access for components).
  */
 export function getConvoModeState(): ConvoModeState {
-	return state;
+	return convoModeState;
 }
 
 /**
  * Check if currently enabled.
  */
 export function isEnabled(): boolean {
-	return state.enabled;
+	return convoModeState.enabled;
 }
 
 /**
  * Get current status.
  */
 export function getStatus(): ConvoModeStatus {
-	return state.status;
+	return convoModeState.status;
 }
 
 /**
  * Get current settings.
  */
 export function getSettings(): ConvoModeSettings {
-	return state.settings;
+	return convoModeState.settings;
 }
 
 // ========== Reactive Exports ==========
-// Export reactive getters for use in components
+// Legacy alias - components should use convoModeState directly
+// This getter-based export is kept for backward compatibility
 export const conversationModeState = {
-	get enabled() { return state.enabled; },
-	get status() { return state.status; },
-	get settings() { return state.settings; },
+	get enabled() { return convoModeState.enabled; },
+	get status() { return convoModeState.status; },
+	get settings() { return convoModeState.settings; },
 	get conversationId() { return currentConversationId; },
 };

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from "$app/stores";
 	import {
-		conversationModeState,
+		convoModeState,
 		toggleConversationMode,
 		initConversationMode,
 		type ConvoModeStatus,
@@ -47,9 +47,9 @@
 		};
 	});
 	
-	// Get reactive state
-	const status = $derived(conversationModeState.status);
-	const enabled = $derived(conversationModeState.enabled);
+	// Derive from reactive state directly
+	const status = $derived(convoModeState.status);
+	const enabled = $derived(convoModeState.enabled);
 	
 	// Status to icon mapping
 	const statusConfig: Record<ConvoModeStatus, {
