@@ -254,6 +254,7 @@ class AnswerGenerator:
         on_token: Any | None = None,
         stream: bool = False,
         temperature: float | None = None,
+        voice_mode: bool = False,
     ) -> GenerationResult:
         """
         Generate a conversational chat response.
@@ -270,11 +271,12 @@ class AnswerGenerator:
             on_token: Optional callback for streaming tokens
             stream: Enable streaming mode
             temperature: LLM temperature override
+            voice_mode: If True, use brief response mode for voice conversation
 
         Returns:
             GenerationResult with answer and optional sources
         """
-        logger.info(f"Generating chat response for message: {message[:100]}...")
+        logger.info(f"Generating chat response for message: {message[:100]}..." + (" [voice_mode]" if voice_mode else ""))
         overall_start = time.time()
         timing = TimingBreakdown()
 
@@ -343,6 +345,7 @@ class AnswerGenerator:
             prompt_components = self.prompt_builder.build_chat_prompt(
                 query=message,
                 contexts=prepared_contexts if prepared_contexts else None,
+                voice_mode=voice_mode,
             )
             timing.prompt_building_time = time.time() - prompt_start
         except Exception as e:
@@ -362,19 +365,26 @@ class AnswerGenerator:
         messages = prompt_components.to_messages()
 
         # Generate answer using LLM
-        logger.debug("Calling LLM for chat generation")
+        logger.debug("Calling LLM for chat generation" + (" [voice_mode: brief response]" if voice_mode else ""))
         try:
             llm_start = time.time()
             
             # Use temperature override if provided
             llm_temperature = temperature if temperature is not None else self.config.rag.llm.temperature
             
+            # In voice mode, limit max_tokens for faster, more concise responses
+            if voice_mode:
+                llm_max_tokens = self.config.conversation_mode.brief_response_max_tokens
+                logger.debug(f"Voice mode: limiting max_tokens to {llm_max_tokens}")
+            else:
+                llm_max_tokens = self.config.rag.llm.max_tokens
+            
             response = self.llm_client.generate(
                 messages=messages,
                 model=self.config.rag.llm.model,
                 temperature=llm_temperature,
                 top_p=self.config.rag.llm.top_p,
-                max_tokens=self.config.rag.llm.max_tokens,
+                max_tokens=llm_max_tokens,
                 stream=stream,
                 on_token=on_token,
             )

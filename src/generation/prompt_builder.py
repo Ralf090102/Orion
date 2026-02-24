@@ -12,6 +12,23 @@ from typing import TYPE_CHECKING, List, Optional
 
 from src.utilities.utils import ensure_config, log_debug, log_info, log_warning
 
+# Voice conversation mode instructions - prepended to system prompt when voice_mode=True
+VOICE_MODE_INSTRUCTIONS = """
+VOICE CONVERSATION MODE:
+You are having a spoken conversation. Your responses will be read aloud via text-to-speech.
+
+Rules:
+- Keep responses brief: 1-3 sentences unless the user explicitly asks for details
+- Be conversational and natural - speak like a knowledgeable friend
+- AVOID: bullet points, numbered lists, code blocks, markdown formatting, URLs
+- Use contractions (it's, you're, don't) and casual speech
+- For complex questions: give a quick summary, then offer to elaborate
+- Don't say "Here's..." or "Let me explain..." - just answer directly
+- Pronounce abbreviations and acronyms naturally (e.g., "API" as "A-P-I")
+
+Remember: This is speech, not text. Think "podcast conversation" not "written essay".
+"""
+
 if TYPE_CHECKING:
     from src.retrieval.search import SearchResult
     from src.utilities.config import OrionConfig
@@ -192,7 +209,11 @@ class PromptBuilder:
     # ========== CHAT MODE ==========
 
     def build_chat_prompt(
-        self, query: str, contexts: Optional[List["SearchResult"]] = None, force_rag: bool = False
+        self,
+        query: str,
+        contexts: Optional[List["SearchResult"]] = None,
+        force_rag: bool = False,
+        voice_mode: bool = False,
     ) -> PromptComponents:
         """
         Build a conversational prompt with optional RAG augmentation.
@@ -201,11 +222,12 @@ class PromptBuilder:
             query: User's message
             contexts: Optional retrieved contexts (if RAG triggered)
             force_rag: Force inclusion of RAG context even if contexts is None
+            voice_mode: If True, prepend voice conversation instructions for brief, TTS-friendly responses
 
         Returns:
             PromptComponents with conversation history and optional context
         """
-        log_debug(f"Building chat prompt (history: {len(self.conversation_history)} messages)", self.config)
+        log_debug(f"Building chat prompt (history: {len(self.conversation_history)} messages, voice_mode={voice_mode})", self.config)
 
         # Determine if we should use RAG context
         use_rag = contexts is not None and len(contexts) > 0
@@ -229,7 +251,13 @@ class PromptBuilder:
             formatted_context = ""
 
         # Build system prompt for chat mode
-        if use_rag:
+        # In voice mode, use voice-optimized instructions instead of standard chat instructions
+        if voice_mode:
+            system_prompt = f"{self.llm_config.system_prompt}\n{VOICE_MODE_INSTRUCTIONS}"
+            if use_rag:
+                system_prompt += "\nYou have access to knowledge base information - summarize it briefly and conversationally."
+            log_debug("Using voice mode instructions for brief, TTS-friendly responses", self.config)
+        elif use_rag:
             system_prompt = (
                 f"{self.llm_config.system_prompt}\n\n"
                 "CHAT MODE INSTRUCTIONS:\n"

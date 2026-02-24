@@ -392,6 +392,7 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
                 rag_mode=rag_mode,
                 include_sources=include_sources,
                 on_token=stream_token,
+                voice_mode=voice_mode,
                 **generation_kwargs,
             )
             
