@@ -574,18 +574,26 @@ class TTSConfig(BaseConfig):
 
 @dataclass
 class Qwen3Config(BaseConfig):
-    """Qwen3-TTS configuration for voice cloning"""
+    """Qwen3-TTS configuration for voice cloning, voice design, and custom voices"""
     
     enabled: bool = False  # Disabled by default (requires GPU)
     
-    # Model settings
-    model_name: str = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"  # Official model name
+    # Model settings - Base model for voice cloning
+    model_name: str = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"  # For voice cloning
+    
+    # Additional models for voice generation and custom voices
+    design_model_name: str = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"  # For voice generation from text
+    custom_model_name: str = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"  # For premium speakers + instruction
+    
     model_cache_dir: Path = field(default_factory=lambda: Path.home() / ".cache" / "qwen3-tts")
     model_precision: str = "float16"  # "float16" or "float32"
     
     # Device settings
     device: str = "auto"  # "auto", "cuda", "cpu"
     min_vram_gb: float = 4.0  # Minimum VRAM required (GB)
+    
+    # Multi-model management (VRAM constraint: only 1 model loaded at a time)
+    max_loaded_models: int = 1  # Keep only 1 model loaded to save VRAM
     
     # Voice cloning settings
     min_audio_duration: float = 3.0  # Minimum seconds for voice sample
@@ -614,10 +622,13 @@ class Qwen3Config(BaseConfig):
         return cls(
             enabled=get_env_bool("QWEN3_ENABLED", False),
             model_name=get_env_str("QWEN3_MODEL_NAME", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"),
+            design_model_name=get_env_str("QWEN3_DESIGN_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"),
+            custom_model_name=get_env_str("QWEN3_CUSTOM_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"),
             model_cache_dir=Path(cache_dir_str),
             model_precision=get_env_str("QWEN3_MODEL_PRECISION", "float16"),
             device=get_env_str("QWEN3_DEVICE", "auto"),
             min_vram_gb=get_env_float("QWEN3_MIN_VRAM_GB", 4.0),
+            max_loaded_models=get_env_int("QWEN3_MAX_LOADED_MODELS", 1),
             min_audio_duration=get_env_float("QWEN3_MIN_AUDIO_DURATION", 3.0),
             max_audio_duration=get_env_float("QWEN3_MAX_AUDIO_DURATION", 15.0),
             voice_sample_rate=get_env_int("QWEN3_VOICE_SAMPLE_RATE", 16000),
