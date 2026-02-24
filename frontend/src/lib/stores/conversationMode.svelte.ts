@@ -20,6 +20,7 @@ export interface ConvoModeSettings {
 	ttsVoice: string | null;  // null = use default
 	silenceDuration: number;  // ms before auto-send
 	autoResume: boolean;      // resume listening after TTS
+	disableRAG: boolean;      // skip RAG pipeline for faster responses
 }
 
 export interface ConvoModeState {
@@ -37,6 +38,7 @@ const DEFAULT_SETTINGS: ConvoModeSettings = {
 	ttsVoice: null,
 	silenceDuration: 1500,
 	autoResume: true,
+	disableRAG: false,
 };
 
 const DEFAULT_STATE: ConvoModeState = {

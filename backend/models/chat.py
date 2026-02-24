@@ -374,6 +374,10 @@ class WebSocketChatOptions(BaseModel):
         default=False,
         description="Whether conversation mode is active (triggers brief responses)",
     )
+    disable_rag: bool = Field(
+        default=False,
+        description="Skip RAG pipeline entirely for faster responses (conversation mode)",
+    )
     input_type: Optional[InputType] = Field(
         default=InputType.TEXT,
         description="How the message was created (text or voice)",
@@ -390,6 +394,7 @@ class WebSocketChatOptions(BaseModel):
                 "include_sources": True,
                 "temperature": 0.7,
                 "voice_mode": False,
+                "disable_rag": False,
                 "input_type": "text",
             }
         }

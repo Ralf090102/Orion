@@ -315,14 +315,24 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
         
         Args:
             message: User message content
-            options: Optional settings (rag_mode, include_sources, temperature, files, etc.)
+            options: Optional settings (rag_mode, include_sources, temperature, files, voice_mode, disable_rag, etc.)
         """
         try:
             options = options or {}
             start_time = time.time()
             
+            # Extract voice mode settings
+            voice_mode = options.get("voice_mode", False)
+            disable_rag = options.get("disable_rag", False)
+            
             # Extract optional settings
-            rag_mode = options.get("rag_mode") or self.config.rag.generation.rag_trigger_mode
+            # If voice_mode with disable_rag, force rag_mode to "never" for faster responses
+            if voice_mode and disable_rag:
+                rag_mode = "never"
+                logger.debug("Voice mode with disable_rag=True, skipping RAG pipeline")
+            else:
+                rag_mode = options.get("rag_mode") or self.config.rag.generation.rag_trigger_mode
+            
             include_sources = options.get("include_sources", False)
             temperature = options.get("temperature")
             files = options.get("files", [])

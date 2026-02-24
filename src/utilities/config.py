@@ -742,6 +742,9 @@ class ConversationModeConfig(BaseConfig):
     # Brief response settings
     brief_response_max_tokens: int = 200  # Limit tokens for voice responses
     
+    # RAG settings
+    disable_rag: bool = False            # Skip RAG pipeline for faster responses
+    
     # VAD settings
     vad: VADConfig = field(default_factory=VADConfig)
     
@@ -755,6 +758,7 @@ class ConversationModeConfig(BaseConfig):
             auto_resume_listening=get_env_bool("CONVO_AUTO_RESUME_LISTENING", True),
             tts_voice=tts_voice,
             brief_response_max_tokens=get_env_int("CONVO_BRIEF_RESPONSE_MAX_TOKENS", 200),
+            disable_rag=get_env_bool("CONVO_DISABLE_RAG", False),
             vad=VADConfig.from_env(),
         )
     
