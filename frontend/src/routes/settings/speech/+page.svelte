@@ -12,6 +12,7 @@
 	import CarbonTrash from "~icons/carbon/trash-can";
 	import CarbonUpload from "~icons/carbon/upload";
 	import CarbonRecordingFilled from "~icons/carbon/recording-filled";
+	import CarbonSettings from "~icons/carbon/settings";
 
 	import { BACKEND_URL } from '$lib/utils/backendUrl';
 
@@ -68,6 +69,15 @@
 		audioUrl: null as string | null
 	});
 	let currentSynthesisAudio: HTMLAudioElement | null = null;
+
+	// Qwen3 configuration
+	let qwen3Config = $state({
+		chunk_size: 200,
+		auto_unload: true,
+		unload_timeout_seconds: 300,
+		model_loaded: false
+	});
+	let savingQwen3Config = $state(false);
 
 	// UI state
 	let loading = $state(false);
@@ -171,6 +181,61 @@
 			console.error('Failed to load TTS config:', err);
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadQwen3Config() {
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/speech/config/qwen3`);
+			
+			if (!response.ok) {
+				// Non-fatal: qwen3 may not be available
+				console.warn('Could not load Qwen3 config (may not be enabled)');
+				return;
+			}
+
+			const data = await response.json();
+			qwen3Config = {
+				chunk_size: data.config.chunk_size ?? 200,
+				auto_unload: data.config.auto_unload ?? true,
+				unload_timeout_seconds: data.config.unload_timeout_seconds ?? 300,
+				model_loaded: data.config.model_loaded ?? false
+			};
+		} catch (err) {
+			console.warn('Failed to load Qwen3 config:', err);
+		}
+	}
+
+	async function saveQwen3Config() {
+		try {
+			savingQwen3Config = true;
+			error = null;
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/config/qwen3`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					chunk_size: qwen3Config.chunk_size,
+					auto_unload: qwen3Config.auto_unload,
+					unload_timeout_seconds: qwen3Config.unload_timeout_seconds
+				})
+			});
+
+			if (!response.ok) {
+				const errData = await response.json().catch(() => ({}));
+				throw new Error(errData.detail || 'Failed to save Qwen3 configuration');
+			}
+
+			const data = await response.json();
+			qwen3Config.model_loaded = data.config.model_loaded ?? qwen3Config.model_loaded;
+			
+			success = 'Qwen3 configuration saved';
+			setTimeout(() => { success = null; }, 3000);
+		} catch (err) {
+			error = (err as Error).message;
+			console.error('Failed to save Qwen3 config:', err);
+		} finally {
+			savingQwen3Config = false;
 		}
 	}
 
@@ -799,6 +864,7 @@
 		await getEngineStatus();
 		await loadWhisperConfig();
 		await loadTTSConfig();
+		await loadQwen3Config();
 		await checkHealth();
 		await loadActiveVoice();
 		
@@ -1633,6 +1699,96 @@
 									Synthesize
 								{/if}
 							</div>
+						</button>
+					</div>
+				</div>
+			</div>
+			{/if}
+
+			<!-- Qwen3 Performance Settings -->
+			{#if currentEngine === 'qwen3'}
+			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
+				<div class="flex items-center gap-3 mb-6">
+					<div class="rounded-lg bg-purple-100 p-3 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400">
+						<CarbonSettings class="size-6" />
+					</div>
+					<div>
+						<h2 class="text-lg font-semibold">Performance Settings</h2>
+						<p class="text-sm text-gray-600 dark:text-gray-400">
+							Tune synthesis speed and memory usage
+						</p>
+					</div>
+					{#if qwen3Config.model_loaded}
+						<span class="ml-auto inline-flex items-center gap-1.5 rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300">
+							<span class="size-1.5 rounded-full bg-green-500 inline-block"></span>
+							Model Loaded
+						</span>
+					{/if}
+				</div>
+
+				<div class="space-y-6">
+					<!-- Chunk Size -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Chunk Size: {qwen3Config.chunk_size} characters
+						</label>
+						<input
+							type="range"
+							min="50"
+							max="500"
+							step="25"
+							bind:value={qwen3Config.chunk_size}
+							class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 accent-purple-600"
+						/>
+						<div class="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
+							<span>50 (fastest)</span>
+							<span>200 (balanced)</span>
+							<span>500 (smoothest)</span>
+						</div>
+						<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+							Smaller chunks = faster time-to-first-audio but more overhead. Larger chunks = smoother audio but slower start.
+						</p>
+					</div>
+
+					<!-- Auto-unload toggle -->
+					<div class="flex items-center justify-between">
+						<div>
+							<label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+								Auto-unload Model
+							</label>
+							<p class="text-xs text-gray-500 dark:text-gray-400">
+								Free GPU memory after {qwen3Config.unload_timeout_seconds / 60} minutes of inactivity
+							</p>
+						</div>
+						<button
+							onclick={() => { qwen3Config.auto_unload = !qwen3Config.auto_unload; }}
+							class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors
+								{qwen3Config.auto_unload ? 'bg-purple-600' : 'bg-gray-300 dark:bg-gray-600'}"
+							role="switch"
+							aria-checked={qwen3Config.auto_unload}
+							aria-label="Toggle auto-unload model"
+						>
+							<span
+								class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+									{qwen3Config.auto_unload ? 'translate-x-6' : 'translate-x-1'}"
+							></span>
+						</button>
+					</div>
+
+					<!-- Save Button -->
+					<div class="flex justify-end pt-2">
+						<button
+							onclick={saveQwen3Config}
+							disabled={savingQwen3Config}
+							class="flex items-center gap-2 rounded-lg bg-purple-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50 dark:bg-purple-500 dark:hover:bg-purple-600"
+						>
+							{#if savingQwen3Config}
+								<CarbonRenew class="size-4 animate-spin" />
+								Saving...
+							{:else}
+								<CarbonSave class="size-4" />
+								Save Settings
+							{/if}
 						</button>
 					</div>
 				</div>
