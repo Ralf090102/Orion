@@ -17,6 +17,7 @@ import {
 	getSettings,
 	type ConvoModeStatus,
 } from "$lib/stores/conversationMode.svelte";
+import { interruptTTS } from "$lib/stores/ttsState.svelte";
 import type { WebSocketChat } from "./websocketChat";
 
 export interface VoiceModeControllerOptions {
@@ -257,6 +258,10 @@ export class VoiceModeController {
 	
 	private handleSpeechStart(): void {
 		console.log('[VoiceMode] Speech started');
+		
+		// Interrupt any playing TTS when user starts speaking
+		interruptTTS();
+		
 		this.setStatus('listening');
 	}
 	

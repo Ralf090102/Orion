@@ -22,6 +22,11 @@
 	import ToolUpdate from "./ToolUpdate.svelte";
 	import { isMessageToolUpdate } from "$lib/utils/messageUpdates";
 	import { MessageUpdateType, type MessageToolUpdate } from "$lib/types/MessageUpdate";
+	
+	// Import conversation mode for auto-TTS
+	import { conversationModeState, setStatus } from "$lib/stores/conversationMode.svelte";
+	import { getActiveVoiceModeController } from "$lib/utils/voiceMode";
+	import { registerTTSStopCallback, clearTTSStopCallback } from "$lib/stores/ttsState.svelte";
 
 	// Global TTS state shared across all message instances
 	let globalTTSState = $state<{
@@ -66,8 +71,59 @@
 	
 	// Computed property to check if this message is currently playing
 	let isReadingAloud = $derived(globalTTSState.messageId === message.id);
+	
+	// Track previous loading state to detect completion
+	let prevLoading = $state(false);
+	let autoTTSTriggered = $state(false);
+	let initialLoadingSet = $state(false);
 
 	import { BACKEND_URL } from '$lib/utils/backendUrl';
+
+	// Auto-TTS: When conversation mode is enabled and this assistant message finishes loading, auto-play TTS
+	$effect(() => {
+		// Initialize prevLoading on first run
+		if (!initialLoadingSet) {
+			prevLoading = loading;
+			initialLoadingSet = true;
+			return;
+		}
+		
+		// Detect when loading transitions from true to false (message just completed)
+		const justFinishedLoading = prevLoading && !loading;
+		prevLoading = loading;
+		
+		// Only auto-trigger once per message completion
+		if (!justFinishedLoading || autoTTSTriggered) return;
+		
+		// Check conditions for auto-TTS:
+		// 1. Must be an assistant message
+		// 2. Must be the last message
+		// 3. Conversation mode must be enabled
+		// 4. autoTTS setting must be on
+		if (
+			message.from === 'assistant' &&
+			isLast &&
+			conversationModeState.enabled &&
+			conversationModeState.settings.autoTTS
+		) {
+			console.log('[ChatMessage] Auto-TTS triggered for message:', message.id);
+			autoTTSTriggered = true;
+			
+			// Update status to speaking
+			setStatus('speaking');
+			
+			// Trigger TTS (small delay to ensure UI updates)
+			setTimeout(() => {
+				readAloud();
+			}, 100);
+		}
+	});
+	
+	// Reset auto-TTS triggered flag when message ID changes
+	$effect(() => {
+		void message.id;
+		autoTTSTriggered = false;
+	});
 
 	$effect(() => {
 		// referenced to appease linter for currently-unused props
@@ -156,6 +212,7 @@
 			for (const u of revokeQueued) URL.revokeObjectURL(u);
 			globalTTSState = { audio: null, messageId: null, audioUrl: null };
 			isTTSLoading = false;
+			clearTTSStopCallback();  // Unregister from global TTS interrupt
 		}
 
 		// ── Fetch the streaming endpoint ─────────────────────────────────
@@ -182,11 +239,18 @@
 		// Each entry is an object-URL for a WAV blob
 		const audioQueue: string[] = [];
 		let isPlayingQueue = false;
+		
+		// Register stop callback so VoiceModeController can interrupt TTS
+		registerTTSStopCallback(() => stopAll(audioQueue));
 
 		function playNext() {
 			if (stopped || audioQueue.length === 0) {
 				isPlayingQueue = false;
-				if (!stopped) globalTTSState = { audio: null, messageId: null, audioUrl: null };
+				if (!stopped) {
+					globalTTSState = { audio: null, messageId: null, audioUrl: null };
+					// TTS completed naturally - notify voice mode controller
+					notifyTTSComplete();
+				}
 				return;
 			}
 			isPlayingQueue = true;
@@ -196,6 +260,25 @@
 			audio.onended = () => { URL.revokeObjectURL(url); playNext(); };
 			audio.onerror = () => { URL.revokeObjectURL(url); playNext(); };
 			audio.play().catch(() => playNext());
+		}
+		
+		// Helper to notify voice mode controller when TTS completes
+		function notifyTTSComplete() {
+			console.log('[ChatMessage] TTS completed');
+			
+			// Clear the stop callback registration
+			clearTTSStopCallback();
+			
+			// Update conversation mode status
+			if (conversationModeState.enabled) {
+				setStatus('idle');
+			}
+			
+			// Notify voice mode controller to resume listening
+			const controller = getActiveVoiceModeController();
+			if (controller) {
+				controller.onTTSComplete();
+			}
 		}
 
 		// ── Read NDJSON stream ───────────────────────────────────────────
@@ -239,6 +322,8 @@
 		if (!isPlayingQueue && audioQueue.length > 0) playNext();
 		if (!isPlayingQueue && audioQueue.length === 0) {
 			globalTTSState = { audio: null, messageId: null, audioUrl: null };
+			// TTS completed naturally (no audio chunks were queued)
+			notifyTTSComplete();
 		}
 	}
 
