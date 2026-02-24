@@ -7,12 +7,15 @@ Provides REST API for:
 - Whisper configuration management
 """
 
+import base64
+import io
 import logging
 import tempfile
 from dataclasses import is_dataclass, asdict
 from pathlib import Path
 from typing import Optional
 
+import soundfile as sf
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
 
@@ -22,11 +25,18 @@ from backend.models.speech import (
     ActiveVoiceResponse,
     ClonedVoiceInfo,
     ClonedVoicesListResponse,
+    CustomSpeakerInfo,
+    CustomSpeakersResponse,
+    CustomVoiceRequest,
+    CustomVoiceResponse,
+    DesignAndSaveRequest,
+    DesignAndSaveResponse,
     EngineSelectRequest,
     EngineSelectResponse,
     Qwen3ConfigResponse,
     Qwen3ConfigUpdate,
     SpeechHealthResponse,
+    SupportedLanguagesResponse,
     TranscriptionResponse,
     TTSAsyncRequest,
     TTSConfigResponse,
@@ -39,6 +49,8 @@ from backend.models.speech import (
     TTSVoiceUpdate,
     VoiceCloneRequest,
     VoiceCloneResponse,
+    VoiceGenerateRequest,
+    VoiceGenerateResponse,
     VoiceListResponse,
     WhisperConfigResponse,
     WhisperConfigUpdate,
@@ -1541,3 +1553,447 @@ async def get_qwen3_stats(
         )
 
 
+# ========== QWEN3-TTS VOICE GENERATION ENDPOINTS (VoiceDesign) ==========
+@router.post(
+    "/generate-voice",
+    response_model=VoiceGenerateResponse,
+    summary="Generate speech with designed voice",
+    description="Synthesize speech using VoiceDesign model with a natural language voice description (Qwen3 engine only)",
+)
+async def generate_voice(
+    request: VoiceGenerateRequest,
+    config: OrionConfig = Depends(get_config_dependency),
+) -> VoiceGenerateResponse:
+    """
+    Generate speech with a voice designed from text description.
+    
+    Uses the Qwen3-TTS VoiceDesign model to create speech with a voice
+    that matches the given description. This creates the voice on-the-fly
+    without needing a reference audio sample.
+    
+    **Note**: For consistent voice across multiple calls, use `/design-and-save`
+    to create a reusable voice, then use `/tts` with that voice_id.
+    
+    **Note**: This endpoint is only available when Qwen3 engine is active.
+    
+    Args:
+        request: Voice generation request with text, description, and language
+        config: Configuration dependency (injected)
+    
+    Returns:
+        VoiceGenerateResponse with base64-encoded audio
+    
+    Raises:
+        HTTPException 400: Invalid request or wrong engine
+        HTTPException 503: Qwen3-TTS not available
+        HTTPException 500: Generation failed
+    """
+    try:
+        # Guard: Qwen3-only endpoint
+        if config.tts.default_engine != "qwen3":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Voice generation requires Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
+            )
+        
+        # Check if Qwen3 is enabled
+        if not config.qwen3.enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS is not enabled. Enable in configuration."
+            )
+        
+        tts_manager = get_tts_manager()
+        
+        if not hasattr(tts_manager, 'qwen3_manager') or tts_manager.qwen3_manager is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS manager not available. Check configuration and logs."
+            )
+        
+        qwen3_manager = tts_manager.qwen3_manager
+        
+        # Generate speech with designed voice
+        audio_data, sample_rate = qwen3_manager.generate_voice(
+            text=request.text,
+            voice_description=request.voice_description,
+            language=request.language,
+            speed=request.speed,
+        )
+        
+        # Convert to WAV bytes for base64 encoding
+        buffer = io.BytesIO()
+        sf.write(buffer, audio_data, sample_rate, format='WAV')
+        buffer.seek(0)
+        audio_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+        
+        duration = len(audio_data) / sample_rate
+        
+        return VoiceGenerateResponse(
+            status="success",
+            audio_base64=audio_base64,
+            sample_rate=sample_rate,
+            duration_seconds=round(duration, 2),
+        )
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Voice generation failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Voice generation failed: {str(e)}"
+        )
+
+
+@router.post(
+    "/design-and-save",
+    response_model=DesignAndSaveResponse,
+    summary="Design a voice and save as cloneable",
+    description="Create a new voice from description and save it for consistent reuse (Qwen3 engine only)",
+)
+async def design_and_save_voice(
+    request: DesignAndSaveRequest,
+    config: OrionConfig = Depends(get_config_dependency),
+) -> DesignAndSaveResponse:
+    """
+    Design a voice and save it as a cloneable voice for consistent reuse.
+    
+    This endpoint uses the VoiceDesign model to generate sample audio from
+    a text description, then saves it as a reusable voice. Future synthesis
+    with this voice_id will use the Base model for faster, consistent results.
+    
+    Workflow (Design-then-Clone):
+    1. VoiceDesign model generates sample audio from description
+    2. Sample is saved as reference audio for voice cloning
+    3. Use `/tts` endpoint with the created voice_id for consistent voice
+    
+    **Note**: This endpoint is only available when Qwen3 engine is active.
+    
+    Args:
+        request: Design and save request with voice_id, description, etc.
+        config: Configuration dependency (injected)
+    
+    Returns:
+        DesignAndSaveResponse with created voice info and preview audio
+    
+    Raises:
+        HTTPException 400: Voice ID exists or invalid request
+        HTTPException 503: Qwen3-TTS not available
+        HTTPException 500: Operation failed
+    """
+    try:
+        # Guard: Qwen3-only endpoint
+        if config.tts.default_engine != "qwen3":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Voice design requires Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
+            )
+        
+        if not config.qwen3.enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS is not enabled. Enable in configuration."
+            )
+        
+        tts_manager = get_tts_manager()
+        
+        if not hasattr(tts_manager, 'qwen3_manager') or tts_manager.qwen3_manager is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS manager not available. Check configuration and logs."
+            )
+        
+        qwen3_manager = tts_manager.qwen3_manager
+        
+        # Design and save the voice
+        embedding = qwen3_manager.design_and_save_voice(
+            voice_id=request.voice_id,
+            voice_description=request.voice_description,
+            sample_text=request.sample_text,
+            language=request.language,
+        )
+        
+        # Get the generated audio for preview
+        audio_path = Path(str(embedding.embedding[0]))
+        audio_data, sample_rate = sf.read(str(audio_path))
+        
+        # Convert to base64 for response
+        buffer = io.BytesIO()
+        sf.write(buffer, audio_data, sample_rate, format='WAV')
+        buffer.seek(0)
+        audio_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+        
+        return DesignAndSaveResponse(
+            status="success",
+            message=f"Voice '{request.voice_id}' designed and saved successfully",
+            voice_id=request.voice_id,
+            audio_base64=audio_base64,
+            sample_rate=sample_rate,
+            duration_seconds=round(embedding.duration, 2),
+            voice_description=request.voice_description,
+        )
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Design and save failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Design and save failed: {str(e)}"
+        )
+
+
+# ========== QWEN3-TTS CUSTOM VOICE ENDPOINTS (CustomVoice) ==========
+@router.post(
+    "/custom-voice",
+    response_model=CustomVoiceResponse,
+    summary="Synthesize with premium custom speaker",
+    description="Generate speech using CustomVoice model with premium speakers and instruction control (Qwen3 engine only)",
+)
+async def synthesize_custom_voice(
+    request: CustomVoiceRequest,
+    config: OrionConfig = Depends(get_config_dependency),
+) -> CustomVoiceResponse:
+    """
+    Synthesize speech using premium custom speakers with instruction control.
+    
+    Uses the Qwen3-TTS CustomVoice model to generate speech with one of
+    9 premium speakers. Optional instructions can modify the speaking style,
+    emotion, pace, etc.
+    
+    Available speakers:
+    - English: Ryan, Aiden
+    - Chinese: Vivian, Serena, Uncle_Fu, Dylan, Eric
+    - Japanese: Ono_Anna
+    - Korean: Sohee
+    
+    **Note**: This endpoint is only available when Qwen3 engine is active.
+    
+    Args:
+        request: Custom voice request with text, speaker, and optional instruct
+        config: Configuration dependency (injected)
+    
+    Returns:
+        CustomVoiceResponse with base64-encoded audio
+    
+    Raises:
+        HTTPException 400: Invalid speaker or wrong engine
+        HTTPException 503: Qwen3-TTS not available
+        HTTPException 500: Synthesis failed
+    """
+    try:
+        # Guard: Qwen3-only endpoint
+        if config.tts.default_engine != "qwen3":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Custom voice requires Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
+            )
+        
+        if not config.qwen3.enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS is not enabled. Enable in configuration."
+            )
+        
+        tts_manager = get_tts_manager()
+        
+        if not hasattr(tts_manager, 'qwen3_manager') or tts_manager.qwen3_manager is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS manager not available. Check configuration and logs."
+            )
+        
+        qwen3_manager = tts_manager.qwen3_manager
+        
+        # Synthesize with custom voice
+        audio_data, sample_rate = qwen3_manager.synthesize_custom(
+            text=request.text,
+            speaker=request.speaker,
+            language=request.language,
+            instruct=request.instruct,
+            speed=request.speed,
+        )
+        
+        # Convert to WAV bytes for base64 encoding
+        buffer = io.BytesIO()
+        sf.write(buffer, audio_data, sample_rate, format='WAV')
+        buffer.seek(0)
+        audio_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+        
+        duration = len(audio_data) / sample_rate
+        
+        return CustomVoiceResponse(
+            status="success",
+            audio_base64=audio_base64,
+            sample_rate=sample_rate,
+            duration_seconds=round(duration, 2),
+            speaker=request.speaker,
+        )
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Custom voice synthesis failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Custom voice synthesis failed: {str(e)}"
+        )
+
+
+@router.get(
+    "/custom-speakers",
+    response_model=CustomSpeakersResponse,
+    summary="List available custom speakers",
+    description="Get list of premium speakers available for CustomVoice synthesis (Qwen3 engine only)",
+)
+async def list_custom_speakers(
+    config: OrionConfig = Depends(get_config_dependency),
+) -> CustomSpeakersResponse:
+    """
+    List all available premium custom speakers.
+    
+    Returns metadata for all 9 premium speakers available in the
+    Qwen3-TTS CustomVoice model, including their descriptions,
+    native languages, and other characteristics.
+    
+    **Note**: This endpoint is only available when Qwen3 engine is active.
+    
+    Args:
+        config: Configuration dependency (injected)
+    
+    Returns:
+        CustomSpeakersResponse with list of speakers
+    
+    Raises:
+        HTTPException 400: Wrong engine active
+        HTTPException 503: Qwen3-TTS not available
+    """
+    try:
+        # Guard: Qwen3-only endpoint
+        if config.tts.default_engine != "qwen3":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Custom speakers require Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
+            )
+        
+        if not config.qwen3.enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS is not enabled. Enable in configuration."
+            )
+        
+        tts_manager = get_tts_manager()
+        
+        if not hasattr(tts_manager, 'qwen3_manager') or tts_manager.qwen3_manager is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS manager not available. Check configuration and logs."
+            )
+        
+        qwen3_manager = tts_manager.qwen3_manager
+        
+        # Get all speakers info
+        speakers_info = qwen3_manager.get_all_speakers_info()
+        
+        speakers = [
+            CustomSpeakerInfo(
+                speaker=name,
+                description=info["description"],
+                native_language=info["native_language"],
+                gender=info["gender"],
+                age_range=info["age_range"],
+            )
+            for name, info in speakers_info.items()
+        ]
+        
+        return CustomSpeakersResponse(
+            status="success",
+            speakers=speakers,
+            count=len(speakers),
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list custom speakers: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list speakers: {str(e)}"
+        )
+
+
+@router.get(
+    "/qwen3/languages",
+    response_model=SupportedLanguagesResponse,
+    summary="List supported TTS languages",
+    description="Get list of languages supported by Qwen3-TTS models (Qwen3 engine only)",
+)
+async def list_supported_languages(
+    config: OrionConfig = Depends(get_config_dependency),
+) -> SupportedLanguagesResponse:
+    """
+    List all languages supported by Qwen3-TTS.
+    
+    Returns the list of languages that can be used with voice generation,
+    voice cloning, and custom voice synthesis.
+    
+    **Note**: This endpoint is only available when Qwen3 engine is active.
+    
+    Args:
+        config: Configuration dependency (injected)
+    
+    Returns:
+        SupportedLanguagesResponse with list of language names
+    
+    Raises:
+        HTTPException 400: Wrong engine active
+        HTTPException 503: Qwen3-TTS not available
+    """
+    try:
+        # Guard: Qwen3-only endpoint
+        if config.tts.default_engine != "qwen3":
+            raise HTTPException(
+                status_code=400,
+                detail=f"This endpoint requires Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
+            )
+        
+        if not config.qwen3.enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS is not enabled. Enable in configuration."
+            )
+        
+        tts_manager = get_tts_manager()
+        
+        if not hasattr(tts_manager, 'qwen3_manager') or tts_manager.qwen3_manager is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen3-TTS manager not available. Check configuration and logs."
+            )
+        
+        qwen3_manager = tts_manager.qwen3_manager
+        
+        # Get supported languages
+        languages = qwen3_manager.get_supported_languages()
+        
+        return SupportedLanguagesResponse(
+            status="success",
+            languages=languages,
+            count=len(languages),
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list languages: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list languages: {str(e)}"
+        )

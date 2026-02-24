@@ -659,3 +659,255 @@ class Qwen3ConfigResponse(BaseModel):
                 },
             }
         }
+
+
+# ========== QWEN3-TTS VOICE GENERATION MODELS (VoiceDesign) ==========
+class VoiceGenerateRequest(BaseModel):
+    """Request model for generating speech with a designed voice."""
+    
+    text: str = Field(
+        ...,
+        description="Text to synthesize",
+        min_length=1,
+        max_length=5000,
+    )
+    voice_description: str = Field(
+        ...,
+        description="Natural language description of desired voice characteristics",
+        min_length=10,
+        max_length=500,
+    )
+    language: str = Field(
+        default="english",
+        description="Target language (english, chinese, japanese, korean, etc.)",
+    )
+    speed: float = Field(
+        default=1.0,
+        description="Speech speed multiplier",
+        ge=0.5,
+        le=2.0,
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "text": "Welcome to our podcast! Today we have a special guest.",
+                "voice_description": "Professional male broadcaster, 35-40 years old, deep resonant voice with confident delivery",
+                "language": "english",
+                "speed": 1.0,
+            }
+        }
+
+
+class VoiceGenerateResponse(BaseModel):
+    """Response model for voice generation synthesis."""
+    
+    status: str = Field(..., description="Operation status")
+    audio_base64: str = Field(..., description="Base64-encoded audio data")
+    sample_rate: int = Field(..., description="Audio sample rate in Hz")
+    duration_seconds: float = Field(..., description="Audio duration in seconds")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "audio_base64": "UklGRi...",
+                "sample_rate": 24000,
+                "duration_seconds": 3.8,
+            }
+        }
+
+
+class DesignAndSaveRequest(BaseModel):
+    """Request model for designing and saving a voice as cloneable."""
+    
+    voice_id: str = Field(
+        ...,
+        description="Unique identifier for the new voice",
+        min_length=1,
+        max_length=50,
+        pattern="^[a-zA-Z0-9_-]+$",
+    )
+    voice_description: str = Field(
+        ...,
+        description="Natural language description of desired voice characteristics",
+        min_length=10,
+        max_length=500,
+    )
+    sample_text: Optional[str] = Field(
+        default=None,
+        description="Text used to generate reference audio sample (defaults to generic phrase)",
+        max_length=500,
+    )
+    language: str = Field(
+        default="english",
+        description="Language for the sample audio",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "voice_id": "podcast_host",
+                "voice_description": "Energetic female host, 28-32, warm and engaging with a touch of humor",
+                "sample_text": "Hello everyone, welcome to the show!",
+                "language": "english",
+            }
+        }
+
+
+class DesignAndSaveResponse(BaseModel):
+    """Response model for design-and-save voice operation."""
+    
+    status: str = Field(..., description="Operation status")
+    message: str = Field(..., description="Status message")
+    voice_id: str = Field(..., description="Created voice ID")
+    audio_base64: str = Field(..., description="Base64-encoded preview audio")
+    sample_rate: int = Field(..., description="Audio sample rate in Hz")
+    duration_seconds: float = Field(..., description="Sample audio duration in seconds")
+    voice_description: str = Field(..., description="Voice description used")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "message": "Voice designed and saved successfully",
+                "voice_id": "podcast_host",
+                "audio_base64": "UklGRi...",
+                "sample_rate": 24000,
+                "duration_seconds": 2.5,
+                "voice_description": "Energetic female host, 28-32, warm and engaging with a touch of humor",
+            }
+        }
+
+
+# ========== QWEN3-TTS CUSTOM VOICE MODELS (CustomVoice) ==========
+class CustomVoiceRequest(BaseModel):
+    """Request model for synthesizing with CustomVoice premium speakers."""
+    
+    text: str = Field(
+        ...,
+        description="Text to synthesize",
+        min_length=1,
+        max_length=5000,
+    )
+    speaker: str = Field(
+        ...,
+        description="Premium speaker name (e.g., Ryan, Vivian, Aiden)",
+    )
+    language: str = Field(
+        default="auto",
+        description="Target language (auto = use speaker's native language)",
+    )
+    instruct: Optional[str] = Field(
+        default=None,
+        description="Style/emotion instruction (e.g., 'Speak with excitement')",
+        max_length=200,
+    )
+    speed: float = Field(
+        default=1.0,
+        description="Speech speed multiplier",
+        ge=0.5,
+        le=2.0,
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "text": "Oh my goodness, I can't believe we actually did it!",
+                "speaker": "Vivian",
+                "language": "auto",
+                "instruct": "Speak with genuine excitement and joy, slightly breathless",
+                "speed": 1.0,
+            }
+        }
+
+
+class CustomVoiceResponse(BaseModel):
+    """Response model for CustomVoice synthesis."""
+    
+    status: str = Field(..., description="Operation status")
+    audio_base64: str = Field(..., description="Base64-encoded audio data")
+    sample_rate: int = Field(..., description="Audio sample rate in Hz")
+    duration_seconds: float = Field(..., description="Audio duration in seconds")
+    speaker: str = Field(..., description="Speaker used")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "audio_base64": "UklGRi...",
+                "sample_rate": 24000,
+                "duration_seconds": 2.1,
+                "speaker": "Vivian",
+            }
+        }
+
+
+class CustomSpeakerInfo(BaseModel):
+    """Information about a premium custom speaker."""
+    
+    speaker: str = Field(..., description="Speaker name")
+    description: str = Field(..., description="Voice description")
+    native_language: str = Field(..., description="Speaker's native language")
+    gender: str = Field(..., description="Speaker gender: male, female")
+    age_range: str = Field(..., description="Approximate age range")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "speaker": "Ryan",
+                "description": "Dynamic male with strong rhythmic drive",
+                "native_language": "english",
+                "gender": "male",
+                "age_range": "28-35",
+            }
+        }
+
+
+class CustomSpeakersResponse(BaseModel):
+    """Response model for listing custom speakers."""
+    
+    status: str = Field(..., description="Operation status")
+    speakers: list[CustomSpeakerInfo] = Field(..., description="List of available speakers")
+    count: int = Field(..., description="Total number of speakers")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "speakers": [
+                    {
+                        "speaker": "Ryan",
+                        "description": "Dynamic male with strong rhythmic drive",
+                        "native_language": "english",
+                        "gender": "male",
+                        "age_range": "28-35",
+                    },
+                    {
+                        "speaker": "Vivian",
+                        "description": "Bright, slightly edgy young female voice",
+                        "native_language": "chinese",
+                        "gender": "female",
+                        "age_range": "20-25",
+                    },
+                ],
+                "count": 2,
+            }
+        }
+
+
+class SupportedLanguagesResponse(BaseModel):
+    """Response model for listing supported TTS languages."""
+    
+    status: str = Field(..., description="Operation status")
+    languages: list[str] = Field(..., description="List of supported language names")
+    count: int = Field(..., description="Total number of languages")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success",
+                "languages": ["auto", "chinese", "english", "french", "german", "italian", "japanese", "korean", "portuguese", "russian", "spanish"],
+                "count": 11,
+            }
+        }
