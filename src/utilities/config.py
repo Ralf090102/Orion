@@ -249,7 +249,7 @@ class RerankerConfig(BaseConfig):
     batch_size: int = 16
     timeout: int = 30
     top_k: int = 10
-    score_threshold: float = 0.5
+    score_threshold: float = 0.0  # Cross-encoder scores are logits, not 0-1; keep low to avoid over-filtering
 
     # Caching and batch processing
     batch_analysis_size: int = 10
@@ -263,7 +263,7 @@ class RerankerConfig(BaseConfig):
             batch_size=get_env_int("ORION_RERANKER_BATCH_SIZE", 16),
             timeout=get_env_int("ORION_RERANKER_TIMEOUT", 30),
             top_k=get_env_int("ORION_RERANKER_TOP_K", 10),
-            score_threshold=get_env_float("ORION_RERANKER_SCORE_THRESHOLD", 0.5),
+            score_threshold=get_env_float("ORION_RERANKER_SCORE_THRESHOLD", 0.0),
             batch_analysis_size=get_env_int("ORION_RERANKER_BATCH_ANALYSIS_SIZE", 10),
             enable_batch_processing=get_env_bool("ORION_RERANKER_ENABLE_BATCH_PROCESSING", True),
         )

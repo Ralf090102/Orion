@@ -25,22 +25,33 @@ if TYPE_CHECKING:
 class SearchResult:
     """Represents a single search result."""
 
-    def __init__(self, document_id: str, content: str, metadata: dict[str, Any], score: float, search_type: str = "semantic"):
+    def __init__(
+        self,
+        document_id: str,
+        content: str,
+        metadata: dict[str, Any],
+        score: float,
+        search_type: str = "semantic",
+        embedding: list[float] | None = None,
+    ):
         self.document_id = document_id
         self.content = content
         self.metadata = metadata
         self.score = score
         self.search_type = search_type
+        self.embedding = embedding  # Cache embedding to avoid re-computation in MMR
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
-        return {
+        result = {
             "id": self.document_id,
             "content": self.content,
             "metadata": self.metadata,
             "score": self.score,
             "search_type": self.search_type,
         }
+        # Don't include embedding in dict by default (large)
+        return result
 
 
 class SemanticSearcher:
@@ -88,7 +99,12 @@ class SemanticSearcher:
             if similarity_threshold is None:
                 similarity_threshold = self.config.rag.retrieval.similarity_threshold
 
-            results = self.vector_store.query(query_embeddings=[query_embedding], n_results=k, where=metadata_filter)
+            results = self.vector_store.query(
+                query_embeddings=[query_embedding],
+                n_results=k,
+                where=metadata_filter,
+                include=["documents", "metadatas", "distances", "embeddings"],
+            )
 
             search_results = []
             if results["ids"] and results["ids"][0]:
@@ -111,12 +127,18 @@ class SemanticSearcher:
 
                     # Apply threshold filter
                     if similarity_score >= similarity_threshold:
+                        # Get embedding if available from query results
+                        result_embedding = None
+                        if results.get("embeddings") and results["embeddings"][0]:
+                            result_embedding = results["embeddings"][0][i]
+
                         search_result = SearchResult(
                             document_id=results["ids"][0][i],
                             content=results["documents"][0][i] if results["documents"] else "",
                             metadata=results["metadatas"][0][i] if results["metadatas"] else {},
                             score=similarity_score,
                             search_type="semantic",
+                            embedding=result_embedding,
                         )
                         search_results.append(search_result)
 
@@ -616,9 +638,30 @@ class MMRSearcher:
                 log_warning("Failed to generate query embedding for MMR", config=self.config)
                 return candidate_results[:k]
 
-            # Generate embeddings for candidate documents
-            candidate_texts = [result.content for result in candidate_results]
-            candidate_embeddings = self.embedding_manager.encode_batch(candidate_texts)
+            # Reuse cached embeddings where available, only encode missing ones
+            candidate_texts_to_encode = []
+            encode_indices = []
+            for i, result in enumerate(candidate_results):
+                if result.embedding is None:
+                    candidate_texts_to_encode.append(result.content)
+                    encode_indices.append(i)
+
+            # Only call encode_batch if we have texts without embeddings
+            new_embeddings = []
+            if candidate_texts_to_encode:
+                new_embeddings = self.embedding_manager.encode_batch(candidate_texts_to_encode)
+
+            # Build embedding list: use cached or newly encoded
+            candidate_embeddings = []
+            new_embed_idx = 0
+            for i, result in enumerate(candidate_results):
+                if result.embedding is not None:
+                    candidate_embeddings.append(result.embedding)
+                elif new_embed_idx < len(new_embeddings):
+                    candidate_embeddings.append(new_embeddings[new_embed_idx])
+                    new_embed_idx += 1
+                else:
+                    candidate_embeddings.append(None)
 
             # Filter out candidates without embeddings
             valid_candidates = []

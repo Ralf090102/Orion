@@ -658,23 +658,31 @@ class TextPreprocessor:
         unique_documents = []
         seen_hashes = set()
 
-        log_info(f"Deduplicating {len(documents)} documents (threshold: {self.similarity_threshold})", self.config)
+        # Skip O(n²) similarity check for large batches (> 100 docs)
+        # Hash-based dedup is O(n) and catches exact duplicates
+        skip_similarity_check = len(documents) > 100
+
+        log_info(
+            f"Deduplicating {len(documents)} documents (threshold: {self.similarity_threshold}, similarity_check: {not skip_similarity_check})",
+            self.config,
+        )
 
         for doc in documents:
-            # Quick hash-based deduplication
+            # Quick hash-based deduplication (O(n))
             content_hash = hashlib.sha256(doc.page_content.encode()).hexdigest()
 
             if content_hash in seen_hashes:
                 log_debug("Skipped exact duplicate document", self.config)
                 continue
 
-            # Similarity-based deduplication
+            # Similarity-based deduplication (O(n²)) - skip for large batches
             is_duplicate = False
-            for unique_doc in unique_documents:
-                if self.is_similar_content(doc.page_content, unique_doc.page_content):
-                    is_duplicate = True
-                    log_debug("Skipped similar document (similarity check)", self.config)
-                    break
+            if not skip_similarity_check:
+                for unique_doc in unique_documents:
+                    if self.is_similar_content(doc.page_content, unique_doc.page_content):
+                        is_duplicate = True
+                        log_debug("Skipped similar document (similarity check)", self.config)
+                        break
 
             if not is_duplicate:
                 unique_documents.append(doc)
