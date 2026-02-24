@@ -5,6 +5,7 @@ Supports any SentenceTransformer model with configurable batching and caching.
 
 import hashlib
 import pickle
+import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -26,6 +27,61 @@ if TYPE_CHECKING:
     from src.utilities.config import OrionConfig
 
 
+class EmbeddingCache:
+    """
+    SQLite-based embedding cache for efficient storage and retrieval.
+    Replaces individual pickle files with a single database.
+    """
+
+    def __init__(self, cache_path: Path):
+        self.cache_path = cache_path
+        self.conn = sqlite3.connect(str(cache_path), check_same_thread=False)
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS embeddings (
+                key TEXT PRIMARY KEY,
+                embedding BLOB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_key ON embeddings(key)")
+        self.conn.commit()
+
+    def get(self, key: str) -> list[float] | None:
+        """Retrieve embedding from cache."""
+        cursor = self.conn.execute("SELECT embedding FROM embeddings WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        return pickle.loads(row[0]) if row else None
+
+    def set(self, key: str, embedding: list[float]) -> None:
+        """Store embedding in cache."""
+        self.conn.execute(
+            "INSERT OR REPLACE INTO embeddings (key, embedding) VALUES (?, ?)",
+            (key, pickle.dumps(embedding)),
+        )
+        self.conn.commit()
+
+    def delete(self, key: str) -> None:
+        """Remove embedding from cache."""
+        self.conn.execute("DELETE FROM embeddings WHERE key = ?", (key,))
+        self.conn.commit()
+
+    def clear(self) -> None:
+        """Clear all cached embeddings."""
+        self.conn.execute("DELETE FROM embeddings")
+        self.conn.commit()
+
+    def count(self) -> int:
+        """Get number of cached embeddings."""
+        cursor = self.conn.execute("SELECT COUNT(*) FROM embeddings")
+        return cursor.fetchone()[0]
+
+    def close(self) -> None:
+        """Close database connection."""
+        self.conn.close()
+
+
 class EmbeddingManager:
     """
     Manages embedding generation using sentence-transformers models.
@@ -44,8 +100,10 @@ class EmbeddingManager:
         self.tokenizer = None
         self.device = self._get_device()
         self.cache_dir = self._setup_cache_directory()
-        self.embedding_cache = {}
+        self.embedding_cache = {}  # In-memory cache for hot embeddings
+        self.disk_cache: EmbeddingCache | None = None  # SQLite cache
 
+        self._setup_disk_cache()
         self._load_model()
 
     def _get_device(self) -> str:
@@ -79,6 +137,19 @@ class EmbeddingManager:
             log_warning(f"Failed to create cache directory: {e}", config=self.config)
             return None
 
+    def _setup_disk_cache(self) -> None:
+        """Initialize SQLite-based disk cache."""
+        if not self.config.rag.embedding.cache_embeddings or not self.cache_dir:
+            return
+
+        try:
+            cache_db_path = self.cache_dir / "embeddings.db"
+            self.disk_cache = EmbeddingCache(cache_db_path)
+            log_debug(f"SQLite embedding cache initialized: {cache_db_path}", self.config)
+        except Exception as e:
+            log_warning(f"Failed to initialize SQLite cache: {e}", config=self.config)
+            self.disk_cache = None
+
     def _load_model(self) -> None:
         """Load the embedding model based on configuration."""
         model_name = self.config.rag.embedding.model
@@ -110,28 +181,25 @@ class EmbeddingManager:
 
     def _load_from_cache(self, cache_key: str) -> list[float] | None:
         """Load embedding from cache if available."""
-        if not self.config.rag.embedding.cache_embeddings or not self.cache_dir:
+        if not self.config.rag.embedding.cache_embeddings:
             return None
 
-        # Check memory cache
+        # Check memory cache first (fastest)
         if cache_key in self.embedding_cache:
             log_debug("Embedding found in memory cache", self.config)
             return self.embedding_cache[cache_key]
 
-        # Check disk cache
-        try:
-            cache_file = self.cache_dir / f"{cache_key}.pkl"
-            if cache_file.exists():
-                with open(cache_file, "rb") as f:
-                    embedding = pickle.load(f)
-
-                    # Store in memory cache
+        # Check SQLite disk cache
+        if self.disk_cache:
+            try:
+                embedding = self.disk_cache.get(cache_key)
+                if embedding:
+                    # Promote to memory cache
                     self.embedding_cache[cache_key] = embedding
-
-                    log_debug("Embedding found in disk cache", self.config)
+                    log_debug("Embedding found in SQLite cache", self.config)
                     return embedding
-        except Exception as e:
-            log_warning(f"Failed to load from cache: {e}", config=self.config)
+            except Exception as e:
+                log_warning(f"Failed to load from SQLite cache: {e}", config=self.config)
 
         return None
 
@@ -143,15 +211,13 @@ class EmbeddingManager:
         # Save to memory cache
         self.embedding_cache[cache_key] = embedding
 
-        # Save to disk cache
-        if self.cache_dir:
+        # Save to SQLite disk cache
+        if self.disk_cache:
             try:
-                cache_file = self.cache_dir / f"{cache_key}.pkl"
-                with open(cache_file, "wb") as f:
-                    pickle.dump(embedding, f)
-                log_debug("Embedding saved to cache", self.config)
+                self.disk_cache.set(cache_key, embedding)
+                log_debug("Embedding saved to SQLite cache", self.config)
             except Exception as e:
-                log_warning(f"Failed to save to cache: {e}", config=self.config)
+                log_warning(f"Failed to save to SQLite cache: {e}", config=self.config)
 
     @timer
     def encode_single(self, text: str) -> list[float]:
@@ -282,6 +348,10 @@ class EmbeddingManager:
         try:
             self.embedding_cache.clear()
 
+            if self.disk_cache:
+                self.disk_cache.clear()
+
+            # Also clean up any legacy pickle files
             if self.cache_dir and self.cache_dir.exists():
                 for cache_file in self.cache_dir.glob("*.pkl"):
                     cache_file.unlink()

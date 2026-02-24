@@ -156,6 +156,7 @@ class KeywordSearcher:
     """
     BM25-based keyword search for exact term matching.
     Automatically syncs with vector store when provided.
+    Supports incremental updates to avoid full rebuilds.
     """
 
     def __init__(self, vector_store: Optional["ChromaVectorStore"] = None, config: Optional["OrionConfig"] = None):
@@ -166,6 +167,9 @@ class KeywordSearcher:
         self.document_metadata = []
         self.document_ids = []
         self._is_synced = False
+        self._pending_additions: list[tuple[str, str, dict]] = []  # (id, text, metadata)
+        self._pending_removals: set[str] = set()  # doc_ids to remove
+        self._needs_rebuild = False
 
     def ensure_synced(self) -> bool:
         """
@@ -174,7 +178,7 @@ class KeywordSearcher:
         Returns:
             True if synced successfully, False otherwise
         """
-        if self._is_synced:
+        if self._is_synced and not self._needs_rebuild:
             return True
             
         if self.vector_store is None:
@@ -182,36 +186,114 @@ class KeywordSearcher:
             return False
             
         try:
-            # Get all documents from vector store
-            if self.vector_store.collection is None:
-                self.vector_store._get_or_create_collection()
-                
-            all_data = self.vector_store.collection.get(include=["documents", "metadatas"])
+            # Apply any pending changes first
+            self._apply_pending_changes()
             
-            if all_data.get("ids") and all_data["ids"]:
-                self.index_documents(
-                    documents=all_data["documents"],
-                    document_ids=all_data["ids"],
-                    metadatas=all_data["metadatas"]
-                )
-                self._is_synced = True
-                log_info(f"Keyword index synced with {len(all_data['ids'])} documents", config=self.config)
-                return True
-            else:
-                log_info("Vector store is empty, keyword index not populated", config=self.config)
-                return False
+            # If we still need a full rebuild (first sync or too many changes)
+            if self.bm25 is None or self._needs_rebuild:
+                # Get all documents from vector store
+                if self.vector_store.collection is None:
+                    self.vector_store._get_or_create_collection()
+                    
+                all_data = self.vector_store.collection.get(include=["documents", "metadatas"])
+                
+                if all_data.get("ids") and all_data["ids"]:
+                    self.index_documents(
+                        documents=all_data["documents"],
+                        document_ids=all_data["ids"],
+                        metadatas=all_data["metadatas"]
+                    )
+                    self._is_synced = True
+                    self._needs_rebuild = False
+                    log_info(f"Keyword index synced with {len(all_data['ids'])} documents", config=self.config)
+                    return True
+                else:
+                    log_info("Vector store is empty, keyword index not populated", config=self.config)
+                    return False
                 
         except Exception as e:
             log_warning(f"Failed to sync keyword index: {e}", config=self.config)
             return False
+        
+        return True
 
     def invalidate_sync(self) -> None:
         """Mark keyword index as out of sync (call after vector store updates)."""
         self._is_synced = False
         
+    def add_document(self, doc_id: str, document: str, metadata: dict[str, Any]) -> None:
+        """
+        Incrementally add a document to the index.
+        Defers rebuild until next search for efficiency.
+        
+        Args:
+            doc_id: Document ID
+            document: Document text
+            metadata: Document metadata
+        """
+        self._pending_additions.append((doc_id, document, metadata))
+        # Small batches: apply immediately to avoid stale results
+        if len(self._pending_additions) >= 50:
+            self._apply_pending_changes()
+
+    def remove_document(self, doc_id: str) -> None:
+        """
+        Incrementally remove a document from the index.
+        Defers rebuild until next search for efficiency.
+        
+        Args:
+            doc_id: Document ID to remove
+        """
+        self._pending_removals.add(doc_id)
+        # Small batches: apply immediately
+        if len(self._pending_removals) >= 20:
+            self._apply_pending_changes()
+
+    def _apply_pending_changes(self) -> None:
+        """Apply pending additions and removals, rebuilding BM25 if needed."""
+        if not self._pending_additions and not self._pending_removals:
+            return
+
+        # Handle removals
+        if self._pending_removals:
+            removal_indices = set()
+            for i, doc_id in enumerate(self.document_ids):
+                if doc_id in self._pending_removals:
+                    removal_indices.add(i)
+            
+            if removal_indices:
+                # Remove in reverse order to maintain indices
+                for i in sorted(removal_indices, reverse=True):
+                    self.documents.pop(i)
+                    self.document_ids.pop(i)
+                    self.document_metadata.pop(i)
+                self._needs_rebuild = True
+                log_debug(f"Removed {len(removal_indices)} documents from keyword index", self.config)
+            
+            self._pending_removals.clear()
+
+        # Handle additions
+        if self._pending_additions:
+            for doc_id, document, metadata in self._pending_additions:
+                # Skip if already exists
+                if doc_id not in self.document_ids:
+                    self.documents.append(document)
+                    self.document_ids.append(doc_id)
+                    self.document_metadata.append(metadata)
+            self._needs_rebuild = True
+            log_debug(f"Added {len(self._pending_additions)} documents to keyword index", self.config)
+            self._pending_additions.clear()
+
+        # Rebuild BM25 if we have documents
+        if self._needs_rebuild and self.documents:
+            tokenized_docs = [self._tokenize(doc) for doc in self.documents]
+            self.bm25 = BM25Okapi(tokenized_docs)
+            self._needs_rebuild = False
+            log_debug(f"Rebuilt BM25 index with {len(self.documents)} documents", self.config)
+        
     def index_documents(self, documents: list[str], document_ids: list[str], metadatas: list[dict[str, Any]]) -> None:
         """
-        Index documents for keyword search.
+        Index documents for keyword search (full rebuild).
 
         Args:
             documents: List of document texts
@@ -223,9 +305,14 @@ class KeywordSearcher:
             return
 
         try:
-            self.documents = documents
-            self.document_ids = document_ids
-            self.document_metadata = metadatas
+            self.documents = list(documents)
+            self.document_ids = list(document_ids)
+            self.document_metadata = list(metadatas)
+            
+            # Clear any pending incremental changes since we're doing a full rebuild
+            self._pending_additions.clear()
+            self._pending_removals.clear()
+            self._needs_rebuild = False
 
             # Tokenize documents
             tokenized_docs = []
@@ -281,6 +368,9 @@ class KeywordSearcher:
         # Auto-sync if needed
         if self.bm25 is None:
             self.ensure_synced()
+        
+        # Apply any pending incremental changes before searching
+        self._apply_pending_changes()
             
         if not query.strip() or self.bm25 is None:
             log_warning("Empty query or BM25 not initialized", config=self.config)
