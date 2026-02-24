@@ -126,7 +126,7 @@
 </script>
 
 <svelte:head>
-	<title>{publicConfig.VITE_APP_NAME}</title>
+	<title>{publicConfig.PUBLIC_APP_NAME || publicConfig.VITE_APP_NAME}</title>
 </svelte:head>
 
 {#if hasModels}

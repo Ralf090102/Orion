@@ -20,7 +20,7 @@ export const GET = ({ url }) => {
 	return new Response(
 		JSON.stringify({
 			client_id: new URL(url, config.VITE_ORIGIN || url.origin).toString(),
-			client_name: config.VITE_APP_NAME,
+			client_name: config.PUBLIC_APP_NAME || config.VITE_APP_NAME,
 			client_uri: `${config.VITE_ORIGIN || url.origin}${base}`,
 			redirect_uris: [
 				new URL(`${base}/login/callback`, config.VITE_ORIGIN || url.origin).toString(),

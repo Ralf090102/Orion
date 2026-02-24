@@ -69,9 +69,9 @@
 			</h2>
 			<p class="text-sm text-gray-600 dark:text-gray-400">
 				{#if currentView === "list"}
-					Manage MCP servers to extend {publicConfig.VITE_APP_NAME} with external tools.
+					Manage MCP servers to extend {publicConfig.PUBLIC_APP_NAME || publicConfig.VITE_APP_NAME} with external tools.
 				{:else}
-					Add a custom MCP server to {publicConfig.VITE_APP_NAME}.
+					Add a custom MCP server to {publicConfig.PUBLIC_APP_NAME || publicConfig.VITE_APP_NAME}.
 				{/if}
 			</p>
 		</div>

@@ -167,31 +167,31 @@
 </script>
 
 <svelte:head>
-	<title>{publicConfig.VITE_APP_NAME} - Chat with AI models</title>
-	<meta name="description" content={publicConfig.VITE_APP_DESCRIPTION} />
+	<title>{publicConfig.PUBLIC_APP_NAME || publicConfig.VITE_APP_NAME} - Chat with AI models</title>
+	<meta name="description" content={publicConfig.PUBLIC_APP_DESCRIPTION || publicConfig.VITE_APP_DESCRIPTION} />
 	<meta name="twitter:card" content="summary_large_image" />
 	<meta name="twitter:site" content="@huggingface" />
-	<meta name="twitter:title" content="{publicConfig.VITE_APP_NAME} - Chat with AI models" />
-	<meta name="twitter:description" content={publicConfig.VITE_APP_DESCRIPTION} />
+	<meta name="twitter:title" content="{publicConfig.PUBLIC_APP_NAME || publicConfig.VITE_APP_NAME} - Chat with AI models" />
+	<meta name="twitter:description" content={publicConfig.PUBLIC_APP_DESCRIPTION || publicConfig.VITE_APP_DESCRIPTION} />
 	<meta
 		name="twitter:image"
-		content="{publicConfig.VITE_ORIGIN || page.url.origin}{publicConfig.assetPath}/thumbnail.png"
+		content="{publicConfig.PUBLIC_ORIGIN || publicConfig.VITE_ORIGIN || page.url.origin}{publicConfig.assetPath}/thumbnail.png"
 	/>
-	<meta name="twitter:image:alt" content="{publicConfig.VITE_APP_NAME} preview" />
+	<meta name="twitter:image:alt" content="{publicConfig.PUBLIC_APP_NAME || publicConfig.VITE_APP_NAME} preview" />
 
 	<!-- use those meta tags everywhere except on special listing pages -->
 	<!-- feel free to refacto if there's a better way -->
 	{#if !page.url.pathname.includes("/models/")}
-		<meta property="og:title" content="{publicConfig.VITE_APP_NAME} - Chat with AI models" />
+		<meta property="og:title" content="{publicConfig.PUBLIC_APP_NAME || publicConfig.VITE_APP_NAME} - Chat with AI models" />
 		<meta property="og:type" content="website" />
-		<meta property="og:url" content="{publicConfig.VITE_ORIGIN || page.url.origin}{base}" />
+		<meta property="og:url" content="{publicConfig.PUBLIC_ORIGIN || publicConfig.VITE_ORIGIN || page.url.origin}{base}" />
 		<meta property="og:image" content="{publicConfig.assetPath}/thumbnail.png" />
-		<meta property="og:description" content={publicConfig.VITE_APP_DESCRIPTION} />
-		<meta property="og:site_name" content={publicConfig.VITE_APP_NAME} />
+		<meta property="og:description" content={publicConfig.PUBLIC_APP_DESCRIPTION || publicConfig.VITE_APP_DESCRIPTION} />
+		<meta property="og:site_name" content={publicConfig.PUBLIC_APP_NAME || publicConfig.VITE_APP_NAME} />
 		<meta property="og:locale" content="en_US" />
 	{/if}
 	<link rel="icon" href="{publicConfig.assetPath}/icon.svg" type="image/svg+xml" />
-	{#if publicConfig.VITE_ORIGIN}
+	{#if publicConfig.PUBLIC_ORIGIN || publicConfig.VITE_ORIGIN}
 		<link
 			rel="icon"
 			href="{publicConfig.assetPath}/favicon.svg"
