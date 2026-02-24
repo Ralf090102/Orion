@@ -13,6 +13,8 @@
 	import CarbonUpload from "~icons/carbon/upload";
 	import CarbonRecordingFilled from "~icons/carbon/recording-filled";
 	import CarbonSettings from "~icons/carbon/settings";
+	import CarbonTextCreation from "~icons/carbon/text-creation";
+	import CarbonUserSpeaker from "~icons/carbon/user-speaker";
 
 	import { BACKEND_URL } from '$lib/utils/backendUrl';
 
@@ -69,6 +71,36 @@
 		audioUrl: null as string | null
 	});
 	let currentSynthesisAudio: HTMLAudioElement | null = null;
+
+	// Voice Design state (VoiceDesign model - generate voice from description)
+	let voiceDesignForm = $state({
+		voice_description: '',
+		preview_text: 'Hello! How can I help you today?',
+		save_voice_id: '',
+		language: 'english'
+	});
+	let generatingVoice = $state(false);
+	let savingDesignedVoice = $state(false);
+	let designedAudioUrl = $state<string | null>(null);
+	let currentDesignAudio: HTMLAudioElement | null = null;
+
+	// Premium Speakers state (CustomVoice model - instruction-controlled synthesis)
+	let customSpeakers = $state<Array<{
+		speaker_id: string;
+		name: string;
+		description: string;
+		gender: string;
+		style: string;
+	}>>([]);
+	let loadingCustomSpeakers = $state(false);
+	let customVoiceForm = $state({
+		speaker: '',
+		instruct: '',
+		preview_text: 'Hello! How can I help you today?'
+	});
+	let previewingCustomVoice = $state(false);
+	let customVoiceAudioUrl = $state<string | null>(null);
+	let currentCustomAudio: HTMLAudioElement | null = null;
 
 	// Qwen3 configuration
 	let qwen3Config = $state({
@@ -772,6 +804,189 @@
 		}
 	}
 
+	// ========== VOICE DESIGN (VoiceDesign model) ==========
+	async function generateVoicePreview() {
+		if (!voiceDesignForm.voice_description.trim()) {
+			error = 'Please provide a voice description';
+			return;
+		}
+		if (!voiceDesignForm.preview_text.trim()) {
+			error = 'Please provide text to preview';
+			return;
+		}
+
+		try {
+			generatingVoice = true;
+			error = null;
+			success = null;
+
+			// Stop any currently playing audio
+			if (currentDesignAudio) {
+				currentDesignAudio.pause();
+				currentDesignAudio = null;
+			}
+			if (designedAudioUrl) {
+				URL.revokeObjectURL(designedAudioUrl);
+				designedAudioUrl = null;
+			}
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/generate-voice`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					text: voiceDesignForm.preview_text,
+					voice_description: voiceDesignForm.voice_description,
+					language: voiceDesignForm.language
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.detail || 'Voice generation failed');
+			}
+
+			const blob = await response.blob();
+			designedAudioUrl = URL.createObjectURL(blob);
+
+			// Auto-play
+			currentDesignAudio = new Audio(designedAudioUrl);
+			currentDesignAudio.play();
+			success = 'Voice preview generated!';
+		} catch (err) {
+			error = (err as Error).message;
+			console.error('Voice generation failed:', err);
+		} finally {
+			generatingVoice = false;
+		}
+	}
+
+	async function designAndSaveVoice() {
+		if (!voiceDesignForm.voice_description.trim()) {
+			error = 'Please provide a voice description';
+			return;
+		}
+		if (!voiceDesignForm.save_voice_id.trim()) {
+			error = 'Please provide a voice ID to save';
+			return;
+		}
+		if (!voiceDesignForm.preview_text.trim()) {
+			error = 'Please provide sample text for the voice';
+			return;
+		}
+
+		try {
+			savingDesignedVoice = true;
+			error = null;
+			success = null;
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/design-and-save`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					voice_description: voiceDesignForm.voice_description,
+					voice_id: voiceDesignForm.save_voice_id,
+					sample_text: voiceDesignForm.preview_text,
+					language: voiceDesignForm.language
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.detail || 'Failed to save designed voice');
+			}
+
+			const data = await response.json();
+			success = data.message;
+
+			// Reset save voice name
+			voiceDesignForm.save_voice_id = '';
+
+			// Reload voices to show the new one
+			await loadClonedVoices();
+		} catch (err) {
+			error = (err as Error).message;
+			console.error('Design and save failed:', err);
+		} finally {
+			savingDesignedVoice = false;
+		}
+	}
+
+	// ========== PREMIUM SPEAKERS (CustomVoice model) ==========
+	async function loadCustomSpeakers() {
+		try {
+			loadingCustomSpeakers = true;
+			const response = await fetch(`${BACKEND_URL}/api/speech/custom-speakers`);
+			
+			if (!response.ok) {
+				throw new Error('Failed to load custom speakers');
+			}
+
+			const data = await response.json();
+			customSpeakers = data.speakers || [];
+		} catch (err) {
+			console.error('Failed to load custom speakers:', err);
+		} finally {
+			loadingCustomSpeakers = false;
+		}
+	}
+
+	async function previewCustomVoice() {
+		if (!customVoiceForm.speaker) {
+			error = 'Please select a speaker';
+			return;
+		}
+		if (!customVoiceForm.preview_text.trim()) {
+			error = 'Please provide text to preview';
+			return;
+		}
+
+		try {
+			previewingCustomVoice = true;
+			error = null;
+			success = null;
+
+			// Stop any currently playing audio
+			if (currentCustomAudio) {
+				currentCustomAudio.pause();
+				currentCustomAudio = null;
+			}
+			if (customVoiceAudioUrl) {
+				URL.revokeObjectURL(customVoiceAudioUrl);
+				customVoiceAudioUrl = null;
+			}
+
+			const response = await fetch(`${BACKEND_URL}/api/speech/custom-voice`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					text: customVoiceForm.preview_text,
+					speaker: customVoiceForm.speaker,
+					instruct: customVoiceForm.instruct || undefined
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.detail || 'Custom voice synthesis failed');
+			}
+
+			const blob = await response.blob();
+			customVoiceAudioUrl = URL.createObjectURL(blob);
+
+			// Auto-play
+			currentCustomAudio = new Audio(customVoiceAudioUrl);
+			currentCustomAudio.play();
+			
+			const speakerInfo = customSpeakers.find(s => s.speaker_id === customVoiceForm.speaker);
+			success = `Preview generated with ${speakerInfo?.name || customVoiceForm.speaker}`;
+		} catch (err) {
+			error = (err as Error).message;
+			console.error('Custom voice preview failed:', err);
+		} finally {
+			previewingCustomVoice = false;
+		}
+	}
+
 	async function deleteClonedVoice(voiceId: string) {
 		if (!confirm(`Delete voice "${voiceId}"? This cannot be undone.`)) {
 			return;
@@ -873,6 +1088,7 @@
 			await loadAvailableVoices();
 		} else {
 			await loadClonedVoices();
+			await loadCustomSpeakers();
 		}
 	});
 </script>
@@ -1550,10 +1766,257 @@
 				</div>
 			</div>
 
+			<!-- Voice Design Interface (VoiceDesign Model) -->
+			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
+				<div class="flex items-center gap-3 mb-6">
+					<div class="rounded-lg bg-indigo-100 p-3 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400">
+						<CarbonTextCreation class="size-6" />
+					</div>
+					<div>
+						<h2 class="text-lg font-semibold">Design Voice from Description</h2>
+						<p class="text-sm text-gray-600 dark:text-gray-400">
+							Generate a voice from text description (no audio sample needed)
+						</p>
+					</div>
+				</div>
+
+				<div class="space-y-6">
+					<!-- Voice Description -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Voice Description <span class="text-red-500">*</span>
+						</label>
+						<textarea
+							bind:value={voiceDesignForm.voice_description}
+							placeholder="Describe the voice you want to create...
+e.g., 'A warm, friendly female voice with a slight British accent, suitable for audiobooks.'
+or 'A deep, authoritative male voice with a calm and reassuring tone.'"
+							rows="4"
+							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+						></textarea>
+						<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+							Be specific about gender, age, accent, tone, and speaking style for best results
+						</p>
+					</div>
+
+					<!-- Preview Text -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Preview Text
+						</label>
+						<textarea
+							bind:value={voiceDesignForm.preview_text}
+							placeholder="Enter text to hear the designed voice..."
+							rows="2"
+							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+						></textarea>
+					</div>
+
+					<!-- Language Selection -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Language
+						</label>
+						<select
+							bind:value={voiceDesignForm.language}
+							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+						>
+							<option value="english">English</option>
+							<option value="chinese">Chinese</option>
+							<option value="japanese">Japanese</option>
+							<option value="korean">Korean</option>
+							<option value="french">French</option>
+							<option value="german">German</option>
+							<option value="spanish">Spanish</option>
+						</select>
+					</div>
+
+					<!-- Audio Preview -->
+					{#if designedAudioUrl}
+						<div class="rounded-lg border border-indigo-200 bg-indigo-50 dark:border-indigo-800 dark:bg-indigo-900/20 p-4">
+							<div class="flex items-center gap-3">
+								<audio
+									src={designedAudioUrl}
+									controls
+									class="flex-1 h-10"
+								></audio>
+							</div>
+						</div>
+					{/if}
+
+					<!-- Actions Row -->
+					<div class="flex flex-wrap items-center justify-between gap-3">
+						<button
+							onclick={generateVoicePreview}
+							disabled={generatingVoice || !voiceDesignForm.voice_description.trim() || !voiceDesignForm.preview_text.trim()}
+							class="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 dark:bg-indigo-500 dark:hover:bg-indigo-600"
+						>
+							<div class="flex items-center gap-2">
+								{#if generatingVoice}
+									<div class="size-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+									Generating...
+								{:else}
+									<CarbonPlay class="size-4" />
+									Preview Voice
+								{/if}
+							</div>
+						</button>
+
+						<!-- Save Voice Section -->
+						{#if designedAudioUrl}
+							<div class="flex items-center gap-2 flex-1 justify-end">
+								<input
+									type="text"
+									bind:value={voiceDesignForm.save_voice_id}
+									placeholder="Voice ID to save..."
+									class="w-48 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+								/>
+								<button
+									onclick={designAndSaveVoice}
+									disabled={savingDesignedVoice || !voiceDesignForm.save_voice_id.trim()}
+									class="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 dark:bg-green-500 dark:hover:bg-green-600"
+								>
+									<div class="flex items-center gap-2">
+										{#if savingDesignedVoice}
+											<div class="size-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+											Saving...
+										{:else}
+											<CarbonSave class="size-4" />
+											Save to Library
+										{/if}
+									</div>
+								</button>
+							</div>
+						{/if}
+					</div>
+				</div>
+			</div>
+
+			<!-- Premium Speakers Interface (CustomVoice Model) -->
+			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
+				<div class="flex items-center gap-3 mb-6">
+					<div class="rounded-lg bg-amber-100 p-3 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400">
+						<CarbonUserSpeaker class="size-6" />
+					</div>
+					<div>
+						<h2 class="text-lg font-semibold">Premium Speakers</h2>
+						<p class="text-sm text-gray-600 dark:text-gray-400">
+							High-quality pre-trained voices with instruction control
+						</p>
+					</div>
+				</div>
+
+				<div class="space-y-6">
+					<!-- Speaker Selection -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Select Speaker <span class="text-red-500">*</span>
+						</label>
+						{#if loadingCustomSpeakers}
+							<div class="flex items-center gap-2 text-gray-500 dark:text-gray-400 py-2">
+								<CarbonRenew class="size-4 animate-spin" />
+								Loading speakers...
+							</div>
+						{:else if customSpeakers.length === 0}
+							<div class="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 p-4">
+								<p class="text-sm text-amber-800 dark:text-amber-200">
+									Premium speakers not available. Make sure the CustomVoice model is configured.
+								</p>
+								<button
+									onclick={loadCustomSpeakers}
+									class="mt-2 text-sm text-amber-600 hover:text-amber-700 dark:text-amber-400"
+								>
+									Retry loading speakers
+								</button>
+							</div>
+						{:else}
+							<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+								{#each customSpeakers as speaker}
+									<button
+										onclick={() => { customVoiceForm.speaker = speaker.speaker_id; }}
+										class="text-left p-3 rounded-lg border-2 transition-all
+											{customVoiceForm.speaker === speaker.speaker_id
+												? 'border-amber-400 bg-amber-50 dark:border-amber-500 dark:bg-amber-900/20'
+												: 'border-gray-200 dark:border-gray-700 hover:border-amber-300 dark:hover:border-amber-600'}"
+									>
+										<div class="font-medium text-gray-900 dark:text-gray-100">{speaker.name}</div>
+										<div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+											{speaker.gender} • {speaker.style}
+										</div>
+										<div class="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
+											{speaker.description}
+										</div>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</div>
+
+					<!-- Instruction (Optional) -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Style Instruction (Optional)
+						</label>
+						<input
+							type="text"
+							bind:value={customVoiceForm.instruct}
+							placeholder="e.g., 'Speak with excitement' or 'Read slowly and calmly'"
+							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 focus:border-amber-500 focus:ring-2 focus:ring-amber-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+						/>
+						<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+							Control how the speaker delivers the text (emotion, pace, emphasis)
+						</p>
+					</div>
+
+					<!-- Preview Text -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Text to Speak <span class="text-red-500">*</span>
+						</label>
+						<textarea
+							bind:value={customVoiceForm.preview_text}
+							placeholder="Enter text to hear the premium speaker..."
+							rows="2"
+							class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 focus:border-amber-500 focus:ring-2 focus:ring-amber-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+						></textarea>
+					</div>
+
+					<!-- Audio Preview -->
+					{#if customVoiceAudioUrl}
+						<div class="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 p-4">
+							<audio
+								src={customVoiceAudioUrl}
+								controls
+								class="w-full h-10"
+							></audio>
+						</div>
+					{/if}
+
+					<!-- Preview Button -->
+					<div class="flex justify-end">
+						<button
+							onclick={previewCustomVoice}
+							disabled={previewingCustomVoice || !customVoiceForm.speaker || !customVoiceForm.preview_text.trim()}
+							class="rounded-lg bg-amber-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50 dark:bg-amber-500 dark:hover:bg-amber-600"
+						>
+							<div class="flex items-center gap-2">
+								{#if previewingCustomVoice}
+									<div class="size-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+									Generating...
+								{:else}
+									<CarbonPlay class="size-4" />
+									Preview Speaker
+								{/if}
+							</div>
+						</button>
+					</div>
+				</div>
+			</div>
+
 			<!-- Cloned Voices List -->
 			<div class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
 				<div class="flex items-center justify-between mb-4">
-					<h2 class="text-lg font-semibold">Your Cloned Voices</h2>
+					<h2 class="text-lg font-semibold">Voice Library</h2>
 					<button
 						onclick={loadClonedVoices}
 						disabled={loadingClonedVoices}
@@ -1572,8 +2035,8 @@
 				{:else if clonedVoices.length === 0}
 					<div class="text-center py-8 text-gray-500 dark:text-gray-400">
 						<CarbonMicrophone class="size-8 mx-auto mb-2 opacity-50" />
-						<p>No cloned voices yet</p>
-						<p class="text-sm mt-1">Record or upload audio above to create your first voice</p>
+						<p>No voices yet</p>
+						<p class="text-sm mt-1">Clone a voice, design one from description, or use premium speakers</p>
 					</div>
 				{:else}
 					<div class="space-y-3">
@@ -1586,6 +2049,16 @@
 											<span class="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
 												<span class="size-1.5 rounded-full bg-purple-500 inline-block"></span>
 												Active
+											</span>
+										{/if}
+										<!-- Source Badge -->
+										{#if voice.source === 'designed'}
+											<span class="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+												Designed
+											</span>
+										{:else}
+											<span class="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+												Cloned
 											</span>
 										{/if}
 									</div>
