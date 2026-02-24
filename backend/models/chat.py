@@ -5,6 +5,7 @@ Request/response models for chat sessions, messages, and conversational AI.
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -148,6 +149,13 @@ class DeleteSessionResponse(BaseModel):
         }
 
 
+# ========== INPUT TYPE ENUM ==========
+class InputType(str, Enum):
+    """How the message was created."""
+    TEXT = "text"
+    VOICE = "voice"
+
+
 # ========== MESSAGE MODELS ==========
 class Message(BaseModel):
     """Model for a chat message."""
@@ -160,6 +168,16 @@ class Message(BaseModel):
     content: str = Field(..., min_length=1, description="Message content")
     tokens: int = Field(default=0, description="Token count (estimated)")
     timestamp: str = Field(..., description="Message timestamp (ISO format)")
+    
+    # Voice/Conversation mode fields
+    input_type: Optional[InputType] = Field(
+        default=InputType.TEXT,
+        description="How the message was created (text or voice)",
+    )
+    voice_mode: bool = Field(
+        default=False,
+        description="Whether conversation mode was active when message was sent",
+    )
 
     class Config:
         json_schema_extra = {
@@ -168,6 +186,8 @@ class Message(BaseModel):
                 "content": "What is machine learning?",
                 "tokens": 5,
                 "timestamp": "2026-01-25T14:30:00",
+                "input_type": "text",
+                "voice_mode": False,
             }
         }
 
@@ -335,6 +355,46 @@ class ChatStreamChunk(BaseModel):
 
 
 # ========== WEBSOCKET MODELS ==========
+class WebSocketChatOptions(BaseModel):
+    """Options for WebSocket chat messages (passed in 'data' field)."""
+    
+    rag_mode: Optional[str] = Field(
+        default=None,
+        description="RAG trigger mode: always/auto/manual/never",
+    )
+    include_sources: bool = Field(
+        default=False,
+        description="Include source citations when RAG is triggered",
+    )
+    temperature: Optional[float] = Field(
+        default=None,
+        description="LLM temperature (0.0-2.0)",
+    )
+    voice_mode: bool = Field(
+        default=False,
+        description="Whether conversation mode is active (triggers brief responses)",
+    )
+    input_type: Optional[InputType] = Field(
+        default=InputType.TEXT,
+        description="How the message was created (text or voice)",
+    )
+    files: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Uploaded files for context",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "rag_mode": "auto",
+                "include_sources": True,
+                "temperature": 0.7,
+                "voice_mode": False,
+                "input_type": "text",
+            }
+        }
+
+
 class WebSocketMessage(BaseModel):
     """Model for WebSocket messages (both incoming and outgoing)."""
 
@@ -349,7 +409,7 @@ class WebSocketMessage(BaseModel):
     )
     data: Optional[dict[str, Any]] = Field(
         default=None,
-        description="Additional data",
+        description="Additional data (options for incoming, metadata for outgoing)",
     )
 
     class Config:
@@ -361,6 +421,16 @@ class WebSocketMessage(BaseModel):
                     "data": {
                         "rag_mode": "auto",
                         "include_sources": True,
+                        "voice_mode": False,
+                        "input_type": "text",
+                    },
+                },
+                {
+                    "type": "message",
+                    "content": "Tell me about the weather",
+                    "data": {
+                        "voice_mode": True,
+                        "input_type": "voice",
                     },
                 },
                 {

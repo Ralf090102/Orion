@@ -660,6 +660,111 @@ class Qwen3Config(BaseConfig):
             raise ValueError(f"max_cached_voices must be positive, got {self.max_cached_voices}")
 
 
+# ========== VOICE ACTIVITY DETECTION (VAD) CONFIGURATION ==========
+class VADInputMode(str, Enum):
+    """Voice input mode options."""
+    AUTO = "auto"           # VAD handles start/end automatically
+    PUSH_TO_TALK = "push-to-talk"  # Click to start, click to stop
+    HOLD_TO_TALK = "hold-to-talk"  # Hold button to record, release to send
+
+
+@dataclass
+class VADConfig(BaseConfig):
+    """Voice Activity Detection configuration for conversation mode."""
+    
+    # Silence detection thresholds
+    silence_threshold_db: float = -50.0  # dB level below which = silence
+    silence_duration_ms: int = 1500      # ms of silence to trigger end of speech
+    
+    # Speech duration limits
+    min_speech_duration_ms: int = 500    # Ignore very short sounds (<500ms)
+    max_speech_duration_ms: int = 60000  # Safety limit (60 seconds)
+    
+    # Noise handling
+    auto_calibrate_noise: bool = True    # Measure ambient noise on start
+    noise_calibration_duration_ms: int = 1000  # Duration to sample noise floor
+    
+    # Input mode
+    default_input_mode: VADInputMode = VADInputMode.AUTO
+    
+    @classmethod
+    def from_env(cls) -> "VADConfig":
+        """Load VAD configuration from environment variables."""
+        input_mode_str = get_env_str("VAD_INPUT_MODE", "auto").lower().replace("_", "-")
+        input_mode = VADInputMode.AUTO
+        for mode in VADInputMode:
+            if mode.value == input_mode_str:
+                input_mode = mode
+                break
+        
+        return cls(
+            silence_threshold_db=get_env_float("VAD_SILENCE_THRESHOLD_DB", -50.0),
+            silence_duration_ms=get_env_int("VAD_SILENCE_DURATION_MS", 1500),
+            min_speech_duration_ms=get_env_int("VAD_MIN_SPEECH_DURATION_MS", 500),
+            max_speech_duration_ms=get_env_int("VAD_MAX_SPEECH_DURATION_MS", 60000),
+            auto_calibrate_noise=get_env_bool("VAD_AUTO_CALIBRATE_NOISE", True),
+            noise_calibration_duration_ms=get_env_int("VAD_NOISE_CALIBRATION_DURATION_MS", 1000),
+            default_input_mode=input_mode,
+        )
+    
+    def validate(self) -> None:
+        """Validate VAD configuration values."""
+        if self.silence_threshold_db > 0:
+            raise ValueError(f"silence_threshold_db should be negative (dB), got {self.silence_threshold_db}")
+        
+        if self.silence_duration_ms < 100:
+            raise ValueError(f"silence_duration_ms must be >= 100ms, got {self.silence_duration_ms}")
+        
+        if self.min_speech_duration_ms < 0:
+            raise ValueError(f"min_speech_duration_ms must be non-negative, got {self.min_speech_duration_ms}")
+        
+        if self.max_speech_duration_ms <= self.min_speech_duration_ms:
+            raise ValueError(
+                f"max_speech_duration_ms ({self.max_speech_duration_ms}) must be > "
+                f"min_speech_duration_ms ({self.min_speech_duration_ms})"
+            )
+        
+        if self.noise_calibration_duration_ms < 100:
+            raise ValueError(f"noise_calibration_duration_ms must be >= 100ms, got {self.noise_calibration_duration_ms}")
+
+
+@dataclass
+class ConversationModeConfig(BaseConfig):
+    """Configuration for conversation mode (voice chat)."""
+    
+    # Auto-TTS settings
+    auto_tts_enabled: bool = True        # Automatically speak assistant responses
+    auto_resume_listening: bool = True   # Resume listening after TTS finishes
+    
+    # Voice settings for conversation mode
+    tts_voice: Optional[str] = None      # Voice to use (None = use default)
+    
+    # Brief response settings
+    brief_response_max_tokens: int = 200  # Limit tokens for voice responses
+    
+    # VAD settings
+    vad: VADConfig = field(default_factory=VADConfig)
+    
+    @classmethod
+    def from_env(cls) -> "ConversationModeConfig":
+        """Load conversation mode configuration from environment variables."""
+        tts_voice = get_env_str("CONVO_TTS_VOICE", "") or None
+        
+        return cls(
+            auto_tts_enabled=get_env_bool("CONVO_AUTO_TTS_ENABLED", True),
+            auto_resume_listening=get_env_bool("CONVO_AUTO_RESUME_LISTENING", True),
+            tts_voice=tts_voice,
+            brief_response_max_tokens=get_env_int("CONVO_BRIEF_RESPONSE_MAX_TOKENS", 200),
+            vad=VADConfig.from_env(),
+        )
+    
+    def validate(self) -> None:
+        """Validate conversation mode configuration."""
+        if self.brief_response_max_tokens <= 0:
+            raise ValueError(f"brief_response_max_tokens must be positive, got {self.brief_response_max_tokens}")
+        self.vad.validate()
+
+
 # ========== MAIN RAG CONFIGURATION ==========
 @dataclass
 class RAGConfig(BaseConfig):
@@ -904,6 +1009,7 @@ class OrionConfig(BaseConfig):
     whisper: WhisperConfig = field(default_factory=WhisperConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
     qwen3: Qwen3Config = field(default_factory=Qwen3Config)
+    conversation_mode: ConversationModeConfig = field(default_factory=ConversationModeConfig)
     version: str = "1.0.0"
 
     @classmethod
@@ -918,6 +1024,7 @@ class OrionConfig(BaseConfig):
             whisper=WhisperConfig.from_env(),
             tts=TTSConfig.from_env(),
             qwen3=Qwen3Config.from_env(),
+            conversation_mode=ConversationModeConfig.from_env(),
             version=get_env_str("ORION_VERSION", "1.0.0"),
         )
         config.validate()
@@ -968,6 +1075,11 @@ class OrionConfig(BaseConfig):
             self.qwen3.validate()
         except Exception as e:
             log_error(f"Qwen3 config validation failed: {e}")
+            raise
+        try:
+            self.conversation_mode.validate()
+        except Exception as e:
+            log_error(f"Conversation mode config validation failed: {e}")
             raise
         
 
