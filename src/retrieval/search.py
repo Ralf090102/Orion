@@ -113,16 +113,17 @@ class SemanticSearcher:
                     distance = results["distances"][0][i] if results["distances"] else float("inf")
 
                     # Convert distance to similarity score (0-1 range, higher is better)
-                    # Using exponential decay: similarity = exp(-distance)
-                    # This naturally handles any distance range and keeps scores in 0-1
-                    import math
-
                     if distance == 0:
                         similarity_score = 1.0  # Perfect match
                     elif distance == float("inf"):
                         similarity_score = 0.0  # No match
+                    elif self.config.rag.vectorstore.distance_metric == "cosine":
+                        # For cosine distance: similarity = 1 - distance
+                        # More intuitive: 0.8 means 80% similar
+                        similarity_score = max(0.0, 1.0 - distance)
                     else:
-                        # Exponential decay provides smooth similarity scores
+                        # Fallback for other metrics (L2, IP): use exponential decay
+                        import math
                         similarity_score = math.exp(-distance)
 
                     # Apply threshold filter

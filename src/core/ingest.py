@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import fitz  # PyMuPDF
 from langchain_core.documents import Document
@@ -929,6 +929,7 @@ class DocumentIngestor:
         recursive: bool = True,
         max_workers: int = 4,
         skip_existing: bool = False,
+        progress_callback: Callable[[int, int, str], None] | None = None,
     ) -> IngestionStats:
         """
         Ingest all supported files from a directory.
@@ -937,6 +938,8 @@ class DocumentIngestor:
             directory_path: Path to directory
             recursive: Whether to search recursively
             max_workers: Number of parallel workers
+            skip_existing: Whether to skip files already in vector store
+            progress_callback: Optional callback(current, total, filename) for progress updates
 
         Returns:
             IngestionStats with results
@@ -1004,10 +1007,20 @@ class DocumentIngestor:
         # Process files in parallel
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(self.ingest_file, file): file for file in files}
+            completed_count = 0
 
             with tqdm(total=len(files), desc="Ingesting files") as pbar:
                 for future in as_completed(futures):
                     file = futures[future]
+                    completed_count += 1
+                    
+                    # Call progress callback if provided
+                    if progress_callback:
+                        try:
+                            progress_callback(completed_count, len(files), str(file))
+                        except Exception as cb_err:
+                            log_warning(f"Progress callback error: {cb_err}", self.config)
+                    
                     try:
                         success, metadata, errors = future.result()
 
@@ -1045,6 +1058,7 @@ class DocumentIngestor:
         clear_existing: bool = False,
         skip_existing: bool = False,
         recursive: bool = True,
+        progress_callback: Callable[[int, int, str], None] | None = None,
     ) -> IngestionStats:
         """
         Ingest files from knowledge base path(s).
@@ -1052,6 +1066,9 @@ class DocumentIngestor:
         Args:
             source_path: Path to file or directory
             clear_existing: Whether to clear existing data first
+            skip_existing: Whether to skip files already in vector store
+            recursive: Whether to search subdirectories
+            progress_callback: Optional callback(current, total, filename) for progress updates
 
         Returns:
             IngestionStats with results
@@ -1063,6 +1080,8 @@ class DocumentIngestor:
             self.vector_store.clear_collection()
 
         if source_path.is_file():
+            if progress_callback:
+                progress_callback(0, 1, str(source_path))
             success, metadata, errors = self.ingest_file(source_path)
             stats = IngestionStats(total_files=1)
             if success:
@@ -1073,10 +1092,17 @@ class DocumentIngestor:
                 stats.failed_files = 1
                 for error in errors:
                     stats.add_error(error)
+            if progress_callback:
+                progress_callback(1, 1, str(source_path))
             return stats
 
         elif source_path.is_dir():
-            return self.ingest_directory(source_path, recursive=recursive, skip_existing=skip_existing)
+            return self.ingest_directory(
+                source_path,
+                recursive=recursive,
+                skip_existing=skip_existing,
+                progress_callback=progress_callback,
+            )
 
         else:
             log_error(f"Path not found: {source_path}", self.config)
