@@ -506,6 +506,57 @@ class UnifiedTTSManager:
             logger.error(f"Piper synthesis failed: {e}")
             raise
     
+    def synthesize_stream(
+        self,
+        text: str,
+        voice_id: Optional[str] = None,
+        speed: Optional[float] = None,
+        output_format: str = "wav",
+        language: str = "en",
+    ):
+        """Generator that yields audio bytes one sentence-chunk at a time.
+
+        For Qwen3 engine: streams one WAV blob per sentence so the frontend
+        can start playing the first sentence while later ones are still being
+        synthesized.
+        For Piper engine: yields a single blob (Piper is already fast).
+        """
+        # Resolve defaults (same logic as synthesize())
+        if voice_id is None:
+            if self.tts_config.default_engine == "qwen3":
+                voice_id = self.tts_config.active_qwen3_voice
+                if voice_id is None and self._qwen3_manager is not None:
+                    cloned = self._qwen3_manager.voice_embeddings
+                    if cloned:
+                        voice_id = next(iter(cloned))
+                        logger.info(f"synthesize_stream: auto-selected voice '{voice_id}'")
+            else:
+                voice_id = self.tts_config.default_voice
+        if speed is None:
+            speed = self.tts_config.default_speed
+
+        engine = self._detect_engine(voice_id)
+
+        if engine == "qwen3" and self.qwen3_manager:
+            _LANG_MAP = {
+                "en": "english", "zh": "chinese", "ja": "japanese",
+                "ko": "korean",  "fr": "french",  "de": "german",
+                "es": "spanish", "it": "italian", "pt": "portuguese",
+                "ru": "russian",
+            }
+            qwen3_lang = _LANG_MAP.get(language.lower(), language.lower())
+            import soundfile as sf
+            for audio_array, sr in self.qwen3_manager.synthesize_stream(
+                text, voice_id=voice_id, speed=speed, language=qwen3_lang
+            ):
+                buf = io.BytesIO()
+                sf.write(buf, audio_array, sr, format="wav")
+                wav_bytes = buf.getvalue()
+                yield self._convert_to_mp3(wav_bytes) if output_format == "mp3" else wav_bytes
+        else:
+            # Piper: single synthesis (it's already fast)
+            yield self._synthesize_piper(text, voice_id, speed, output_format)
+
     def _synthesize_qwen3(
         self,
         text: str,

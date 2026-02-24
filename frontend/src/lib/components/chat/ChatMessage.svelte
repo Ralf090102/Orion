@@ -61,6 +61,8 @@
 	let messageWidth: number = $state(0);
 	let messageInfoWidth: number = $state(0);
 	let isTTSLoading = $state(false);
+	// AbortController for the active streaming fetch
+	let ttsStreamController: AbortController | null = null;
 	
 	// Computed property to check if this message is currently playing
 	let isReadingAloud = $derived(globalTTSState.messageId === message.id);
@@ -125,83 +127,118 @@
 	}
 
 	async function readAloud() {
+		// ── Stop if already playing ──────────────────────────────────────
+		if (isReadingAloud || isTTSLoading) {
+			ttsStreamController?.abort();
+			ttsStreamController = null;
+			globalTTSState.audio?.pause();
+			if (globalTTSState.audioUrl) URL.revokeObjectURL(globalTTSState.audioUrl);
+			globalTTSState = { audio: null, messageId: null, audioUrl: null };
+			isTTSLoading = false;
+			return;
+		}
+
+		const textToRead = contentWithoutThink;
+		if (!textToRead?.trim()) return;
+
+		isTTSLoading = true;
+
+		// ── Set up abort controller for this session ─────────────────────
+		const ac = new AbortController();
+		ttsStreamController = ac;
+		let stopped = false;
+
+		function stopAll(revokeQueued: string[]) {
+			stopped = true;
+			ac.abort();
+			globalTTSState.audio?.pause();
+			if (globalTTSState.audioUrl) URL.revokeObjectURL(globalTTSState.audioUrl);
+			for (const u of revokeQueued) URL.revokeObjectURL(u);
+			globalTTSState = { audio: null, messageId: null, audioUrl: null };
+			isTTSLoading = false;
+		}
+
+		// ── Fetch the streaming endpoint ─────────────────────────────────
+		let response: Response;
 		try {
-			// If this message is currently playing, stop it
-			if (isReadingAloud && globalTTSState.audio) {
-				globalTTSState.audio.pause();
-				if (globalTTSState.audioUrl) {
-					URL.revokeObjectURL(globalTTSState.audioUrl);
-				}
-				globalTTSState = { audio: null, messageId: null, audioUrl: null };
-				return;
-			}
-
-			// Prevent multiple concurrent requests
-			if (isTTSLoading) {
-				return;
-			}
-
-			// Use content without think blocks for TTS
-			const textToRead = contentWithoutThink;
-
-			if (!textToRead || textToRead.trim().length === 0) {
-				console.warn('No content to read aloud');
-				return;
-			}
-
-			isTTSLoading = true;
-
-			const response = await fetch(`${BACKEND_URL}/api/speech/synthesize`, {
+			response = await fetch(`${BACKEND_URL}/api/speech/synthesize-stream`, {
 				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify({
-					text: textToRead,
-					voice: null,  // Use backend's configured default voice
-					format: 'mp3'
-				}),
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ text: textToRead, voice: null, format: 'wav' }),
+				signal: ac.signal,
 			});
-
-			if (!response.ok) {
-				const errorData = await response.json().catch(() => ({ detail: 'TTS failed' }));
-				throw new Error(errorData.detail || 'Failed to synthesize speech');
+			if (!response.ok || !response.body) {
+				const err = await response.json().catch(() => ({ detail: 'TTS failed' }));
+				throw new Error(err.detail || 'TTS request failed');
 			}
-
-			const audioBlob = await response.blob();
-			const audioUrl = URL.createObjectURL(audioBlob);
-
-			const audio = new Audio(audioUrl);
-			
-			// Set global state before playing
-			globalTTSState = { audio: audio, messageId: message.id, audioUrl: audioUrl };
+		} catch (err: any) {
+			if (err?.name !== 'AbortError') console.error('Read aloud failed:', err);
 			isTTSLoading = false;
-			
-			// Handle audio end
-			audio.onended = () => {
-				URL.revokeObjectURL(audioUrl);
-				if (globalTTSState.messageId === message.id) {
-					globalTTSState = { audio: null, messageId: null, audioUrl: null };
-				}
-			};
+			ttsStreamController = null;
+			return;
+		}
 
-			// Handle audio errors
-			audio.onerror = () => {
-				URL.revokeObjectURL(audioUrl);
-				if (globalTTSState.messageId === message.id) {
-					globalTTSState = { audio: null, messageId: null, audioUrl: null };
-				}
-				console.error('Audio playback failed');
-			};
+		// ── Audio queue player ───────────────────────────────────────────
+		// Each entry is an object-URL for a WAV blob
+		const audioQueue: string[] = [];
+		let isPlayingQueue = false;
 
-			await audio.play();
-
-		} catch (err) {
-			console.error('Read aloud failed:', err);
-			isTTSLoading = false;
-			if (globalTTSState.messageId === message.id) {
-				globalTTSState = { audio: null, messageId: null, audioUrl: null };
+		function playNext() {
+			if (stopped || audioQueue.length === 0) {
+				isPlayingQueue = false;
+				if (!stopped) globalTTSState = { audio: null, messageId: null, audioUrl: null };
+				return;
 			}
+			isPlayingQueue = true;
+			const url = audioQueue.shift()!;
+			const audio = new Audio(url);
+			globalTTSState = { audio, messageId: message.id, audioUrl: url };
+			audio.onended = () => { URL.revokeObjectURL(url); playNext(); };
+			audio.onerror = () => { URL.revokeObjectURL(url); playNext(); };
+			audio.play().catch(() => playNext());
+		}
+
+		// ── Read NDJSON stream ───────────────────────────────────────────
+		const reader = response.body!.getReader();
+		const decoder = new TextDecoder();
+		let buf = '';
+		isTTSLoading = false;  // first byte received — clear spinner
+
+		try {
+			while (!stopped) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				buf += decoder.decode(value, { stream: true });
+				const lines = buf.split('\n');
+				buf = lines.pop()!;  // last partial line stays in buffer
+
+				for (const line of lines) {
+					if (!line.trim() || stopped) continue;
+					const msg = JSON.parse(line) as {
+						audio_b64?: string; done?: boolean; error?: string; index?: number;
+					};
+					if (msg.error) throw new Error(`Synthesis failed: ${msg.error}`);
+					if (msg.done) { stopped = true; break; }
+					if (msg.audio_b64) {
+						const bytes = Uint8Array.from(atob(msg.audio_b64), c => c.charCodeAt(0));
+						const blob = new Blob([bytes], { type: 'audio/wav' });
+						audioQueue.push(URL.createObjectURL(blob));
+						if (!isPlayingQueue) playNext();
+					}
+				}
+			}
+		} catch (err: any) {
+			if (err?.name !== 'AbortError') console.error('Read aloud stream error:', err);
+			stopAll(audioQueue);
+			return;
+		} finally {
+			ttsStreamController = null;
+		}
+
+		// Stream done — let any remaining queued chunks finish playing
+		if (!isPlayingQueue && audioQueue.length > 0) playNext();
+		if (!isPlayingQueue && audioQueue.length === 0) {
+			globalTTSState = { audio: null, messageId: null, audioUrl: null };
 		}
 	}
 

@@ -591,6 +591,54 @@ async def set_active_voice(
 
 # ========== TEXT-TO-SPEECH (TTS) ENDPOINTS ==========
 @router.post(
+    "/synthesize-stream",
+    summary="Synthesize speech (streaming)",
+    description="Stream synthesized speech sentence-by-sentence as NDJSON. "
+                "Each line is {\"audio_b64\": \"<base64 WAV>\", \"index\": N, \"done\": false}. "
+                "Final line is {\"done\": true}.",
+)
+async def synthesize_speech_stream(
+    request: TTSRequest,
+    config: OrionConfig = Depends(get_config_dependency),
+) -> StreamingResponse:
+    """Stream TTS audio sentence-by-sentence for low-latency playback."""
+    import json as _json
+    import base64 as _b64
+    import asyncio
+
+    async def _generate():
+        try:
+            tts_manager = get_tts_manager()
+            for i, chunk_bytes in enumerate(
+                tts_manager.synthesize_stream(
+                    text=request.text,
+                    voice_id=request.voice,
+                    speed=request.speed,
+                    output_format="wav",  # always WAV per chunk; frontend decodes
+                    language="en",
+                )
+            ):
+                line = _json.dumps({
+                    "index": i,
+                    "audio_b64": _b64.b64encode(chunk_bytes).decode(),
+                    "done": False,
+                }) + "\n"
+                yield line.encode()
+                await asyncio.sleep(0)  # yield control to event loop between chunks
+        except Exception as e:
+            logger.error(f"TTS stream failed: {e}")
+            yield (_json.dumps({"error": str(e), "done": True}) + "\n").encode()
+            return
+        yield (_json.dumps({"done": True}) + "\n").encode()
+
+    return StreamingResponse(
+        _generate(),
+        media_type="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+@router.post(
     "/synthesize",
     summary="Synthesize speech from text",
     description="Convert text to speech audio using active TTS engine (Piper or Qwen3)",

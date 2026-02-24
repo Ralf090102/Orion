@@ -11,13 +11,14 @@ Features:
 Official Docs: https://github.com/QwenLM/Qwen3-TTS
 """
 
+import re
 import torch
 import numpy as np
 import soundfile as sf
 import time
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Tuple
+from typing import Generator, Iterator, Optional, Dict, Tuple
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -307,6 +308,118 @@ class Qwen3Manager:
             logger.error(f"Failed to store voice reference: {e}")
             raise
     
+    # ------------------------------------------------------------------
+    # Text helpers
+    # ------------------------------------------------------------------
+
+    def _preprocess_text_for_tts(self, text: str) -> str:
+        """Strip markdown/formatting symbols that make TTS sound wrong."""
+        # Fenced code blocks → spoken notice
+        text = re.sub(r'```[\s\S]*?```', ' [code block] ', text)
+        # Inline code → unwrapped content
+        text = re.sub(r'`([^`]+)`', r'\1', text)
+        # LaTeX display math
+        text = re.sub(r'\$\$[\s\S]*?\$\$', ' [formula] ', text)
+        text = re.sub(r'\$[^$]+\$', ' formula ', text)
+        # Markdown bold / italic
+        text = re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', text)
+        text = re.sub(r'_{1,3}([^_]+)_{1,3}', r'\1', text)
+        # ATX headings
+        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+        # Markdown links → link text only
+        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+        # Bare URLs
+        text = re.sub(r'https?://\S+', '', text)
+        # Bullet / numbered list markers
+        text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+        # Horizontal rules
+        text = re.sub(r'^[-*_]{3,}\s*$', '', text, flags=re.MULTILINE)
+        # Excessive whitespace
+        text = re.sub(r'[ \t]{2,}', ' ', text)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text.strip()
+
+    def _split_into_sentences(self, text: str, max_chars: int = 200) -> list:
+        """Split text into speakable chunks of up to max_chars characters.
+
+        Splits first on paragraph breaks, then on sentence-ending punctuation,
+        then merges short fragments and subdivides overlong ones at word boundaries.
+        """
+        # Paragraph-level split first
+        paragraphs = re.split(r'\n{2,}', text)
+        raw: list = []
+        for para in paragraphs:
+            # Sentence-level split within each paragraph
+            parts = re.split(r'(?<=[.!?\u3002\uff01\uff1f])\s+', para.strip())
+            raw.extend(p.strip() for p in parts if p.strip())
+
+        # Merge short adjacent sentences / split overlong ones
+        chunks: list = []
+        buf = ''
+        for sentence in raw:
+            if not sentence:
+                continue
+            candidate = (buf + ' ' + sentence).strip() if buf else sentence
+            if len(candidate) <= max_chars:
+                buf = candidate
+            else:
+                if buf:
+                    chunks.append(buf)
+                if len(sentence) <= max_chars:
+                    buf = sentence
+                else:
+                    # Hard-split at word boundaries
+                    words = sentence.split()
+                    buf = ''
+                    for word in words:
+                        trial = (buf + ' ' + word).strip() if buf else word
+                        if len(trial) <= max_chars:
+                            buf = trial
+                        else:
+                            if buf:
+                                chunks.append(buf)
+                            buf = word
+        if buf:
+            chunks.append(buf)
+
+        return [c for c in chunks if c.strip()]
+
+    # ------------------------------------------------------------------
+    # Core synthesis
+    # ------------------------------------------------------------------
+
+    def _synthesize_single(
+        self,
+        text: str,
+        embedding: 'VoiceEmbedding',
+        speed: float,
+        language: str,
+    ) -> Tuple[np.ndarray, int]:
+        """Synthesize one text chunk using a pre-looked-up embedding."""
+        ref_audio_path = str(embedding.embedding[0])
+        ref_text = embedding.ref_text
+
+        with torch.no_grad():
+            wavs, sr = self.model.generate_voice_clone(
+                text=text,
+                language=language,
+                ref_audio=ref_audio_path,
+                ref_text=ref_text,
+                x_vector_only_mode=(ref_text is None),
+            )
+
+        audio = wavs[0] if isinstance(wavs, list) else wavs
+
+        if speed != 1.0:
+            try:
+                import librosa
+                audio = librosa.effects.time_stretch(audio, rate=speed)
+            except ImportError:
+                logger.warning("librosa not installed, speed adjustment skipped")
+
+        return audio, sr
+
     def synthesize(
         self,
         text: str,
@@ -315,96 +428,110 @@ class Qwen3Manager:
         language: str = "english",
     ) -> Tuple[np.ndarray, int]:
         """Synthesize speech using cloned voice.
-        
-        Args:
-            text: Text to synthesize
-            voice_id: ID of cloned voice (must be in voice_embeddings)
-            speed: Speech speed multiplier (0.5-2.0)
-            language: Full language name ("english", "chinese", "japanese", "korean", etc.)
-                     Supported: auto, chinese, english, french, german, italian, japanese,
-                     korean, portuguese, russian, spanish
-        
+
+        Long texts are automatically split into sentences and synthesized in
+        separate chunks, then concatenated.  This gives a large speed-up
+        because inference cost scales super-linearly with sequence length.
+
         Returns:
             Tuple of (audio_array, sample_rate)
-        
-        Raises:
-            ValueError: If voice_id not found or text too long
-            RuntimeError: If synthesis fails
         """
-        # Validate inputs
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
-        
-        if len(text) > self.qwen3_config.max_text_length:
-            raise ValueError(
-                f"Text too long: {len(text)} > {self.qwen3_config.max_text_length} chars"
-            )
-        
+
         if voice_id and voice_id not in self.voice_embeddings:
             raise ValueError(f"Voice not found: {voice_id}. Available: {list(self.voice_embeddings.keys())}")
-        
-        # Load model if needed
-        if self.model is None:
-            self.load_model()
-        
-        # Get voice embedding (required for Base model)
+
         embedding = self.voice_embeddings.get(voice_id) if voice_id else None
-        
         if embedding is None:
             raise ValueError(
                 f"Qwen3-TTS Base model requires a voice reference for synthesis. "
                 f"Use extract_voice_embedding() to create a voice first, or specify a valid voice_id. "
                 f"Available voices: {list(self.voice_embeddings.keys())}"
             )
-        
-        logger.info(f"Synthesizing: {len(text)} chars, voice={voice_id}, lang={language}")
+
+        if self.model is None:
+            self.load_model()
+
+        text = self._preprocess_text_for_tts(text)
+        chunks = self._split_into_sentences(text, max_chars=200)
+        if not chunks:
+            raise ValueError("Text is empty after preprocessing")
+
+        logger.info(f"Synthesizing {len(chunks)} chunk(s), voice={voice_id}, lang={language}")
         start_time = time.time()
-        
-        try:
-            # Get audio file path and reference text from embedding
-            ref_audio_path = str(embedding.embedding[0])
-            ref_text = embedding.ref_text  # Now a proper dataclass field
-            
-            # Call generate_voice_clone with reference audio
-            # x_vector_only_mode=False enables ICL mode (better quality with ref_text)
-            wavs, sr = self.model.generate_voice_clone(
-                text=text,
-                language=language,
-                ref_audio=ref_audio_path,
-                ref_text=ref_text,
-                x_vector_only_mode=(ref_text is None),  # Use ICL if ref_text provided
+
+        audio_parts: list = []
+        sample_rate = 24000
+        silence: Optional[np.ndarray] = None
+
+        for i, chunk in enumerate(chunks):
+            chunk_start = time.time()
+            audio, sr = self._synthesize_single(chunk, embedding, speed, language)
+            sample_rate = sr
+            if silence is None:
+                silence = np.zeros(int(0.08 * sr), dtype=np.float32)  # 80 ms gap
+            audio_parts.append(audio)
+            if i < len(chunks) - 1:
+                audio_parts.append(silence)
+            logger.debug(f"  chunk {i+1}/{len(chunks)} done in {time.time()-chunk_start:.1f}s")
+
+        combined = np.concatenate(audio_parts)
+
+        synth_time = time.time() - start_time
+        audio_duration = len(combined) / sample_rate
+        self.synthesis_count += 1
+        self.total_synthesis_time += synth_time
+        self.last_used_at = time.time()
+        logger.info(
+            f"✓ Synthesis complete: {audio_duration:.1f}s audio in {synth_time:.1f}s "
+            f"({len(chunks)} chunk(s), RTF: {synth_time/audio_duration:.2f}x)"
+        )
+
+        return combined, sample_rate
+
+    def synthesize_stream(
+        self,
+        text: str,
+        voice_id: Optional[str] = None,
+        speed: float = 1.0,
+        language: str = "english",
+    ) -> Generator[Tuple[np.ndarray, int], None, None]:
+        """Yield (audio_array, sample_rate) for each sentence chunk.
+
+        Allows the caller to stream audio to the client sentence-by-sentence
+        so playback can start before synthesis of the full text is complete.
+        """
+        if not text or not text.strip():
+            return
+
+        if voice_id and voice_id not in self.voice_embeddings:
+            raise ValueError(f"Voice not found: {voice_id}")
+
+        embedding = self.voice_embeddings.get(voice_id) if voice_id else None
+        if embedding is None:
+            raise ValueError(
+                f"No voice available. Available: {list(self.voice_embeddings.keys())}"
             )
-            
-            # Extract audio (list of numpy arrays)
-            audio = wavs[0] if isinstance(wavs, list) else wavs
-            
-            # Apply speed adjustment if needed
-            if speed != 1.0:
-                try:
-                    import librosa
-                    audio = librosa.effects.time_stretch(audio, rate=speed)
-                except ImportError:
-                    logger.warning("librosa not installed, speed adjustment skipped")
-            
-            # Update stats
-            synth_time = time.time() - start_time
-            audio_duration = len(audio) / sr
-            rtf = synth_time / audio_duration  # Real-time factor
-            
-            self.synthesis_count += 1
-            self.total_synthesis_time += synth_time
-            self.last_used_at = time.time()
-            
-            logger.info(
-                f"✓ Synthesis complete: {audio_duration:.1f}s audio in {synth_time:.1f}s "
-                f"(RTF: {rtf:.2f}x, avg RTF: {self.get_average_rtf():.2f}x)"
-            )
-            
-            return audio, sr
-            
-        except Exception as e:
-            logger.error(f"Synthesis failed: {e}")
-            raise RuntimeError(f"Qwen3 synthesis failed: {e}")
+
+        if self.model is None:
+            self.load_model()
+
+        text = self._preprocess_text_for_tts(text)
+        chunks = self._split_into_sentences(text, max_chars=200)
+        logger.info(f"Streaming {len(chunks)} chunk(s), voice={voice_id}, lang={language}")
+
+        for i, chunk in enumerate(chunks):
+            if not chunk.strip():
+                continue
+            try:
+                audio, sr = self._synthesize_single(chunk, embedding, speed, language)
+                self.last_used_at = time.time()
+                logger.debug(f"  yielding chunk {i+1}/{len(chunks)}")
+                yield audio, sr
+            except Exception as e:
+                logger.error(f"Chunk {i+1} failed: {e}")
+                raise
     
     def list_cloned_voices(self) -> Dict[str, VoiceEmbedding]:
         """List all cloned voices in cache.
