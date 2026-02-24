@@ -7,10 +7,17 @@
 		type ConvoModeStatus,
 	} from "$lib/stores/conversationMode.svelte";
 	
+	import ConvoModeSettings from "./ConvoModeSettings.svelte";
+	
 	import MicIcon from "~icons/lucide/mic";
 	import MicOffIcon from "~icons/lucide/mic-off";
 	import Volume2Icon from "~icons/lucide/volume-2";
 	import LoaderIcon from "~icons/lucide/loader-2";
+	import SettingsIcon from "~icons/lucide/settings";
+	
+	// Settings popover state
+	let showSettings = $state(false);
+	let settingsRef: HTMLDivElement | null = null;
 	
 	// Initialize when conversation ID changes
 	$effect(() => {
@@ -18,6 +25,26 @@
 		if (conversationId) {
 			initConversationMode(conversationId);
 		}
+	});
+	
+	// Close popover when clicking outside
+	$effect(() => {
+		if (!showSettings) return;
+		
+		function handleClickOutside(event: MouseEvent) {
+			if (settingsRef && !settingsRef.contains(event.target as Node)) {
+				showSettings = false;
+			}
+		}
+		
+		// Delay adding listener to avoid immediate close
+		setTimeout(() => {
+			document.addEventListener('click', handleClickOutside);
+		}, 0);
+		
+		return () => {
+			document.removeEventListener('click', handleClickOutside);
+		};
 	});
 	
 	// Get reactive state
@@ -79,38 +106,79 @@
 			handleClick();
 		}
 	}
+	
+	function handleSettingsClick(event: MouseEvent) {
+		event.stopPropagation();
+		showSettings = !showSettings;
+	}
 </script>
 
-<button
-	type="button"
-	onclick={handleClick}
-	onkeydown={handleKeyDown}
-	class="
-		flex items-center justify-center
-		w-9 h-9 rounded-full
-		transition-all duration-200
-		text-white
-		{currentConfig.bgClass}
-		{currentConfig.animate && status === 'listening' ? 'animate-pulse' : ''}
-		{status === 'processing' ? 'cursor-wait' : ''}
-		{status === 'speaking' ? 'cursor-default' : 'cursor-pointer'}
-	"
-	title={currentConfig.label}
-	aria-label={currentConfig.label}
-	disabled={status === 'processing'}
->
-	{#if status === 'off'}
-		<MicOffIcon class="w-5 h-5" />
-	{:else if status === 'idle'}
-		<MicIcon class="w-5 h-5" />
-	{:else if status === 'listening'}
-		<MicIcon class="w-5 h-5" />
-	{:else if status === 'processing'}
-		<LoaderIcon class="w-5 h-5 animate-spin" />
-	{:else if status === 'speaking'}
-		<Volume2Icon class="w-5 h-5" />
+<div class="relative flex items-center gap-1" bind:this={settingsRef}>
+	<!-- Main Toggle Button -->
+	<button
+		type="button"
+		onclick={handleClick}
+		onkeydown={handleKeyDown}
+		class="
+			flex items-center justify-center
+			w-9 h-9 rounded-full
+			transition-all duration-200
+			text-white
+			{currentConfig.bgClass}
+			{currentConfig.animate && status === 'listening' ? 'animate-pulse' : ''}
+			{status === 'processing' ? 'cursor-wait' : ''}
+			{status === 'speaking' ? 'cursor-default' : 'cursor-pointer'}
+		"
+		title={currentConfig.label}
+		aria-label={currentConfig.label}
+		disabled={status === 'processing'}
+	>
+		{#if status === 'off'}
+			<MicOffIcon class="w-5 h-5" />
+		{:else if status === 'idle'}
+			<MicIcon class="w-5 h-5" />
+		{:else if status === 'listening'}
+			<MicIcon class="w-5 h-5" />
+		{:else if status === 'processing'}
+			<LoaderIcon class="w-5 h-5 animate-spin" />
+		{:else if status === 'speaking'}
+			<Volume2Icon class="w-5 h-5" />
+		{/if}
+	</button>
+	
+	<!-- Settings Gear Icon -->
+	<button
+		type="button"
+		onclick={handleSettingsClick}
+		class="
+			flex items-center justify-center
+			w-7 h-7 rounded-full
+			transition-all duration-200
+			text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200
+			hover:bg-gray-200 dark:hover:bg-gray-700
+			{showSettings ? 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200' : ''}
+		"
+		title="Voice settings"
+		aria-label="Voice settings"
+		aria-expanded={showSettings}
+	>
+		<SettingsIcon class="w-4 h-4" />
+	</button>
+	
+	<!-- Settings Popover -->
+	{#if showSettings}
+		<div
+			class="
+				absolute top-full right-0 mt-2 z-50
+				bg-white dark:bg-gray-800
+				rounded-xl shadow-lg border border-gray-200 dark:border-gray-700
+				animate-in fade-in slide-in-from-top-2 duration-200
+			"
+		>
+			<ConvoModeSettings compact={true} onchange={() => {}} />
+		</div>
 	{/if}
-</button>
+</div>
 
 <style>
 	/* Custom pulse animation for listening state */

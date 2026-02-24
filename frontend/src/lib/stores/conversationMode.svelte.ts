@@ -38,7 +38,7 @@ const DEFAULT_SETTINGS: ConvoModeSettings = {
 	ttsVoice: null,
 	silenceDuration: 1500,
 	autoResume: true,
-	disableRAG: false,
+	disableRAG: true,  // RAG disabled by default for faster voice responses
 };
 
 const DEFAULT_STATE: ConvoModeState = {

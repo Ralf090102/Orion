@@ -4,6 +4,7 @@
 	import CarbonDocumentTasks from "~icons/carbon/document-tasks";
 	import CarbonUpload from "~icons/carbon/upload";
 	import CarbonVolumeUp from "~icons/carbon/volume-up";
+	import CarbonMicrophone from "~icons/carbon/microphone";
 
 	const settingsCategories = [
 		{
@@ -28,6 +29,14 @@
 			description: 'Configure speech-to-text (STT) and text-to-speech (TTS) settings',
 			icon: CarbonVolumeUp,
 			path: '/settings/speech',
+			enabled: true
+		},
+		{
+			id: 'conversation',
+			title: 'Conversation Mode',
+			description: 'Configure voice conversation settings: VAD, auto-TTS, input modes',
+			icon: CarbonMicrophone,
+			path: '/settings/conversation',
 			enabled: true
 		},
 		// Future settings categories will be added here
