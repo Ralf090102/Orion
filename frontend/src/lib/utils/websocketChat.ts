@@ -100,7 +100,14 @@ export class WebSocketChat {
 		}
 	}
 
-	sendMessage(message: string, files?: File[]) {
+	sendMessage(message: string, files?: File[] | { type: string; value: string; mime: string; name: string }[], options?: {
+		voice_mode?: boolean;
+		disable_rag?: boolean;
+		input_type?: 'text' | 'voice';
+		rag_mode?: string;
+		include_sources?: boolean;
+		temperature?: number;
+	}) {
 		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
 			console.error('[WebSocket] Not connected, readyState:', this.ws?.readyState);
 			this.options.onError?.('Not connected to server');
@@ -113,8 +120,12 @@ export class WebSocketChat {
 				content: message,
 				data: {
 					files: files || [],
-					rag_mode: 'auto',
-					include_sources: true
+					rag_mode: options?.rag_mode ?? 'auto',
+					include_sources: options?.include_sources ?? true,
+					voice_mode: options?.voice_mode ?? false,
+					disable_rag: options?.disable_rag ?? false,
+					input_type: options?.input_type ?? 'text',
+					...(options?.temperature !== undefined && { temperature: options.temperature }),
 				}
 			};
 			

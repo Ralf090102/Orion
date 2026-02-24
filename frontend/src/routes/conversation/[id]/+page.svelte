@@ -16,6 +16,17 @@
 	import { loading } from "$lib/stores/loading.js";
 	import { WebSocketChat } from "$lib/utils/websocketChat";
 	import titleUpdate from "$lib/stores/titleUpdate";
+	
+	// Voice mode imports
+	import { 
+		conversationModeState, 
+		initConversationMode,
+		setStatus,
+	} from "$lib/stores/conversationMode.svelte";
+	import { 
+		VoiceModeController,
+		stopVoiceModeController,
+	} from "$lib/utils/voiceMode";
 
 	let { data = $bindable() } = $props();
 
@@ -31,9 +42,57 @@
 	let hasPendingMessage = $state(false); // Track if we need to send pending message
 	let pendingMessageContent = $state<string>('');
 	let pendingMessageFiles = $state<File[]>([]);
+	
+	// Voice mode controller
+	let voiceModeController: VoiceModeController | null = null;
+	let voiceModeEnabled = $derived(conversationModeState.enabled);
 
 	$effect(() => {
 		conversations = data.conversations;
+	});
+	
+	// Watch voice mode state and start/stop controller
+	$effect(() => {
+		if (!browser) return;
+		
+		const sessionId = page.params.id;
+		if (!sessionId) return;
+		
+		if (voiceModeEnabled && !voiceModeController) {
+			// Start voice mode
+			console.log('[VoiceMode] Starting voice mode controller');
+			voiceModeController = new VoiceModeController({
+				conversationId: sessionId,
+				webSocketChat: wsChat,
+				onTranscription: (text) => {
+					console.log('[VoiceMode] Transcription received:', text);
+				},
+				onError: (errorMsg) => {
+					console.error('[VoiceMode] Error:', errorMsg);
+					$error = errorMsg;
+				},
+				onStatusChange: (status) => {
+					console.log('[VoiceMode] Status changed:', status);
+				},
+			});
+			
+			voiceModeController.start().catch((err) => {
+				console.error('[VoiceMode] Failed to start:', err);
+				$error = 'Failed to start voice mode: ' + (err.message || 'Unknown error');
+			});
+		} else if (!voiceModeEnabled && voiceModeController) {
+			// Stop voice mode
+			console.log('[VoiceMode] Stopping voice mode controller');
+			voiceModeController.stop();
+			voiceModeController = null;
+		}
+	});
+	
+	// Keep voice mode controller updated with WebSocket reference
+	$effect(() => {
+		if (voiceModeController && wsChat) {
+			voiceModeController.setWebSocket(wsChat);
+		}
 	});
 
 	// UUID generation — crypto.randomUUID() only works in secure contexts (HTTPS/localhost)
@@ -87,12 +146,15 @@
 
 	// Initialize WebSocket connection
 	function initializeWebSocket() {
+		const sessionId = page.params.id;
+		if (!sessionId) return;
+		
 		if (wsChat) {
 			wsChat.disconnect();
 		}
 
 		wsChat = new WebSocketChat({
-			sessionId: page.params.id,
+			sessionId,
 			backendUrl: BACKEND_WS,
 			onMessage: (content, done) => {
 				if (done) {
@@ -130,10 +192,13 @@
 			onTitleGenerated: (title) => {
 				console.log('[WebSocket] Title generated:', title);
 				// Update sidebar via titleUpdate store
-				$titleUpdate = {
-					convId: page.params.id,
-					title: title
-				};
+				const convId = page.params.id;
+				if (convId) {
+					$titleUpdate = {
+						convId,
+						title: title
+					};
+				}
 			},
 			onError: (errorMsg) => {
 				console.error('[WebSocket] Error:', errorMsg);
@@ -261,9 +326,17 @@
 	});
 
 	onDestroy(() => {
+		// Cleanup WebSocket
 		if (wsChat) {
 			wsChat.disconnect();
 		}
+		
+		// Cleanup voice mode controller
+		if (voiceModeController) {
+			voiceModeController.stop();
+			voiceModeController = null;
+		}
+		stopVoiceModeController();
 	});
 
 	async function onMessage(content: string) {
