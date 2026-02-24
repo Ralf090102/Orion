@@ -27,6 +27,8 @@ export interface VoiceModeControllerOptions {
 	webSocketChat: WebSocketChat | null;
 	/** Callback when transcription completes (before sending to chat) */
 	onTranscription?: (text: string) => void;
+	/** Callback when message is sent to chat (for UI to add message bubbles) */
+	onMessageSent?: (userText: string) => void;
 	/** Callback when an error occurs */
 	onError?: (error: string) => void;
 	/** Callback when status changes */
@@ -40,6 +42,7 @@ export class VoiceModeController {
 	private vad: VoiceActivityDetector | null = null;
 	private isActive: boolean = false;
 	private isProcessing: boolean = false;
+	private processingTimeout: ReturnType<typeof setTimeout> | null = null;
 	
 	// For hold-to-talk mode
 	private isHolding: boolean = false;
@@ -106,6 +109,13 @@ export class VoiceModeController {
 		
 		this.isActive = false;
 		this.isHolding = false;
+		this.isProcessing = false;
+		
+		// Clear any pending timeout
+		if (this.processingTimeout) {
+			clearTimeout(this.processingTimeout);
+			this.processingTimeout = null;
+		}
 		
 		if (this.vad) {
 			this.vad.stop();
@@ -222,10 +232,62 @@ export class VoiceModeController {
 	// ========== Event handlers for external events ==========
 	
 	/**
+	 * Called when LLM response finishes streaming (from WebSocket done=true)
+	 * This is the primary signal that processing is complete.
+	 * If autoTTS is enabled, we wait for onTTSComplete; otherwise resume now.
+	 */
+	onResponseComplete(): void {
+		console.log('[VoiceMode] Response complete callback received');
+		
+		// Clear any processing timeout
+		if (this.processingTimeout) {
+			clearTimeout(this.processingTimeout);
+			this.processingTimeout = null;
+		}
+		
+		const settings = getSettings();
+		
+		if (settings.autoTTS) {
+			// Wait for TTS to finish - onTTSComplete will handle resume
+			// But set a fallback timeout in case TTS fails
+			console.log('[VoiceMode] Waiting for TTS to complete');
+			this.setStatus('speaking');
+			
+			this.processingTimeout = setTimeout(() => {
+				if (this.isProcessing) {
+					console.log('[VoiceMode] TTS timeout, resuming anyway');
+					this.isProcessing = false;
+					if (this.isActive) {
+						this.resume();
+					}
+				}
+			}, 30000); // 30 second timeout for TTS
+		} else {
+			// No TTS, resume immediately
+			console.log('[VoiceMode] No autoTTS, resuming immediately');
+			this.isProcessing = false;
+			if (this.isActive) {
+				this.resume();
+			}
+		}
+	}
+	
+	/**
 	 * Called when TTS playback completes (from ChatMessage)
 	 * Resume listening if autoResume is enabled
 	 */
 	onTTSComplete(): void {
+		console.log('[VoiceMode] TTS complete callback received');
+		
+		// Clear any processing timeout
+		if (this.processingTimeout) {
+			clearTimeout(this.processingTimeout);
+			this.processingTimeout = null;
+		}
+		
+		// Reset processing flag
+		this.isProcessing = false;
+		
 		if (!this.isActive) return;
 		
 		const settings = getSettings();
@@ -292,8 +354,8 @@ export class VoiceModeController {
 			// 2. Send to chat via WebSocket
 			await this.sendToChat(text);
 			
-			// Status will change to 'speaking' when TTS starts
-			// Then onTTSComplete will be called to resume listening
+			// onResponseComplete will be called when WebSocket response finishes
+			// That handler will then either wait for TTS or resume immediately
 			
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : 'Processing failed';
@@ -310,7 +372,10 @@ export class VoiceModeController {
 		});
 		
 		try {
-			const result = await api.speech.transcribe(audioFile);
+			const settings = getSettings();
+			// Pass language setting (use undefined for 'auto' to let Whisper detect)
+			const language = settings.sttLanguage === 'auto' ? undefined : settings.sttLanguage;
+			const result = await api.speech.transcribe(audioFile, language);
 			return result.text;
 		} catch (error) {
 			console.error('[VoiceMode] STT error:', error);
@@ -326,6 +391,9 @@ export class VoiceModeController {
 		}
 		
 		const settings = getSettings();
+		
+		// Notify UI to add message bubbles BEFORE sending
+		this.options.onMessageSent?.(text);
 		
 		// Send with voice mode flags
 		ws.sendMessage(text, undefined, {

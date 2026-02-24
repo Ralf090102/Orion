@@ -24,8 +24,9 @@
 		setStatus,
 	} from "$lib/stores/conversationMode.svelte";
 	import { 
-		VoiceModeController,
+		getVoiceModeController,
 		stopVoiceModeController,
+		type VoiceModeController,
 	} from "$lib/utils/voiceMode";
 
 	let { data = $bindable() } = $props();
@@ -61,11 +62,25 @@
 		if (voiceModeEnabled && !voiceModeController) {
 			// Start voice mode
 			console.log('[VoiceMode] Starting voice mode controller');
-			voiceModeController = new VoiceModeController({
+			voiceModeController = getVoiceModeController({
 				conversationId: sessionId,
 				webSocketChat: wsChat,
 				onTranscription: (text) => {
 					console.log('[VoiceMode] Transcription received:', text);
+				},
+				onMessageSent: (userText) => {
+					// Add user message to UI
+					console.log('[VoiceMode] Adding user message to UI:', userText);
+					const userMessage = createMessage('user', userText);
+					messages = [...messages, userMessage];
+					
+					// Add empty assistant message that will be filled by WebSocket
+					const assistantMessage = createMessage('assistant', '');
+					messages = [...messages, assistantMessage];
+					
+					// Set loading state so ChatMessage can detect when it finishes
+					$loading = true;
+					pending = true;
 				},
 				onError: (errorMsg) => {
 					console.error('[VoiceMode] Error:', errorMsg);
@@ -160,6 +175,11 @@
 				if (done) {
 					$loading = false;
 					pending = false;
+					
+					// Notify voice mode controller that response is complete
+					if (voiceModeController) {
+						voiceModeController.onResponseComplete();
+					}
 					return;
 				}
 

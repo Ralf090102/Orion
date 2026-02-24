@@ -25,6 +25,7 @@
 		silenceDuration: convoModeState.settings.silenceDuration,
 		autoResume: convoModeState.settings.autoResume,
 		disableRAG: convoModeState.settings.disableRAG,
+		sttLanguage: convoModeState.settings.sttLanguage || 'en',
 	});
 	
 	// Sync local state when store changes
@@ -35,6 +36,7 @@
 			silenceDuration: convoModeState.settings.silenceDuration,
 			autoResume: convoModeState.settings.autoResume,
 			disableRAG: convoModeState.settings.disableRAG,
+			sttLanguage: convoModeState.settings.sttLanguage || 'en',
 		};
 	});
 	
@@ -72,6 +74,31 @@
 		{ value: 'push-to-talk', label: 'Push to Talk', description: 'Click button to start, click again to stop' },
 		{ value: 'hold-to-talk', label: 'Hold to Talk', description: 'Hold button while speaking' },
 	];
+	
+	// STT language options
+	const sttLanguages = [
+		{ value: 'en', label: 'English' },
+		{ value: 'auto', label: 'Auto-detect' },
+		{ value: 'zh', label: 'Chinese' },
+		{ value: 'de', label: 'German' },
+		{ value: 'es', label: 'Spanish' },
+		{ value: 'fr', label: 'French' },
+		{ value: 'it', label: 'Italian' },
+		{ value: 'ja', label: 'Japanese' },
+		{ value: 'ko', label: 'Korean' },
+		{ value: 'nl', label: 'Dutch' },
+		{ value: 'pl', label: 'Polish' },
+		{ value: 'pt', label: 'Portuguese' },
+		{ value: 'ru', label: 'Russian' },
+	];
+	
+	function handleLanguageChange(event: Event) {
+		const target = event.target as HTMLSelectElement;
+		const newLanguage = target.value;
+		localSettings.sttLanguage = newLanguage;
+		updateSettings({ sttLanguage: newLanguage });
+		onchange?.();
+	}
 </script>
 
 {#if compact}
@@ -207,6 +234,27 @@
 				<span>3s</span>
 			</div>
 		</div>
+		
+		<!-- STT Language Select -->
+		<div>
+			<label class="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-1.5">
+				Speech Recognition Language
+			</label>
+			<select
+				value={localSettings.sttLanguage}
+				onchange={handleLanguageChange}
+				class="
+					w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm
+					dark:border-gray-600 dark:bg-gray-700 dark:text-white
+					focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500
+				"
+			>
+				{#each sttLanguages as lang}
+					<option value={lang.value}>{lang.label}</option>
+				{/each}
+			</select>
+			<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Set to English for best accuracy</p>
+		</div>
 	</div>
 {:else}
 	<!-- Full Settings Page Layout -->
@@ -320,6 +368,28 @@
 					</label>
 				{/each}
 			</div>
+		</div>
+		
+		<!-- STT Language -->
+		<div class="p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+			<h4 class="font-medium text-gray-900 dark:text-gray-100 mb-2">Speech Recognition Language</h4>
+			<p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+				Select the language for speech-to-text transcription. Setting a specific language improves accuracy.
+				Use "Auto-detect" only if you speak multiple languages.
+			</p>
+			<select
+				value={localSettings.sttLanguage}
+				onchange={handleLanguageChange}
+				class="
+					w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm
+					dark:border-gray-600 dark:bg-gray-700 dark:text-white
+					focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500
+				"
+			>
+				{#each sttLanguages as lang}
+					<option value={lang.value}>{lang.label}</option>
+				{/each}
+			</select>
 		</div>
 		
 		<!-- Silence Duration -->

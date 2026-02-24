@@ -21,6 +21,7 @@ export interface ConvoModeSettings {
 	silenceDuration: number;  // ms before auto-send
 	autoResume: boolean;      // resume listening after TTS
 	disableRAG: boolean;      // skip RAG pipeline for faster responses
+	sttLanguage: string;      // Language code for STT (e.g., 'en', 'auto')
 }
 
 export interface ConvoModeState {
@@ -39,6 +40,7 @@ const DEFAULT_SETTINGS: ConvoModeSettings = {
 	silenceDuration: 1500,
 	autoResume: true,
 	disableRAG: true,  // RAG disabled by default for faster voice responses
+	sttLanguage: 'en', // Default to English for better accuracy
 };
 
 const DEFAULT_STATE: ConvoModeState = {
@@ -52,7 +54,7 @@ const DEFAULT_STATE: ConvoModeState = {
 let currentConversationId = $state<string | null>(null);
 
 // The actual conversation mode state - exported for direct reactive access
-export let convoModeState = $state<ConvoModeState>({ ...DEFAULT_STATE });
+export const convoModeState = $state<ConvoModeState>({ ...DEFAULT_STATE });
 
 // ========== LocalStorage Helpers ==========
 function getStorageKey(conversationId: string): string {

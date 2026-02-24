@@ -85,15 +85,31 @@
 		if (!initialLoadingSet) {
 			prevLoading = loading;
 			initialLoadingSet = true;
+			console.log('[ChatMessage] Initial loading set to:', loading, 'for message:', message.id);
 			return;
 		}
 		
 		// Detect when loading transitions from true to false (message just completed)
 		const justFinishedLoading = prevLoading && !loading;
+		
+		// Log every state change
+		if (prevLoading !== loading) {
+			console.log('[ChatMessage] Loading changed:', prevLoading, '->', loading, 'for message:', message.id, 'isLast:', isLast);
+		}
+		
 		prevLoading = loading;
 		
 		// Only auto-trigger once per message completion
 		if (!justFinishedLoading || autoTTSTriggered) return;
+		
+		// Debug logging for auto-TTS conditions
+		console.log('[ChatMessage] Auto-TTS check:', {
+			messageId: message.id,
+			from: message.from,
+			isLast,
+			enabled: convoModeState.enabled,
+			autoTTS: convoModeState.settings?.autoTTS,
+		});
 		
 		// Check conditions for auto-TTS:
 		// 1. Must be an assistant message
@@ -183,8 +199,15 @@
 	}
 
 	async function readAloud() {
+		console.log('[ChatMessage] readAloud called for message:', message.id, {
+			isReadingAloud,
+			isTTSLoading,
+			hasContent: !!contentWithoutThink?.trim(),
+		});
+		
 		// ── Stop if already playing ──────────────────────────────────────
 		if (isReadingAloud || isTTSLoading) {
+			console.log('[ChatMessage] Stopping existing TTS playback');
 			ttsStreamController?.abort();
 			ttsStreamController = null;
 			globalTTSState.audio?.pause();
@@ -195,8 +218,12 @@
 		}
 
 		const textToRead = contentWithoutThink;
-		if (!textToRead?.trim()) return;
+		if (!textToRead?.trim()) {
+			console.log('[ChatMessage] No text to read');
+			return;
+		}
 
+		console.log('[ChatMessage] Starting TTS for text length:', textToRead.length);
 		isTTSLoading = true;
 
 		// ── Set up abort controller for this session ─────────────────────
@@ -264,7 +291,7 @@
 		
 		// Helper to notify voice mode controller when TTS completes
 		function notifyTTSComplete() {
-			console.log('[ChatMessage] TTS completed');
+			console.log('[ChatMessage] TTS completed, notifying voice mode');
 			
 			// Clear the stop callback registration
 			clearTTSStopCallback();
@@ -276,6 +303,7 @@
 			
 			// Notify voice mode controller to resume listening
 			const controller = getActiveVoiceModeController();
+			console.log('[ChatMessage] Voice mode controller:', controller ? 'found' : 'not found');
 			if (controller) {
 				controller.onTTSComplete();
 			}
