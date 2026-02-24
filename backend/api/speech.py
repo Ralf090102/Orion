@@ -606,6 +606,11 @@ async def synthesize_speech_stream(
     import base64 as _b64
     import asyncio
 
+    if len(request.text) > 50_000:
+        raise HTTPException(status_code=400, detail="Text too long (max 50,000 characters)")
+    if not request.text or not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
     async def _generate():
         try:
             tts_manager = get_tts_manager()
@@ -669,10 +674,10 @@ async def synthesize_speech(
         if not request.text or len(request.text.strip()) == 0:
             raise HTTPException(status_code=400, detail="Text cannot be empty")
         
-        if len(request.text) > 5000:
+        if len(request.text) > 50_000:
             raise HTTPException(
                 status_code=400,
-                detail="Text too long (max 5000 characters)"
+                detail="Text too long (max 50,000 characters)"
             )
         
         # Get TTS manager

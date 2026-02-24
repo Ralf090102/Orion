@@ -594,7 +594,7 @@ class Qwen3Config(BaseConfig):
     
     # Synthesis settings
     default_language: str = "en"  # "en", "zh", "ja", "ko", etc.
-    max_text_length: int = 1000  # Characters per synthesis
+    max_text_length: int = 100_000  # Safety ceiling; chunking handles long texts automatically
     batch_size: int = 1  # Future: batch processing
     
     # Performance settings
@@ -621,7 +621,7 @@ class Qwen3Config(BaseConfig):
             max_audio_duration=get_env_float("QWEN3_MAX_AUDIO_DURATION", 15.0),
             voice_sample_rate=get_env_int("QWEN3_VOICE_SAMPLE_RATE", 16000),
             default_language=get_env_str("QWEN3_DEFAULT_LANGUAGE", "en"),
-            max_text_length=get_env_int("QWEN3_MAX_TEXT_LENGTH", 1000),
+            max_text_length=get_env_int("QWEN3_MAX_TEXT_LENGTH", 100_000),
             batch_size=get_env_int("QWEN3_BATCH_SIZE", 1),
             auto_unload=get_env_bool("QWEN3_AUTO_UNLOAD", True),
             unload_timeout_seconds=get_env_int("QWEN3_UNLOAD_TIMEOUT", 300),
