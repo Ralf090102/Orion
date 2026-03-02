@@ -3,7 +3,6 @@
 This module provides voice generation capabilities using Qwen3-TTS models:
 - Voice Cloning: Clone voices from 3-15s audio samples (Base model)
 - Voice Generation: Create new voices from text descriptions (VoiceDesign model)
-- Custom Voices: Premium speakers with instruction control (CustomVoice model)
 
 Features:
 - Lazy model loading (GPU memory optimization)
@@ -38,7 +37,6 @@ class ModelType(str, Enum):
     """Qwen3-TTS model types."""
     BASE = "base"           # Voice cloning from audio
     DESIGN = "design"       # Voice generation from text description
-    CUSTOM = "custom"       # Premium speakers with instruction control
 
 
 # Supported languages by Qwen3-TTS
@@ -60,66 +58,6 @@ LANGUAGE_ALIASES = {
     "pt": "portuguese", "por": "portuguese",
     "es": "spanish", "spa": "spanish",
     "it": "italian", "ita": "italian",
-}
-
-
-# Custom speakers available in Qwen3-TTS-CustomVoice model
-# Each speaker has unique characteristics and native language
-CUSTOM_SPEAKERS = {
-    "Vivian": {
-        "description": "Bright, slightly edgy young female voice",
-        "native_language": "chinese",
-        "gender": "female",
-        "age_range": "20-25",
-    },
-    "Serena": {
-        "description": "Warm, gentle young female voice",
-        "native_language": "chinese",
-        "gender": "female",
-        "age_range": "22-28",
-    },
-    "Uncle_Fu": {
-        "description": "Seasoned male with low, mellow timbre",
-        "native_language": "chinese",
-        "gender": "male",
-        "age_range": "50-60",
-    },
-    "Dylan": {
-        "description": "Youthful Beijing male, clear and natural",
-        "native_language": "chinese",  # Beijing dialect
-        "gender": "male",
-        "age_range": "25-30",
-    },
-    "Eric": {
-        "description": "Lively Chengdu male, slightly husky",
-        "native_language": "chinese",  # Sichuan dialect
-        "gender": "male",
-        "age_range": "25-32",
-    },
-    "Ryan": {
-        "description": "Dynamic male with strong rhythmic drive",
-        "native_language": "english",
-        "gender": "male",
-        "age_range": "28-35",
-    },
-    "Aiden": {
-        "description": "Sunny American male with clear midrange",
-        "native_language": "english",
-        "gender": "male",
-        "age_range": "22-28",
-    },
-    "Ono_Anna": {
-        "description": "Playful Japanese female, light and nimble",
-        "native_language": "japanese",
-        "gender": "female",
-        "age_range": "20-26",
-    },
-    "Sohee": {
-        "description": "Warm Korean female with rich emotion",
-        "native_language": "korean",
-        "gender": "female",
-        "age_range": "24-30",
-    },
 }
 
 
@@ -152,7 +90,7 @@ class Qwen3Manager:
     
     This manager handles:
     - Model loading/unloading (lazy initialization)
-    - Multi-model support (Base, VoiceDesign, CustomVoice)
+    - Multi-model support (Base, VoiceDesign)
     - Automatic model switching (only 1 loaded at a time for VRAM)
     - Voice embedding extraction from audio samples
     - Speech synthesis with cloned/designed voices
@@ -193,7 +131,6 @@ class Qwen3Manager:
         # Multi-model state (only 1 loaded at a time for VRAM)
         self._base_model = None      # Base model for voice cloning
         self._design_model = None    # VoiceDesign model for voice generation
-        self._custom_model = None    # CustomVoice model for premium speakers
         self._current_model_type: Optional[ModelType] = None
         
         self.device = self._get_device()
@@ -215,7 +152,6 @@ class Qwen3Manager:
         self._stats_by_model: Dict[ModelType, Dict] = {
             ModelType.BASE: {"count": 0, "time": 0.0},
             ModelType.DESIGN: {"count": 0, "time": 0.0},
-            ModelType.CUSTOM: {"count": 0, "time": 0.0},
         }
         
         # Background loading
@@ -227,8 +163,7 @@ class Qwen3Manager:
         logger.info(f"Auto-unload: {self.qwen3_config.auto_unload} "
                    f"(timeout: {self.qwen3_config.unload_timeout_seconds}s)")
         logger.info(f"Models: base={self.qwen3_config.model_name}, "
-                   f"design={self.qwen3_config.design_model_name}, "
-                   f"custom={self.qwen3_config.custom_model_name}")
+                   f"design={self.qwen3_config.design_model_name}")
         
         # Scan disk for existing cloned voices so they survive restarts
         loaded = self._scan_cloned_voices()
@@ -241,8 +176,6 @@ class Qwen3Manager:
             return self._base_model
         elif self._current_model_type == ModelType.DESIGN:
             return self._design_model
-        elif self._current_model_type == ModelType.CUSTOM:
-            return self._custom_model
         return None
     
     # Backwards compatibility property
@@ -295,15 +228,13 @@ class Qwen3Manager:
             return self.qwen3_config.model_name
         elif model_type == ModelType.DESIGN:
             return self.qwen3_config.design_model_name
-        elif model_type == ModelType.CUSTOM:
-            return self.qwen3_config.custom_model_name
         raise ValueError(f"Unknown model type: {model_type}")
     
     def _load_specific_model(self, model_type: ModelType) -> None:
         """Load a specific Qwen3-TTS model into memory.
         
         Args:
-            model_type: Which model to load (BASE, DESIGN, or CUSTOM)
+            model_type: Which model to load (BASE or DESIGN)
         
         Raises:
             RuntimeError: If model loading fails
@@ -333,8 +264,6 @@ class Qwen3Manager:
                 self._base_model = model
             elif model_type == ModelType.DESIGN:
                 self._design_model = model
-            elif model_type == ModelType.CUSTOM:
-                self._custom_model = model
             
             self._current_model_type = model_type
             self.model_loaded_at = time.time()
@@ -366,10 +295,6 @@ class Qwen3Manager:
                 if self._design_model is not None:
                     del self._design_model
                     self._design_model = None
-            elif self._current_model_type == ModelType.CUSTOM:
-                if self._custom_model is not None:
-                    del self._custom_model
-                    self._custom_model = None
             
             self._current_model_type = None
             self.model_loaded_at = None
@@ -1402,272 +1327,3 @@ class Qwen3Manager:
             logger.warning(f"Failed to save voice metadata JSON: {e}")
         
         return embedding
-    
-    # ------------------------------------------------------------------
-    # Custom Voice (CustomVoice model with instruction control)
-    # ------------------------------------------------------------------
-    
-    def list_custom_speakers(self) -> List[str]:
-        """Get list of available custom speakers.
-        
-        Returns:
-            List of speaker names (e.g., ["Vivian", "Ryan", "Aiden", ...])
-        """
-        return list(CUSTOM_SPEAKERS.keys())
-    
-    def get_speaker_info(self, speaker: str) -> Optional[Dict]:
-        """Get metadata for a custom speaker.
-        
-        Args:
-            speaker: Speaker name (case-sensitive)
-        
-        Returns:
-            Dictionary with speaker info, or None if not found
-            Keys: description, native_language, gender, age_range
-        """
-        return CUSTOM_SPEAKERS.get(speaker)
-    
-    def get_all_speakers_info(self) -> Dict[str, Dict]:
-        """Get metadata for all custom speakers.
-        
-        Returns:
-            Dictionary mapping speaker names to their info
-        """
-        return CUSTOM_SPEAKERS.copy()
-    
-    def _validate_speaker(self, speaker: str) -> str:
-        """Validate and normalize speaker name.
-        
-        Args:
-            speaker: Speaker name (case-insensitive matching)
-        
-        Returns:
-            Normalized speaker name
-        
-        Raises:
-            ValueError: If speaker is not found
-        """
-        # Try exact match first
-        if speaker in CUSTOM_SPEAKERS:
-            return speaker
-        
-        # Try case-insensitive match
-        speaker_lower = speaker.lower()
-        for name in CUSTOM_SPEAKERS:
-            if name.lower() == speaker_lower:
-                return name
-        
-        # Not found
-        raise ValueError(
-            f"Unknown speaker: '{speaker}'. "
-            f"Available speakers: {', '.join(CUSTOM_SPEAKERS.keys())}"
-        )
-    
-    def synthesize_custom(
-        self,
-        text: str,
-        speaker: str,
-        language: str = "auto",
-        instruct: Optional[str] = None,
-        speed: float = 1.0,
-    ) -> Tuple[np.ndarray, int]:
-        """Synthesize speech using CustomVoice model with premium speakers.
-        
-        This method uses pre-built premium speakers with optional instruction
-        control. Instructions can modify the speaking style, emotion, pace, etc.
-        
-        Args:
-            text: Text to synthesize
-            speaker: Speaker name (e.g., "Ryan", "Vivian", "Aiden")
-            language: Target language (default: "auto" for speaker's native)
-            instruct: Optional instruction for voice control
-                e.g., "Speak with excitement", "Calm and professional"
-            speed: Playback speed multiplier (default: 1.0)
-        
-        Returns:
-            Tuple of (audio_array, sample_rate)
-        
-        Raises:
-            ValueError: If text is empty, speaker is invalid, or language unsupported
-            RuntimeError: If model loading fails
-        
-        Example:
-            >>> audio, sr = manager.synthesize_custom(
-            ...     text="Welcome to the presentation!",
-            ...     speaker="Ryan",
-            ...     instruct="Speak with enthusiasm and energy"
-            ... )
-        """
-        if not text or not text.strip():
-            raise ValueError("Text cannot be empty")
-        
-        # Validate speaker
-        speaker = self._validate_speaker(speaker)
-        speaker_info = CUSTOM_SPEAKERS[speaker]
-        
-        # Handle language
-        if language == "auto":
-            # Use speaker's native language
-            language = speaker_info["native_language"]
-        else:
-            language = self._normalize_language(language)
-        
-        # Ensure custom model is loaded
-        self._ensure_model(ModelType.CUSTOM)
-        if self._custom_model is None:
-            raise RuntimeError("Failed to load CustomVoice model")
-        
-        text = self._preprocess_text_for_tts(text)
-        chunks = self._split_into_sentences(text, max_chars=self.qwen3_config.chunk_size)
-        if not chunks:
-            raise ValueError("Text is empty after preprocessing")
-        
-        instruct_str = instruct if instruct else "(default style)"
-        logger.info(
-            f"Synthesizing with custom speaker: {speaker}, "
-            f"lang={language}, instruct='{instruct_str[:50]}', {len(chunks)} chunk(s)"
-        )
-        start_time = time.time()
-        
-        audio_parts: list = []
-        sample_rate = 24000
-        silence: Optional[np.ndarray] = None
-        
-        for i, chunk in enumerate(chunks):
-            chunk_start = time.time()
-            
-            with torch.inference_mode():
-                # Call generate_custom_voice with or without instruction
-                if instruct:
-                    wavs, sr = self._custom_model.generate_custom_voice(
-                        text=chunk,
-                        speaker=speaker,
-                        language=language,
-                        instruct=instruct,
-                    )
-                else:
-                    wavs, sr = self._custom_model.generate_custom_voice(
-                        text=chunk,
-                        speaker=speaker,
-                        language=language,
-                    )
-            
-            audio = wavs[0] if isinstance(wavs, list) else wavs
-            sample_rate = sr
-            
-            if speed != 1.0:
-                try:
-                    import librosa
-                    audio = librosa.effects.time_stretch(audio, rate=speed)
-                except ImportError:
-                    if i == 0:
-                        logger.warning("librosa not installed, speed adjustment skipped")
-            
-            if silence is None:
-                silence = np.zeros(int(0.08 * sr), dtype=np.float32)  # 80 ms gap
-            
-            audio_parts.append(audio)
-            if i < len(chunks) - 1:
-                audio_parts.append(silence)
-            
-            if i == 0 or i == len(chunks) - 1:
-                logger.info(f"  chunk {i+1}/{len(chunks)} done in {time.time()-chunk_start:.1f}s")
-        
-        combined = np.concatenate(audio_parts)
-        
-        synth_time = time.time() - start_time
-        audio_duration = len(combined) / sample_rate
-        self.synthesis_count += 1
-        self.total_synthesis_time += synth_time
-        self.last_used_at = time.time()
-        
-        logger.info(
-            f"✓ Custom voice synthesis complete: {audio_duration:.1f}s audio in {synth_time:.1f}s "
-            f"(speaker={speaker}, RTF: {synth_time/audio_duration:.2f}x)"
-        )
-        
-        return combined, sample_rate
-    
-    def synthesize_custom_stream(
-        self,
-        text: str,
-        speaker: str,
-        language: str = "auto",
-        instruct: Optional[str] = None,
-        speed: float = 1.0,
-    ) -> Generator[Tuple[np.ndarray, int], None, None]:
-        """Stream speech synthesis using CustomVoice model chunk by chunk.
-        
-        Similar to synthesize_custom() but yields audio chunks as they're generated,
-        enabling faster time-to-first-audio for long texts.
-        
-        Args:
-            text: Text to synthesize
-            speaker: Speaker name (e.g., "Ryan", "Vivian")
-            language: Target language (default: "auto")
-            instruct: Optional instruction for voice control
-            speed: Playback speed multiplier (default: 1.0)
-        
-        Yields:
-            Tuple of (audio_chunk, sample_rate) for each sentence
-        """
-        if not text or not text.strip():
-            return
-        
-        # Validate speaker
-        speaker = self._validate_speaker(speaker)
-        speaker_info = CUSTOM_SPEAKERS[speaker]
-        
-        # Handle language
-        if language == "auto":
-            language = speaker_info["native_language"]
-        else:
-            language = self._normalize_language(language)
-        
-        # Ensure custom model is loaded
-        self._ensure_model(ModelType.CUSTOM)
-        if self._custom_model is None:
-            raise RuntimeError("Failed to load CustomVoice model")
-        
-        text = self._preprocess_text_for_tts(text)
-        chunks = self._split_into_sentences(text, max_chars=self.qwen3_config.chunk_size)
-        
-        logger.info(
-            f"Streaming custom voice: {speaker}, {len(chunks)} chunk(s), lang={language}"
-        )
-        
-        for i, chunk in enumerate(chunks):
-            if not chunk.strip():
-                continue
-            try:
-                with torch.inference_mode():
-                    if instruct:
-                        wavs, sr = self._custom_model.generate_custom_voice(
-                            text=chunk,
-                            speaker=speaker,
-                            language=language,
-                            instruct=instruct,
-                        )
-                    else:
-                        wavs, sr = self._custom_model.generate_custom_voice(
-                            text=chunk,
-                            speaker=speaker,
-                            language=language,
-                        )
-                
-                audio = wavs[0] if isinstance(wavs, list) else wavs
-                
-                if speed != 1.0:
-                    try:
-                        import librosa
-                        audio = librosa.effects.time_stretch(audio, rate=speed)
-                    except ImportError:
-                        pass
-                
-                self.last_used_at = time.time()
-                if i == 0 or i == len(chunks) - 1:
-                    logger.info(f"  streaming custom chunk {i+1}/{len(chunks)}")
-                yield audio, sr
-            except Exception as e:
-                logger.error(f"Custom voice chunk {i+1} failed: {e}")
-                raise
