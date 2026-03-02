@@ -94,7 +94,7 @@
 			error = null;
 			const [settingsRes, healthRes] = await Promise.all([
 				fetch(`${BACKEND_URL}/api/settings`),
-				fetch(`${BACKEND_URL}/api/health`),
+				fetch(`${BACKEND_URL}/health`),
 			]);
 			
 			if (!settingsRes.ok) {
