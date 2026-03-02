@@ -699,6 +699,11 @@
 
 	async function startRecording() {
 		try {
+			// Check for secure context (HTTPS or localhost) - required for mediaDevices
+			if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+				throw new Error('Microphone access requires a secure context (HTTPS)');
+			}
+			
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 			mediaRecorder = new MediaRecorder(stream);
 			recordedChunks = [];
@@ -845,7 +850,16 @@
 				throw new Error(errorData.detail || 'Voice generation failed');
 			}
 
-			const blob = await response.blob();
+			// Backend returns JSON with audio_base64
+			const data = await response.json();
+			
+			// Convert base64 to Blob
+			const binaryString = atob(data.audio_base64);
+			const bytes = new Uint8Array(binaryString.length);
+			for (let i = 0; i < binaryString.length; i++) {
+				bytes[i] = binaryString.charCodeAt(i);
+			}
+			const blob = new Blob([bytes], { type: 'audio/wav' });
 			designedAudioUrl = URL.createObjectURL(blob);
 
 			// Auto-play

@@ -120,6 +120,14 @@ export class VoiceActivityDetector {
 			return;
 		}
 		
+		// Check for secure context (HTTPS or localhost) - required for mediaDevices
+		if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+			const err = new Error('Microphone access requires a secure context (HTTPS). Voice mode is not available over HTTP.');
+			console.error('[VAD] Secure context required:', err);
+			this.options.onError?.(err);
+			throw err;
+		}
+		
 		try {
 			// Request microphone access
 			this.mediaStream = await navigator.mediaDevices.getUserMedia({

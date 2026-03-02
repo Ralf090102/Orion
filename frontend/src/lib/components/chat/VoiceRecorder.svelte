@@ -48,6 +48,11 @@
 
 	async function startRecording() {
 		try {
+			// Check for secure context (HTTPS or localhost) - required for mediaDevices
+			if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+				throw new Error('Microphone access requires a secure context (HTTPS)');
+			}
+			
 			const stream = await navigator.mediaDevices.getUserMedia({
 				audio: {
 					channelCount: 1,
