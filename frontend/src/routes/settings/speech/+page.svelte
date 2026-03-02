@@ -86,12 +86,12 @@
 
 	// Premium Speakers state (CustomVoice model - instruction-controlled synthesis)
 	let customSpeakers = $state<Array<{
-		speaker_id: string;
-		name: string;
+		speaker: string;
 		description: string;
+		native_language: string;
 		gender: string;
-		style: string;
-	}>>([]);
+		age_range: string;
+	}>>([]);;
 	let loadingCustomSpeakers = $state(false);
 	let customVoiceForm = $state({
 		speaker: '',
@@ -977,8 +977,8 @@
 			currentCustomAudio = new Audio(customVoiceAudioUrl);
 			currentCustomAudio.play();
 			
-			const speakerInfo = customSpeakers.find(s => s.speaker_id === customVoiceForm.speaker);
-			success = `Preview generated with ${speakerInfo?.name || customVoiceForm.speaker}`;
+			const speakerInfo = customSpeakers.find(s => s.speaker === customVoiceForm.speaker);
+			success = `Preview generated with ${speakerInfo?.speaker || customVoiceForm.speaker}`;
 		} catch (err) {
 			error = (err as Error).message;
 			console.error('Custom voice preview failed:', err);
@@ -1933,15 +1933,15 @@ or 'A deep, authoritative male voice with a calm and reassuring tone.'"
 							<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
 								{#each customSpeakers as speaker}
 									<button
-										onclick={() => { customVoiceForm.speaker = speaker.speaker_id; }}
+										onclick={() => { customVoiceForm.speaker = speaker.speaker; }}
 										class="text-left p-3 rounded-lg border-2 transition-all
-											{customVoiceForm.speaker === speaker.speaker_id
+											{customVoiceForm.speaker === speaker.speaker
 												? 'border-amber-400 bg-amber-50 dark:border-amber-500 dark:bg-amber-900/20'
 												: 'border-gray-200 dark:border-gray-700 hover:border-amber-300 dark:hover:border-amber-600'}"
 									>
-										<div class="font-medium text-gray-900 dark:text-gray-100">{speaker.name}</div>
+										<div class="font-medium text-gray-900 dark:text-gray-100">{speaker.speaker}</div>
 										<div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-											{speaker.gender} • {speaker.style}
+											{speaker.gender} • {speaker.native_language} • {speaker.age_range}
 										</div>
 										<div class="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
 											{speaker.description}

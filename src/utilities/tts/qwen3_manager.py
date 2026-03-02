@@ -816,7 +816,7 @@ class Qwen3Manager:
             wavs, sr = self._base_model.generate_voice_clone(
                 text=text,
                 language=language,
-                voice_clone_prompt=voice_prompt,  # Reuse pre-computed prompt
+                voice_clone_prompt=[voice_prompt],  # Must be a list of VoiceClonePromptItem
             )
 
         audio = wavs[0] if isinstance(wavs, list) else wavs
@@ -1159,7 +1159,7 @@ class Qwen3Manager:
             with torch.inference_mode():
                 wavs, sr = self._design_model.generate_voice_design(
                     text=chunk,
-                    voice_description=voice_description,
+                    instruct=voice_description,  # API uses 'instruct' for voice description
                     language=language,
                 )
             
@@ -1245,7 +1245,7 @@ class Qwen3Manager:
                 with torch.inference_mode():
                     wavs, sr = self._design_model.generate_voice_design(
                         text=chunk,
-                        voice_description=voice_description,
+                        instruct=voice_description,  # API uses 'instruct' for voice description
                         language=language,
                     )
                 
@@ -1333,7 +1333,7 @@ class Qwen3Manager:
         with torch.inference_mode():
             wavs, sr = self._design_model.generate_voice_design(
                 text=sample_text,
-                voice_description=voice_description,
+                instruct=voice_description,  # API uses 'instruct' for voice description
                 language=language,
             )
         
