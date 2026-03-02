@@ -254,10 +254,11 @@ export const api = {
 	},
 };
 
+import { BACKEND_WS } from '$lib/utils/backendUrl';
+
 /**
  * Get WebSocket URL for chat
  */
 export function getChatWebSocketURL(sessionId: string): string {
-	const wsUrl = import.meta.env.PUBLIC_BACKEND_WS || 'ws://localhost:8000';
-	return `${wsUrl}/ws/chat/${sessionId}`;
+	return `${BACKEND_WS}/ws/chat/${sessionId}`;
 }
