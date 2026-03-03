@@ -1,10 +1,76 @@
 <script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
 	import CarbonSettings from "~icons/carbon/settings";
 	import CarbonChevronRight from "~icons/carbon/chevron-right";
 	import CarbonDocumentTasks from "~icons/carbon/document-tasks";
 	import CarbonUpload from "~icons/carbon/upload";
 	import CarbonVolumeUp from "~icons/carbon/volume-up";
 	import CarbonMicrophone from "~icons/carbon/microphone";
+	import CarbonCheckmarkFilled from "~icons/carbon/checkmark-filled";
+	import CarbonWarningFilled from "~icons/carbon/warning-filled";
+	import CarbonStopFilled from "~icons/carbon/stop-filled";
+	import CarbonPlay from "~icons/carbon/play";
+	import CarbonReset from "~icons/carbon/reset";
+
+	import { isTauri, pollBackendStatus, startBackend, stopBackend, restartBackend } from '$lib/tauri';
+
+	let backendStatus: string = 'checking';
+	let isDesktopMode = false;
+	let pollCleanup: (() => void) | null = null;
+	let isProcessing = false;
+
+	onMount(() => {
+		isDesktopMode = isTauri();
+		
+		if (isDesktopMode) {
+			// Start polling backend status
+			pollCleanup = pollBackendStatus((status) => {
+				backendStatus = status;
+			}, 5000); // Check every 5 seconds
+		}
+	});
+
+	onDestroy(() => {
+		if (pollCleanup) {
+			pollCleanup();
+		}
+	});
+
+	async function handleStartBackend() {
+		isProcessing = true;
+		try {
+			await startBackend();
+			backendStatus = 'starting';
+		} catch (error) {
+			console.error('Failed to start backend:', error);
+		} finally {
+			isProcessing = false;
+		}
+	}
+
+	async function handleStopBackend() {
+		isProcessing = true;
+		try {
+			await stopBackend();
+			backendStatus = 'stopped';
+		} catch (error) {
+			console.error('Failed to stop backend:', error);
+		} finally {
+			isProcessing = false;
+		}
+	}
+
+	async function handleRestartBackend() {
+		isProcessing = true;
+		try {
+			await restartBackend();
+			backendStatus = 'restarting';
+		} catch (error) {
+			console.error('Failed to restart backend:', error);
+		} finally {
+			isProcessing = false;
+		}
+	}
 
 	const settingsCategories = [
 		{
@@ -62,6 +128,76 @@
 			Configure your Orion application
 		</p>
 	</div>
+
+	<!-- Backend Status (Desktop Only) -->
+	{#if isDesktopMode}
+		<div class="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
+			<div class="flex items-center justify-between">
+				<div class="flex items-center gap-4">
+					<div class="flex items-center gap-2">
+						{#if backendStatus === 'running'}
+							<CarbonCheckmarkFilled class="size-6 text-green-500" />
+							<div>
+								<h3 class="font-semibold text-gray-900 dark:text-gray-100">Backend Running</h3>
+								<p class="text-sm text-gray-600 dark:text-gray-400">Python backend is active</p>
+							</div>
+						{:else if backendStatus === 'stopped'}
+							<CarbonStopFilled class="size-6 text-red-500" />
+							<div>
+								<h3 class="font-semibold text-gray-900 dark:text-gray-100">Backend Stopped</h3>
+								<p class="text-sm text-gray-600 dark:text-gray-400">Backend is not running</p>
+							</div>
+						{:else if backendStatus === 'checking' || backendStatus === 'starting' || backendStatus === 'restarting'}
+							<div class="size-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent"></div>
+							<div>
+								<h3 class="font-semibold text-gray-900 dark:text-gray-100">
+									{backendStatus === 'checking' ? 'Checking Status' : backendStatus === 'starting' ? 'Starting Backend' : 'Restarting Backend'}
+								</h3>
+								<p class="text-sm text-gray-600 dark:text-gray-400">Please wait...</p>
+							</div>
+						{:else}
+							<CarbonWarningFilled class="size-6 text-yellow-500" />
+							<div>
+								<h3 class="font-semibold text-gray-900 dark:text-gray-100">Backend Error</h3>
+								<p class="text-sm text-gray-600 dark:text-gray-400">Status: {backendStatus}</p>
+							</div>
+						{/if}
+					</div>
+				</div>
+
+				<!-- Control Buttons -->
+				<div class="flex items-center gap-2">
+					{#if backendStatus === 'running'}
+						<button
+							on:click={handleRestartBackend}
+							disabled={isProcessing}
+							class="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+						>
+							<CarbonReset class="size-4" />
+							Restart
+						</button>
+						<button
+							on:click={handleStopBackend}
+							disabled={isProcessing}
+							class="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+						>
+							<CarbonStopFilled class="size-4" />
+							Stop
+						</button>
+					{:else if backendStatus === 'stopped'}
+						<button
+							on:click={handleStartBackend}
+							disabled={isProcessing}
+							class="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+						>
+							<CarbonPlay class="size-4" />
+							Start
+						</button>
+					{/if}
+				</div>
+			</div>
+		</div>
+	{/if}
 
 	<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
 		{#each settingsCategories as category}

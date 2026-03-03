@@ -11,6 +11,7 @@
 	import CarbonDocument from "~icons/carbon/document";
 
 	import { BACKEND_URL } from '$lib/utils/backendUrl';
+	import { isTauri, selectFolder, showNotification } from '$lib/tauri';
 
 	// Ingestion form state
 	let ingestPaths = $state<string[]>([""]);
@@ -98,29 +99,37 @@
 		}
 	}
 
-	function openFolderPicker(index: number) {
-		// Create a hidden file input for folder selection
-		const input = document.createElement('input');
-		input.type = 'file';
-		input.webkitdirectory = true;
-		input.multiple = false;
-		
-		input.onchange = (e: Event) => {
-			const target = e.target as HTMLInputElement;
-			if (target.files && target.files.length > 0) {
-				// Get the directory path from the first file
-				const firstFile = target.files[0];
-				// Extract directory path (remove the filename)
-				const fullPath = firstFile.webkitRelativePath || firstFile.name;
-				const dirPath = fullPath.split('/')[0]; // Get root folder name
-				
-				// For desktop apps, we'd get full path. For web, we get relative path
-				// Let user see what they selected
-				ingestPaths[index] = dirPath || 'Selected folder';
+	async function openFolderPicker(index: number) {
+		// Use native dialog in Tauri, fallback to web file picker in browser
+		if (isTauri()) {
+			const selected = await selectFolder('Select Folder to Ingest', ingestPaths[index] || undefined);
+			if (selected) {
+				ingestPaths[index] = selected;
 			}
-		};
-		
-		input.click();
+		} else {
+			// Create a hidden file input for folder selection (browser fallback)
+			const input = document.createElement('input');
+			input.type = 'file';
+			input.webkitdirectory = true;
+			input.multiple = false;
+			
+			input.onchange = (e: Event) => {
+				const target = e.target as HTMLInputElement;
+				if (target.files && target.files.length > 0) {
+					// Get the directory path from the first file
+					const firstFile = target.files[0];
+					// Extract directory path (remove the filename)
+					const fullPath = firstFile.webkitRelativePath || firstFile.name;
+					const dirPath = fullPath.split('/')[0]; // Get root folder name
+					
+					// For desktop apps, we'd get full path. For web, we get relative path
+					// Let user see what they selected
+					ingestPaths[index] = dirPath || 'Selected folder';
+				}
+			};
+			
+			input.click();
+		}
 	}
 
 	async function loadTasks() {
@@ -138,6 +147,24 @@
 				previouslyRunning.includes(t.task_id) && 
 				(t.status === 'completed' || t.status === 'failed')
 			);
+			
+			// Send notifications for completed tasks
+			if (nowCompleted.length > 0) {
+				for (const task of nowCompleted) {
+					if (task.status === 'completed') {
+						const docsCount = task.stats?.total_documents || 0;
+						await showNotification(
+							'Ingestion Complete',
+							`Successfully ingested ${docsCount} documents from ${task.path}`
+						);
+					} else if (task.status === 'failed') {
+						await showNotification(
+							'Ingestion Failed',
+							`Failed to ingest documents from ${task.path}: ${task.error || 'Unknown error'}`
+						);
+					}
+				}
+			}
 			
 			// If no tasks just completed, update immediately
 			if (nowCompleted.length === 0) {

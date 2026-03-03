@@ -53,6 +53,8 @@
 		"@iconify-json/bi": "^1.1.21",
 		"@iconify-json/carbon": "^1.1.16",
 		"@iconify-json/lucide": "^1.2.77",
+		"@tauri-apps/plugin-dialog": "^2.6.0",
+		"@tauri-apps/plugin-notification": "^2.3.3",
 		"bits-ui": "^2.15.4",
 		"date-fns": "^2.29.3",
 		"dompurify": "^3.2.4",
