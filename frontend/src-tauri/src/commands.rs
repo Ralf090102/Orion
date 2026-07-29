@@ -1,6 +1,6 @@
 // src-tauri/src/commands.rs
 use crate::backend::BackendState;
-use tauri::{AppHandle, Manager, State};
+use tauri::State;
 
 #[tauri::command]
 pub async fn get_backend_status() -> Result<String, String> {
@@ -12,7 +12,7 @@ pub async fn get_backend_status() -> Result<String, String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    match client.get("http://127.0.0.1:8000/api/health").send().await {
+    match client.get("http://127.0.0.1:8000/health").send().await {
         Ok(response) if response.status().is_success() => {
             log::info!("Backend is running");
             Ok("running".to_string())
@@ -30,17 +30,17 @@ pub async fn get_backend_status() -> Result<String, String> {
 
 #[tauri::command]
 pub async fn restart_backend(
-    app: AppHandle,
     state: State<'_, BackendState>,
 ) -> Result<(), String> {
     log::info!("Restart backend command received");
 
-    let app_dir = app.path()
-        .app_config_dir()
-        .map_err(|e| format!("Failed to get app directory: {}", e))?;
+    let project_root = state.project_root.clone();
+    if project_root.as_os_str().is_empty() {
+        return Err("Project root not configured. Please start backend manually.".to_string());
+    }
 
     let mut backend = state.backend.lock().unwrap();
-    backend.restart(app_dir)?;
+    backend.restart(project_root)?;
 
     log::info!("Backend restart initiated");
     Ok(())
@@ -59,17 +59,17 @@ pub async fn stop_backend(state: State<'_, BackendState>) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn start_backend(
-    app: AppHandle,
     state: State<'_, BackendState>,
 ) -> Result<(), String> {
     log::info!("Start backend command received");
 
-    let app_dir = app.path()
-        .app_config_dir()
-        .map_err(|e| format!("Failed to get app directory: {}", e))?;
+    let project_root = state.project_root.clone();
+    if project_root.as_os_str().is_empty() {
+        return Err("Project root not configured. Please start backend manually.".to_string());
+    }
 
     let mut backend = state.backend.lock().unwrap();
-    backend.start(app_dir)?;
+    backend.start(project_root)?;
 
     log::info!("Backend start initiated");
     Ok(())
