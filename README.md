@@ -17,7 +17,7 @@ Orion consists of four main components:
 | **RAG Pipeline** | Document ingestion, chunking, embedding, hybrid search, and reranking | ChromaDB, sentence-transformers, rank-bm25 |
 | **Backend** | REST API and WebSocket server for chat, RAG queries, and system management | FastAPI, Uvicorn |
 | **Frontend** | Modern chat interface based on HuggingFace's Chat-UI | SvelteKit, TailwindCSS |
-| **Desktop App** | Native system tray application with window management | Tauri (Rust) - coming soon |
+| **Desktop App** | Native system tray application with window management | Tauri (Rust) |
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -123,6 +123,22 @@ npm install
 npm run dev
 ```
 
+### Desktop App (Tauri)
+
+The desktop build wraps the SvelteKit frontend and the Python backend (auto-started as a sidecar process) in a native window with a system tray.
+
+**Additional prerequisites (Windows):**
+- [Rust](https://rustup.rs) (`winget install Rust.Rustup`)
+- **Microsoft C++ Build Tools** — install via `winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools"`, or through the Visual Studio Installer with the "Desktop development with C++" workload. Tauri's build needs the real MSVC `link.exe`; without this workload, Rust/Cargo either fails with `linker 'link.exe' not found`, or — if running from a Git Bash/MSYS shell — silently picks up MSYS's unrelated `link` (hard-link) utility instead and fails with a confusing `link: missing operand` error. Build from PowerShell/cmd, not Git Bash, to avoid the latter.
+
+```bash
+cd frontend
+npx tauri dev    # dev mode, hot-reloads frontend + Rust
+npx tauri build  # production installer
+```
+
+On first launch the backend can take up to ~60s to become ready (loading the embedding + reranker models) — this is expected, not a hang.
+
 ---
 
 ## Configuration
@@ -203,7 +219,7 @@ Orion/
 │   ├── src/
 │   │   ├── lib/          # Components and utilities
 │   │   └── routes/       # Page routes
-│   └── src-tauri/        # Tauri desktop wrapper (coming soon)
+│   └── src-tauri/        # Tauri desktop wrapper
 ├── src/
 │   ├── core/             # Ingestion and LLM integration
 │   ├── generation/       # Prompt building and response generation
@@ -223,11 +239,13 @@ Orion/
 - [x] Chat-UI frontend
 - [x] Piper TTS integration
 - [x] Qwen3-TTS voice synthesis
-- [ ] Tauri desktop application
-- [ ] System tray with quick actions
+- [x] Tauri desktop application
+- [x] System tray with quick actions
 - [ ] Auto-update mechanism
+- [ ] Automated test suite
+- [ ] Production packaging for the desktop backend sidecar (currently dev-tree only)
 
-See [Orion_Roadmap.md](Orion_Roadmap.md) for detailed planning.
+See [Tauri Roadmap.md](Tauri%20Roadmap.md) for how the desktop app was built. `Orion_Roadmap.md` is superseded by this checklist and kept for historical reference only.
 
 ---
 

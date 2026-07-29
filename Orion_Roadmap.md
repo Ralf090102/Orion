@@ -1,5 +1,7 @@
 # Orion Roadmap — Local RAG Assistant
 
+> **⚠️ Superseded (2026-07-29):** This was an early planning draft and several file paths it references no longer match the codebase (e.g. `retrieval/vector_space.py` → `src/retrieval/vector_store.py`, `retrieval/retrieval.py` → `src/retrieval/retriever.py`). For current status, see the [README Roadmap section](README.md#roadmap) and [Tauri Roadmap.md](Tauri%20Roadmap.md). Kept here for historical reference only.
+
 This document is a detailed, step-by-step engineering roadmap for "Orion" — a purely local RAG (Retrieval-Augmented Generation) assistant that uses one or more folder paths as its knowledge base. The roadmap maps to the current `config.py` for parameter names and defaults, highlights milestones, testing strategies, and implementation notes.
 
 ---
