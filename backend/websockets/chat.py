@@ -48,11 +48,15 @@ class ChatWebSocketHandler:
         self.generator = generator
         self.config = config
         self.connected = False
-        
+
         # Token streaming queue (fixes fire-and-forget issues)
         self.token_queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._queue_task: asyncio.Task | None = None
         self._is_processing = False
+        # Set from the event-loop thread before generation is offloaded to a
+        # worker thread (see handle_user_message); queue_token() needs this to
+        # safely hop back onto the loop via call_soon_threadsafe.
+        self._loop: asyncio.AbstractEventLoop | None = None
     
     async def _process_token_queue(self):
         """
@@ -95,15 +99,23 @@ class ChatWebSocketHandler:
     def queue_token(self, token: str):
         """
         Queue a token for sending (thread-safe).
-        
-        This is called from the sync streaming callback and safely
-        adds tokens to the async queue.
-        
+
+        Called from the sync Ollama streaming callback, which runs on a
+        worker thread (see handle_user_message) — asyncio.Queue isn't safe
+        to touch off the event-loop thread, so this hops back via
+        call_soon_threadsafe instead of calling put_nowait directly.
+
         Args:
             token: Token content to send
         """
+        if self._loop is None:
+            logger.error("Dropped token: no event loop registered")
+            return
+        self._loop.call_soon_threadsafe(self._put_token_nowait, token)
+
+    def _put_token_nowait(self, token: str):
+        """Actually enqueue the token; must run on the event-loop thread."""
         try:
-            # Put token in queue (non-blocking)
             self.token_queue.put_nowait(token)
         except asyncio.QueueFull:
             logger.warning(f"Token queue full, dropping token: {token[:20]}...")
@@ -267,11 +279,13 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
                 {"role": "user", "content": title_prompt}
             ]
             
-            # Generate title using LLM (non-streaming)
+            # Generate title using LLM (non-streaming). Same blocking-call
+            # concern as the main response generation above — offload it.
             from src.core.llm import OllamaClient
             llm = OllamaClient(timeout=10)
-            
-            response = llm.generate(
+
+            response = await asyncio.to_thread(
+                llm.generate,
                 messages=messages,
                 model=self.config.rag.llm.model,
                 temperature=0.7,
@@ -373,19 +387,30 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
             
             # Start token streaming task
             await self.start_token_streaming()
-            
+
+            # Needed so queue_token() (called from the worker thread below)
+            # can safely hop back onto the event loop.
+            self._loop = asyncio.get_running_loop()
+
             # Define sync callback for token streaming (called by Ollama)
             def stream_token(token: str):
                 """
                 Queue tokens for async sending (thread-safe).
-                
+
                 This is called from the sync Ollama streaming callback.
                 Tokens are queued and sent by the async queue processor.
                 """
                 self.queue_token(token)
-            
-            # Generate chat response with streaming
-            result = self.generator.generate_chat_response(
+
+            # Generate chat response with streaming. generate_chat_response is
+            # a blocking sync call (it iterates a synchronous Ollama stream) —
+            # running it directly here would block the whole asyncio event
+            # loop for the entire generation, starving every other coroutine
+            # on this process (including /health, which is why the frontend's
+            # "backend not connected" banner used to fire mid-generation).
+            # asyncio.to_thread offloads it to a worker thread instead.
+            result = await asyncio.to_thread(
+                self.generator.generate_chat_response,
                 message=enhanced_message,  # Use enhanced message with file context
                 session_id=self.session_id,
                 session_manager=self.session_manager,
