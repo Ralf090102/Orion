@@ -5,6 +5,7 @@
 	import { goto } from "$app/navigation";
 	import { base } from "$app/paths";
 	import { page } from "$app/state";
+	import { browser } from "$app/environment";
 
 	import { error } from "$lib/stores/errors";
 	import { createSettingsStore } from "$lib/stores/settings";
@@ -22,8 +23,13 @@
 	import { shareModal } from "$lib/stores/shareModal";
 	import ConvoModeToggle from "$lib/components/ConvoModeToggle.svelte";
 	import { BACKEND_URL } from '$lib/utils/backendUrl';
+	import { isTauri } from '$lib/tauri';
 
 	let { data = $bindable(), children } = $props();
+	
+	// Backend connectivity state
+	let backendConnected = $state(true);
+	let backendCheckInterval: ReturnType<typeof setInterval> | null = null;
 
 	setContext("publicConfig", data.publicConfig);
 
@@ -106,7 +112,24 @@
 
 	onDestroy(() => {
 		clearTimeout(errorToastTimeout);
+		if (backendCheckInterval) {
+			clearInterval(backendCheckInterval);
+		}
 	});
+
+	// Check backend connectivity
+	async function checkBackendHealth() {
+		if (!browser) return;
+		try {
+			const response = await fetch(`${BACKEND_URL}/health`, {
+				method: 'GET',
+				signal: AbortSignal.timeout(3000),
+			});
+			backendConnected = response.ok;
+		} catch {
+			backendConnected = false;
+		}
+	}
 
 	$effect(() => {
 		if ($error) onError();
@@ -126,22 +149,12 @@
 
 	const settings = createSettingsStore(data.settings);
 
-	onMount(async () => {
-		if (page.url.searchParams.has("model")) {
-			await settings
-				.instantSet({
-					activeModel: page.url.searchParams.get("model") ?? $settings.activeModel,
-				})
-				.then(async () => {
-					const query = new URLSearchParams(page.url.searchParams.toString());
-					query.delete("model");
-					await goto(`${base}/?${query.toString()}`, {
-						invalidateAll: true,
-					});
-				});
-		}
-
+	onMount(() => {
 		// Global keyboard shortcut: New Chat (Ctrl/Cmd + Shift + O)
+		// Registered in a synchronous onMount (not the async one below) because
+		// onDestroy() must be called before any `await` — once an async onMount
+		// callback resumes past its first await, Svelte's component-init window
+		// has already closed and onDestroy() throws lifecycle_outside_component.
 		const onKeydown = (e: KeyboardEvent) => {
 			// Ignore when a modal has focus (app is inert)
 			const appEl = document.getElementById("app");
@@ -158,6 +171,26 @@
 
 		window.addEventListener("keydown", onKeydown, { capture: true });
 		onDestroy(() => window.removeEventListener("keydown", onKeydown, { capture: true }));
+	});
+
+	onMount(async () => {
+		// Check backend connectivity immediately and periodically
+		await checkBackendHealth();
+		backendCheckInterval = setInterval(checkBackendHealth, 10000); // Check every 10s
+
+		if (page.url.searchParams.has("model")) {
+			await settings
+				.instantSet({
+					activeModel: page.url.searchParams.get("model") ?? $settings.activeModel,
+				})
+				.then(async () => {
+					const query = new URLSearchParams(page.url.searchParams.toString());
+					query.delete("model");
+					await goto(`${base}/?${query.toString()}`, {
+						invalidateAll: true,
+					});
+				});
+		}
 	});
 
 	let mobileNavTitle = $derived(
@@ -276,6 +309,20 @@
 	{#if currentError}
 		<Toast message={currentError} />
 	{/if}
+	
+	<!-- Backend disconnected warning banner -->
+	{#if !backendConnected}
+		<div class="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-black px-4 py-2 text-center text-sm font-medium shadow-lg">
+			<span class="mr-2">⚠️</span>
+			Backend not connected. 
+			{#if isTauri()}
+				Start it via Settings → Application, or run <code class="bg-amber-600/30 px-1 rounded">python run.py</code> manually.
+			{:else}
+				Please start the backend: <code class="bg-amber-600/30 px-1 rounded">python run.py</code>
+			{/if}
+		</div>
+	{/if}
+	
 	{@render children()}
 
 	{#if publicConfig.PUBLIC_PLAUSIBLE_SCRIPT_URL}

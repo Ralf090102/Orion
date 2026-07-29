@@ -23,10 +23,8 @@
 	import { CONV_NUM_PER_PAGE } from "$lib/constants/pagination";
 	import { browser } from "$app/environment";
 	import { usePublicConfig } from "$lib/utils/PublicConfig.svelte";
-	import { enabledServersCount } from "$lib/stores/mcpServers";
 	import { isPro } from "$lib/stores/isPro";
 	import IconPro from "$lib/components/icons/IconPro.svelte";
-	import MCPServerManager from "./mcp/MCPServerManager.svelte";
 
 	const publicConfig = usePublicConfig();
 	import { BACKEND_URL } from '$lib/utils/backendUrl';
@@ -130,7 +128,6 @@
 
 	let isDark = $state(false);
 	let unsubscribeTheme: (() => void) | undefined;
-	let showMcpModal = $state(false);
 
 	if (browser) {
 		unsubscribeTheme = subscribeToTheme(({ isDark: nextIsDark }) => {
@@ -232,7 +229,3 @@
 		</button>
 	</div>
 </div>
-
-{#if showMcpModal}
-	<MCPServerManager onclose={() => (showMcpModal = false)} />
-{/if}

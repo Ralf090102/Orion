@@ -1,38 +1,47 @@
 import { UrlDependency } from "$lib/types/UrlDependency";
 import type { ConvSidebar } from "$lib/types/ConvSidebar";
 import { BACKEND_URL } from '$lib/utils/backendUrl';
+import { browser } from '$app/environment';
 
 export const load = async ({ depends, fetch }) => {
 	depends(UrlDependency.ConversationList);
 
+	// Only fetch from backend in browser context (not during SSR)
+	// During Tauri dev, SSR happens before Python backend is available
+	const shouldFetch = browser;
+
 	// Load conversations from FastAPI backend
 	let conversations: ConvSidebar[] = [];
-	try {
-		const response = await fetch(`${BACKEND_URL}/api/chat/sessions`);
-		if (response.ok) {
-			const data = await response.json();
-			conversations = data.sessions?.map((session: any) => ({
-				id: session.session_id,
-				title: session.metadata?.title || session.metadata?.topic || 'New Chat',
-				model: session.metadata?.model || 'default',
-				updatedAt: new Date(session.updated_at),
-				createdAt: new Date(session.created_at),
-			})) || [];
+	if (shouldFetch) {
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/chat/sessions`);
+			if (response.ok) {
+				const data = await response.json();
+				conversations = data.sessions?.map((session: any) => ({
+					id: session.session_id,
+					title: session.metadata?.title || session.metadata?.topic || 'New Chat',
+					model: session.metadata?.model || 'default',
+					updatedAt: new Date(session.updated_at),
+					createdAt: new Date(session.created_at),
+				})) || [];
+			}
+		} catch (err) {
+			console.error('Failed to load conversations:', err);
 		}
-	} catch (err) {
-		console.error('Failed to load conversations:', err);
 	}
 
 	// Fetch actual active model from backend
 	let activeModelName = 'mistral:latest';
-	try {
-		const response = await fetch(`${BACKEND_URL}/api/models/config`);
-		if (response.ok) {
-			const config = await response.json();
-			activeModelName = config.model;
+	if (shouldFetch) {
+		try {
+			const response = await fetch(`${BACKEND_URL}/api/models/config`);
+			if (response.ok) {
+				const config = await response.json();
+				activeModelName = config.model;
+			}
+		} catch (err) {
+			console.error('Failed to load model config:', err);
 		}
-	} catch (err) {
-		console.error('Failed to load model config:', err);
 	}
 
 	// Create model entry based on active model

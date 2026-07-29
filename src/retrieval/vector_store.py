@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from enum import Enum
 from datetime import datetime
 import hashlib
+import uuid
 
 import chromadb
 from chromadb.config import Settings
@@ -132,6 +133,7 @@ class ChromaVectorStore:
         self.knowledge_base_paths = [str(Path(p).resolve()) for p in self.knowledge_base_paths]
 
         self._initialize_client()
+        self._get_or_create_collection()
 
     def _initialize_client(self) -> None:
         """Initialize Chroma client and ensure persistence directory exists."""
@@ -173,7 +175,7 @@ class ChromaVectorStore:
                     metadata={
                         "description": "Orion local knowledge base",
                         "created_by": "Orion",
-                        "distance_metric": self.vectorstore_config.distance_metric,
+                        "hnsw:space": self.vectorstore_config.distance_metric,
                         "supports_multimedia": True,  # Future-ready flag
                     },
                 )
@@ -373,7 +375,7 @@ class ChromaVectorStore:
 
         try:
             if ids is None:
-                ids = [f"doc_{i}_{hash(doc[:50])}" for i, doc in enumerate(documents)]
+                ids = [str(uuid.uuid4()) for _ in documents]
 
             self.collection.add(
                 documents=documents,
