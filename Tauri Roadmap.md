@@ -2,7 +2,7 @@
 
 **Purpose**: Wrap Orion in a native desktop application with system tray, window management, and native OS integration.  
 **Date**: February 2026  
-**Status**: ✅ Complete (2026-07-29) — sidecar backend spawn, system tray, IPC commands, native dialogs/notifications all shipped in v1. Auto-update and production packaging of the backend sidecar remain open (see README Roadmap).
+**Status**: ✅ Complete (2026-07-29) — sidecar backend spawn, system tray, IPC commands, native dialogs/notifications all shipped in v1. Production packaging of the backend sidecar (bundled portable Python runtime, so the app doesn't depend on a dev `.venv`) shipped 2026-07-30 — see README Roadmap and `scripts/build_python_runtime.ps1`. Auto-update is the one item still open.
 ---
 
 ## What is Tauri?

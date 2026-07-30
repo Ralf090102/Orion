@@ -145,7 +145,9 @@ On first launch the backend can take up to ~60s to become ready (loading the emb
 .\scripts\build_python_runtime.ps1
 ```
 
-This downloads the official Python embeddable package into `python-runtime/` (gitignored — it's a build artifact, ~1.8GB with the CPU-only ML stack) and installs `requirements.txt` into it. `tauri.conf.json`'s `bundle.resources` then packages `python-runtime/`, `backend/`, and `src/` alongside the installer; at runtime, `backend.rs` prefers this bundled runtime and only falls back to a dev `.venv` (or system Python) when it isn't present. Verified end-to-end (backend boots and serves requests from the bundled runtime with zero `.venv` involvement) via `npx tauri build --debug --no-bundle`; the full MSI/NSIS installer step with the complete bundled runtime hasn't been run to completion yet.
+This downloads the official Python embeddable package into `python-runtime/` (gitignored — it's a build artifact, ~1.8GB with the CPU-only ML stack) and installs `requirements.txt` into it. `tauri.conf.json`'s `bundle.resources` then packages `python-runtime/`, `backend/`, and `src/` alongside the installer; at runtime, `backend.rs` prefers this bundled runtime and only falls back to a dev `.venv` (or system Python) when it isn't present.
+
+**Verified end-to-end 2026-07-30**: `bundle.targets` is currently scoped to `"nsis"` (WiX/MSI has more historical friction with the large, deeply-nested file tree an ML stack produces — untested here, but a one-line config change to add back if wanted). A real release build (`npx tauri build`, no `--debug`/`--no-bundle`) produced `Orion_0.1.0_x64-setup.exe` (~540MB, compressed from the ~1.8-2GB bundled runtime) in about 15 minutes on this machine — installed and launched from the Start Menu, backend came up on the bundled runtime with zero dependency on this repo's `.venv`, and chat worked. Known gap from this pass: TTS doesn't work in the installed build yet (untriaged — tracked as a follow-up, not blocking).
 
 ---
 
