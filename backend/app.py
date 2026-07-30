@@ -245,5 +245,12 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,
+        # Without reload_dirs, uvicorn watches the whole CWD -- which is the
+        # repo root (backend.rs spawns this from the project root) -- so any
+        # frontend build (npm run build, npx tauri build) writing to
+        # frontend/dist, frontend/.svelte-kit, or frontend/src-tauri/target
+        # triggers spurious backend restarts. Only backend/ and src/ contain
+        # Python source that should ever trigger a reload.
+        reload_dirs=["backend", "src"],
         log_level="info",
     )

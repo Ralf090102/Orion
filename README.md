@@ -139,6 +139,14 @@ npx tauri build  # production installer
 
 On first launch the backend can take up to ~60s to become ready (loading the embedding + reranker models) — this is expected, not a hang.
 
+**Building a distributable installer** (i.e. for a machine without this repo's `.venv`): `npx tauri build` needs a bundled, self-contained Python runtime — it doesn't ship one by default. Generate it once (or whenever `requirements.txt` changes) with:
+
+```powershell
+.\scripts\build_python_runtime.ps1
+```
+
+This downloads the official Python embeddable package into `python-runtime/` (gitignored — it's a build artifact, ~1.8GB with the CPU-only ML stack) and installs `requirements.txt` into it. `tauri.conf.json`'s `bundle.resources` then packages `python-runtime/`, `backend/`, and `src/` alongside the installer; at runtime, `backend.rs` prefers this bundled runtime and only falls back to a dev `.venv` (or system Python) when it isn't present. Verified end-to-end (backend boots and serves requests from the bundled runtime with zero `.venv` involvement) via `npx tauri build --debug --no-bundle`; the full MSI/NSIS installer step with the complete bundled runtime hasn't been run to completion yet.
+
 ---
 
 ## Configuration
@@ -230,6 +238,18 @@ Orion/
 
 ---
 
+## Testing
+
+```bash
+# Run the backend test suite (must use the project's own .venv --
+# system Python is missing dependencies like soundfile)
+.venv\Scripts\python.exe -m pytest test/ -v
+```
+
+Tests use FastAPI's `dependency_overrides` to fake out the ML stack (retriever, generator, session manager), so they run in seconds without needing Ollama or ChromaDB. See `test/conftest.py` for the fixtures.
+
+---
+
 ## Roadmap
 
 - [x] Core RAG pipeline (embeddings, vector store, hybrid search)
@@ -242,8 +262,8 @@ Orion/
 - [x] Tauri desktop application
 - [x] System tray with quick actions
 - [ ] Auto-update mechanism
-- [ ] Automated test suite
-- [ ] Production packaging for the desktop backend sidecar (currently dev-tree only)
+- [x] Automated test suite
+- [x] Production packaging for the desktop backend sidecar (bundled portable Python runtime — see Desktop App section)
 
 See [Tauri Roadmap.md](Tauri%20Roadmap.md) for how the desktop app was built. `Orion_Roadmap.md` is superseded by this checklist and kept for historical reference only.
 
