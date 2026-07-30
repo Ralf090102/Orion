@@ -106,6 +106,7 @@ async def track_request_metrics(request: Request, call_next):
     """Records request count/latency/errors per route, keyed by route template
     (e.g. "GET /api/chat/{session_id}") rather than the raw resolved path, so
     metrics aggregate across different session/file IDs instead of fragmenting."""
+    logger.info(f"CORS SMOKE TEST -- Origin header: {request.headers.get('origin')!r}")
     start = time.monotonic()
     response = await call_next(request)
     latency_ms = (time.monotonic() - start) * 1000

@@ -3,6 +3,13 @@ import type { ConvSidebar } from "$lib/types/ConvSidebar";
 import { BACKEND_URL } from '$lib/utils/backendUrl';
 import { browser } from '$app/environment';
 
+// The Tauri production build has no Node server behind it (just static files
+// served over a custom protocol), so SSR/prerendering can never run there --
+// this makes the whole app a client-rendered SPA, required for adapter-static's
+// fallback mode (see svelte.config.js) and for dynamic routes like
+// conversation/[id] whose IDs only exist at runtime, not at build time.
+export const ssr = false;
+
 export const load = async ({ depends, fetch }) => {
 	depends(UrlDependency.ConversationList);
 
