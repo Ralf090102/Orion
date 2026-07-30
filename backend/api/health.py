@@ -15,6 +15,7 @@ from backend.dependencies import (
     get_retriever_dependency,
     get_session_manager_dependency,
 )
+from backend.metrics import metrics_collector
 from backend.models.ingestion import (
     FormatsResponse,
     KnowledgeBaseStats,
@@ -348,31 +349,26 @@ async def readiness_check(
     }
 
 
-# ========== METRICS (OPTIONAL) ==========
+# ========== METRICS ==========
 @router.get(
     "/api/metrics",
     summary="System metrics",
-    description="Get system metrics (requests, latency, etc.)",
+    description="Get system metrics (requests, latency, errors per route)",
     tags=["Health"],
 )
 async def get_metrics():
     """
-    Get system metrics.
-    
-    Returns basic metrics about API usage and performance.
-    Can be extended to support Prometheus format.
-    
+    Get system metrics collected by the request-tracking middleware.
+
+    Reflects every request handled so far *except this one* -- metrics are
+    recorded by middleware after the response is built, so a request can't
+    observe itself in its own snapshot.
+
     Returns:
-        Metrics dictionary
+        Metrics dictionary with uptime, request counts, latency, and
+        per-endpoint breakdown
     """
-    # TODO: Implement proper metrics tracking
-    # For now, return placeholder
     return {
         "status": "success",
-        "metrics": {
-            "uptime_seconds": 0,  # Would track actual uptime
-            "total_requests": 0,  # Would track request count
-            "average_latency_ms": 0,  # Would track average latency
-            "note": "Metrics tracking not yet implemented",
-        },
+        "metrics": metrics_collector.snapshot(),
     }
