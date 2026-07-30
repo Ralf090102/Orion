@@ -34,13 +34,13 @@ pub async fn restart_backend(
 ) -> Result<(), String> {
     log::info!("Restart backend command received");
 
-    let project_root = state.project_root.clone();
-    if project_root.as_os_str().is_empty() {
-        return Err("Project root not configured. Please start backend manually.".to_string());
+    let runtime = state.runtime.clone();
+    if runtime.working_dir.as_os_str().is_empty() {
+        return Err("Python runtime not configured. Please start backend manually.".to_string());
     }
 
     let mut backend = state.backend.lock().unwrap();
-    backend.restart(project_root)?;
+    backend.restart(&runtime)?;
 
     log::info!("Backend restart initiated");
     Ok(())
@@ -63,13 +63,13 @@ pub async fn start_backend(
 ) -> Result<(), String> {
     log::info!("Start backend command received");
 
-    let project_root = state.project_root.clone();
-    if project_root.as_os_str().is_empty() {
-        return Err("Project root not configured. Please start backend manually.".to_string());
+    let runtime = state.runtime.clone();
+    if runtime.working_dir.as_os_str().is_empty() {
+        return Err("Python runtime not configured. Please start backend manually.".to_string());
     }
 
     let mut backend = state.backend.lock().unwrap();
-    backend.start(project_root)?;
+    backend.start(&runtime)?;
 
     log::info!("Backend start initiated");
     Ok(())

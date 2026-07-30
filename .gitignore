@@ -13,6 +13,9 @@ __pycache__/
 env/
 venv/
 
+# Bundled portable Python runtime for Tauri packaging (see scripts/build_python_runtime.ps1)
+python-runtime/
+
 # VSCode
 .vscode/
 

@@ -9,6 +9,7 @@
  *  4. PUBLIC_BACKEND_URL / PUBLIC_BACKEND_WS (SSR fallback from SvelteKit)
  *  5. localhost:8000 fallback (final SSR fallback)
  */
+import { isTauri } from '@tauri-apps/api/core';
 
 // Get PUBLIC_ vars for SSR (these are set by SvelteKit from .env)
 const PUBLIC_BACKEND_URL = import.meta.env.PUBLIC_BACKEND_URL as string | undefined;
@@ -24,7 +25,16 @@ function detectUrl(): { http: string; ws: string } {
 	}
 
 	// Priority 2: Check if running in Tauri (desktop app)
-	if (typeof window !== 'undefined' && '__TAURI__' in window) {
+	//
+	// `'__TAURI__' in window` (the old check here) only works if
+	// `app.withGlobalTauri` is set in tauri.conf.json -- it isn't, so that
+	// check was always false and this branch never ran in production. The
+	// packaged app fell through to priority 3 instead, deriving the backend
+	// URL from the *page's own* hostname (`tauri.localhost`) rather than
+	// where the sidecar backend actually listens, breaking every fetch.
+	// `isTauri()` from @tauri-apps/api/core is the version-proof way to
+	// detect Tauri context regardless of that config flag.
+	if (typeof window !== 'undefined' && isTauri()) {
 		// In Tauri, always use localhost:8000 as the backend is managed by Tauri
 		return {
 			http: envHttp || 'http://localhost:8000',

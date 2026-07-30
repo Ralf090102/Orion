@@ -20,39 +20,27 @@ impl BackendProcess {
         }
     }
 
-    pub fn start(&mut self, project_root: PathBuf) -> Result<(), String> {
+    pub fn start(&mut self, runtime: &PythonRuntime) -> Result<(), String> {
         if self.is_running() {
             return Ok(()); // Already running
         }
 
-        log::info!("Starting Python backend from: {:?}", project_root);
+        log::info!("Starting Python backend from: {:?}", runtime.working_dir);
+        log::info!("Using Python: {:?}", runtime.python_cmd);
         log::info!("Backend will run on port: {}", self.port);
-
-        // Determine the Python executable path
-        // Prefer the virtual environment if it exists
-        let venv_python = if cfg!(windows) {
-            project_root.join(".venv").join("Scripts").join("python.exe")
-        } else {
-            project_root.join(".venv").join("bin").join("python")
-        };
-        
-        let python_cmd = if venv_python.exists() {
-            log::info!("Using virtual environment Python: {:?}", venv_python);
-            venv_python.to_string_lossy().to_string()
-        } else {
-            log::info!("Virtual environment not found, using system Python");
-            "python".to_string()
-        };
 
         // Start Python backend with backend/app.py (FastAPI server)
         // Pipe output so we can log it
-        let mut child = Command::new(&python_cmd)
+        let mut child = Command::new(&runtime.python_cmd)
             .args(["-m", "backend.app"])  // Run as module: python -m backend.app
-            .current_dir(&project_root)
+            .current_dir(&runtime.working_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to start Python backend: {}. Make sure Python is installed and backend/app.py exists at {:?}", e, project_root))?;
+            .map_err(|e| format!(
+                "Failed to start Python backend: {}. Tried to run {:?} -m backend.app from {:?}",
+                e, runtime.python_cmd, runtime.working_dir
+            ))?;
 
         log::info!("Python backend process started with PID: {:?}", child.id());
         
@@ -121,11 +109,11 @@ impl BackendProcess {
         }
     }
 
-    pub fn restart(&mut self, project_root: PathBuf) -> Result<(), String> {
+    pub fn restart(&mut self, runtime: &PythonRuntime) -> Result<(), String> {
         log::info!("Restarting Python backend...");
         self.stop();
         std::thread::sleep(std::time::Duration::from_secs(2)); // Wait for graceful shutdown
-        self.start(project_root)
+        self.start(runtime)
     }
 }
 
@@ -135,10 +123,18 @@ impl Drop for BackendProcess {
     }
 }
 
+/// Where the Python interpreter and `backend`/`src` source live, and what
+/// directory to launch `python -m backend.app` from.
+#[derive(Debug, Clone)]
+pub struct PythonRuntime {
+    pub python_cmd: PathBuf,
+    pub working_dir: PathBuf,
+}
+
 // Global backend state
 pub struct BackendState {
     pub backend: Arc<Mutex<BackendProcess>>,
-    pub project_root: PathBuf,
+    pub runtime: PythonRuntime,
 }
 
 /// Check if the backend is responding by testing TCP connection to the port
@@ -188,42 +184,88 @@ fn wait_for_backend_ready(
     false
 }
 
-/// Get the project root directory
-/// In dev mode: uses current working directory's parent (frontend/../ = project root)
-/// In production: would use bundled resources or require Python pre-started
-fn get_project_root() -> Result<PathBuf, String> {
-    // `cargo run` sets CWD to the crate root (frontend/src-tauri), so the
-    // project root is two levels up. Walk ancestors instead of hardcoding a
-    // fixed depth, since that's what actually broke here.
-    let cwd = std::env::current_dir()
-        .map_err(|e| format!("Failed to get current directory: {}", e))?;
-
-    log::info!("Current working directory: {:?}", cwd);
-
-    for ancestor in cwd.ancestors() {
-        if ancestor.join("backend").join("app.py").exists() {
-            log::info!("Found project root: {:?}", ancestor);
-            return Ok(ancestor.to_path_buf());
+/// Locate the Python interpreter to run and the directory to run it from.
+///
+/// Production installs bundle a portable Python runtime alongside the
+/// `backend`/`src` source under Tauri's resource directory (see
+/// `bundle.resources` in tauri.conf.json) -- checked first, since a real
+/// install has no repo checkout or dev `.venv` to fall back to. Dev mode
+/// has no bundled resources, so it falls back to walking up from CWD to
+/// find the repo checkout (identified by `backend/app.py`) and preferring
+/// its `.venv` if present.
+fn resolve_python_runtime(app: &AppHandle) -> Result<PythonRuntime, String> {
+    match app.path().resource_dir() {
+        Ok(resource_dir) => {
+            let bundled_python = resource_dir.join("python-runtime").join("python.exe");
+            let bundled_backend = resource_dir.join("backend").join("app.py");
+            log::info!(
+                "Resource dir: {:?} (python exists: {}, backend exists: {})",
+                resource_dir, bundled_python.exists(), bundled_backend.exists()
+            );
+            if bundled_python.exists() && bundled_backend.exists() {
+                log::info!("Using bundled Python runtime: {:?}", bundled_python);
+                return Ok(PythonRuntime {
+                    python_cmd: bundled_python,
+                    working_dir: resource_dir,
+                });
+            }
+        }
+        Err(e) => {
+            log::info!("No resource dir available ({}), falling back to dev mode", e);
         }
     }
 
-    Err(format!("Could not find project root (backend/app.py) from CWD: {:?}", cwd))
+    let cwd = std::env::current_dir()
+        .map_err(|e| format!("Failed to get current directory: {}", e))?;
+    log::info!("Current working directory: {:?}", cwd);
+
+    // `cargo run` sets CWD to the crate root (frontend/src-tauri), so the
+    // project root is two levels up. Walk ancestors instead of hardcoding a
+    // fixed depth, since that's what actually broke here previously.
+    let project_root = cwd
+        .ancestors()
+        .find(|ancestor| ancestor.join("backend").join("app.py").exists())
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| format!("Could not find project root (backend/app.py) from CWD: {:?}", cwd))?;
+    log::info!("Found project root: {:?}", project_root);
+
+    let venv_python = if cfg!(windows) {
+        project_root.join(".venv").join("Scripts").join("python.exe")
+    } else {
+        project_root.join(".venv").join("bin").join("python")
+    };
+
+    let python_cmd = if venv_python.exists() {
+        log::info!("Using virtual environment Python: {:?}", venv_python);
+        venv_python
+    } else {
+        log::info!("Virtual environment not found, using system Python");
+        PathBuf::from("python")
+    };
+
+    Ok(PythonRuntime {
+        python_cmd,
+        working_dir: project_root,
+    })
 }
 
 pub fn init_backend(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let backend = BackendProcess::new(8000);
     let backend_mutex = Arc::new(Mutex::new(backend));
 
-    // Find project root
-    let project_root = match get_project_root() {
-        Ok(path) => path,
+    // Resolve the Python runtime (bundled in production, dev .venv otherwise)
+    let runtime = match resolve_python_runtime(app) {
+        Ok(runtime) => runtime,
         Err(e) => {
-            log::warn!("Could not find project root: {}. Backend must be started manually.", e);
+            log::warn!("Could not resolve Python runtime: {}. Backend must be started manually.", e);
             log::warn!("Run 'python -m backend.app' from the project root directory.");
-            // Still register state but with a placeholder path
+            // Still register state but with a placeholder runtime
             app.manage(BackendState {
                 backend: backend_mutex,
-                project_root: PathBuf::new(),
+                runtime: PythonRuntime {
+                    python_cmd: PathBuf::from("python"),
+                    working_dir: PathBuf::new(),
+                },
             });
             return Ok(()); // Don't fail startup, just skip backend auto-start
         }
@@ -232,14 +274,14 @@ pub fn init_backend(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Store backend state
     app.manage(BackendState {
         backend: backend_mutex.clone(),
-        project_root: project_root.clone(),
+        runtime: runtime.clone(),
     });
 
     // Auto-start the Python backend
-    log::info!("Auto-starting Python backend from: {:?}", project_root);
+    log::info!("Auto-starting Python backend from: {:?}", runtime.working_dir);
     {
         let mut backend_guard = backend_mutex.lock().unwrap();
-        if let Err(e) = backend_guard.start(project_root) {
+        if let Err(e) = backend_guard.start(&runtime) {
             log::error!("Failed to auto-start backend: {}. Please start manually with 'python -m backend.app'", e);
             return Ok(());
         }

@@ -1,6 +1,5 @@
 import { browser } from "$app/environment";
 import { invalidate } from "$app/navigation";
-import { base } from "$app/paths";
 import { UrlDependency } from "$lib/types/UrlDependency";
 import { getContext, setContext } from "svelte";
 import { type Writable, writable, get } from "svelte/store";
@@ -48,15 +47,7 @@ export function createSettingsStore(initialValue: Omit<SettingsStore, "recentlyS
 		if (browser) {
 			showSavedOnNextSync = true; // User edit, should show "Saved"
 			clearTimeout(timeoutId);
-			timeoutId = setTimeout(async () => {
-				await fetch(`${base}/settings`, {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify(get(baseStore)),
-				});
-
+			timeoutId = setTimeout(() => {
 				invalidate(UrlDependency.ConversationList);
 
 				if (showSavedOnNextSync) {
@@ -75,7 +66,10 @@ export function createSettingsStore(initialValue: Omit<SettingsStore, "recentlyS
 
 				showSavedOnNextSync = false;
 			}, 300);
-			// debounce server calls by 300ms
+			// debounce by 300ms -- settings persist client-side (this store's
+			// subscribers write to localStorage); nothing server-side to sync to
+			// in a Tauri desktop build, which has no Node server to run SvelteKit
+			// +server.ts routes against.
 		}
 	}
 
@@ -103,18 +97,10 @@ export function createSettingsStore(initialValue: Omit<SettingsStore, "recentlyS
 			[key]: newNestedObject,
 		}));
 
-		// Save to server (debounced) - note: we don't set showSavedOnNextSync
+		// Persist (debounced) - note: we don't set showSavedOnNextSync
 		if (browser) {
 			clearTimeout(timeoutId);
-			timeoutId = setTimeout(async () => {
-				await fetch(`${base}/settings`, {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify(get(baseStore)),
-				});
-
+			timeoutId = setTimeout(() => {
 				invalidate(UrlDependency.ConversationList);
 
 				if (showSavedOnNextSync) {
@@ -141,16 +127,6 @@ export function createSettingsStore(initialValue: Omit<SettingsStore, "recentlyS
 		}));
 
 		if (browser) {
-			await fetch(`${base}/settings`, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					...get(baseStore),
-					...settings,
-				}),
-			});
 			invalidate(UrlDependency.ConversationList);
 		}
 	}

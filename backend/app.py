@@ -5,14 +5,16 @@ Main FastAPI application with CORS, lifespan events, and route registration.
 """
 
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.dependencies import cleanup_resources, initialize_resources
+from backend.metrics import metrics_collector
 
 # Configure logging
 logging.basicConfig(
@@ -70,16 +72,51 @@ app = FastAPI(
 
 
 # ========== CORS MIDDLEWARE ==========
-# Allow frontend to communicate with backend
-# Using "*" for development - in production, specify exact origins
+# Orion's frontend only ever runs as one of two origins -- the Vite dev
+# server (`npm run dev`, per frontend/vite.config.ts) or the Tauri webview
+# in production. A wildcard would let any website open in the user's
+# regular browser make requests to a backend that talks to their local
+# Ollama instance and knowledge base, so we allowlist explicitly instead.
+#
+# The production origin is matched by regex rather than one hardcoded
+# string: Tauri v2 serves the app from the `tauri.localhost` host, but the
+# exact scheme (http/https) is platform- and version-specific and wasn't
+# empirically verified against a packaged build in this change. Neither
+# `tauri.localhost` nor the `tauri://` scheme can be registered by a real
+# website, so matching the pattern is as safe as listing every variant.
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",  # Vite dev server (frontend/vite.config.ts devUrl)
+]
+ALLOWED_ORIGIN_REGEX = r"^(https?://tauri\.localhost|tauri://localhost)$"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
-    allow_credentials=False,  # Must be False when allow_origins=["*"]
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=ALLOWED_ORIGIN_REGEX,
+    allow_credentials=False,  # nothing in this app uses cookies/credentialed requests
     allow_methods=["*"],  # Allow all HTTP methods
     allow_headers=["*"],  # Allow all headers
     expose_headers=["X-Total-Count", "X-Page-Size"],  # Custom headers for pagination
 )
+
+
+# ========== METRICS MIDDLEWARE ==========
+@app.middleware("http")
+async def track_request_metrics(request: Request, call_next):
+    """Records request count/latency/errors per route, keyed by route template
+    (e.g. "GET /api/chat/{session_id}") rather than the raw resolved path, so
+    metrics aggregate across different session/file IDs instead of fragmenting."""
+    logger.info(f"CORS SMOKE TEST -- Origin header: {request.headers.get('origin')!r}")
+    start = time.monotonic()
+    response = await call_next(request)
+    latency_ms = (time.monotonic() - start) * 1000
+
+    route = request.scope.get("route")
+    path = route.path if route is not None else request.url.path
+    endpoint = f"{request.method} {path}"
+
+    metrics_collector.record(endpoint=endpoint, latency_ms=latency_ms, is_error=response.status_code >= 500)
+    return response
 
 
 # ========== EXCEPTION HANDLERS ==========
@@ -208,5 +245,12 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,
+        # Without reload_dirs, uvicorn watches the whole CWD -- which is the
+        # repo root (backend.rs spawns this from the project root) -- so any
+        # frontend build (npm run build, npx tauri build) writing to
+        # frontend/dist, frontend/.svelte-kit, or frontend/src-tauri/target
+        # triggers spurious backend restarts. Only backend/ and src/ contain
+        # Python source that should ever trigger a reload.
+        reload_dirs=["backend", "src"],
         log_level="info",
     )
