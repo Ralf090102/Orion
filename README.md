@@ -2,6 +2,8 @@
 
 A fully local RAG (Retrieval-Augmented Generation) assistant with a modern chat interface, voice synthesis, and real-time knowledge base monitoring. Built for privacy-first personal knowledge management.
 
+<img width="1919" height="1028" alt="image" src="https://github.com/user-attachments/assets/4604a344-fabd-40e4-8376-9df9b4dc20fc" />
+
 ![Status](https://img.shields.io/badge/status-active%20development-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
