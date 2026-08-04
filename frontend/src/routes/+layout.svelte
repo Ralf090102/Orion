@@ -344,9 +344,9 @@
 				<span class="mr-2">⚠️</span>
 				Backend not connected.
 				{#if isTauri()}
-					Start it via Settings → Application, or run <code class="bg-amber-600/30 px-1 rounded">python run.py</code> manually.
+					Start it via Settings → Application, or run <code class="bg-amber-600/30 px-1 rounded">python -m backend.app</code> manually.
 				{:else}
-					Please start the backend: <code class="bg-amber-600/30 px-1 rounded">python run.py</code>
+					Please start the backend: <code class="bg-amber-600/30 px-1 rounded">python -m backend.app</code>
 				{/if}
 			</div>
 		{/if}

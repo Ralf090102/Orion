@@ -98,8 +98,8 @@ python -m venv .venv
 # Install dependencies
 pip install -r requirements.txt
 
-# Start the backend
-python run.py
+# Start the backend (FastAPI server)
+python -m backend.app
 ```
 
 ### GPU Acceleration (Recommended)
