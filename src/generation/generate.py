@@ -65,7 +65,12 @@ class AnswerGenerator:
         )
 
     def generate_rag_response(
-        self, query: str, k: int | None = None, include_sources: bool = True
+        self,
+        query: str,
+        k: int | None = None,
+        include_sources: bool = True,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> GenerationResult:
         """
         Generate a RAG response with citations.
@@ -79,6 +84,8 @@ class AnswerGenerator:
             query: User query
             k: Number of contexts to retrieve (uses config default if None)
             include_sources: Include source information in response
+            temperature: LLM temperature override (uses config default if None)
+            max_tokens: LLM max_tokens override (uses config default if None)
 
         Returns:
             GenerationResult with answer and sources
@@ -187,9 +194,9 @@ class AnswerGenerator:
             response = self.llm_client.generate(
                 messages=messages,
                 model=self.config.rag.llm.model,
-                temperature=self.config.rag.llm.temperature,
+                temperature=temperature if temperature is not None else self.config.rag.llm.temperature,
                 top_p=self.config.rag.llm.top_p,
-                max_tokens=self.config.rag.llm.max_tokens,
+                max_tokens=max_tokens if max_tokens is not None else self.config.rag.llm.max_tokens,
             )
             timing.llm_generation_time = time.time() - llm_start
         except Exception as e:

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { processBlocks, processBlocksSync, type BlockToken } from "$lib/utils/marked";
+	import { processBlocks, processBlocksSync, type BlockToken, type SimpleSource } from "$lib/utils/marked";
 	import MarkdownWorker from "$lib/workers/markdownWorker?worker";
 	import MarkdownBlock from "./MarkdownBlock.svelte";
 	import { browser } from "$app/environment";
@@ -9,7 +9,7 @@
 
 	interface Props {
 		content: string;
-		sources?: { title?: string; link: string }[];
+		sources?: SimpleSource[];
 		loading?: boolean;
 	}
 

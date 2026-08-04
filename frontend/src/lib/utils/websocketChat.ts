@@ -3,6 +3,8 @@
  * Connects to FastAPI WebSocket endpoint at /ws/chat/{session_id}
  */
 
+import type { ChatSource } from "$lib/types/Message";
+
 export interface WebSocketChatOptions {
 	sessionId: string;
 	onMessage: (content: string, done: boolean) => void;
@@ -10,6 +12,7 @@ export interface WebSocketChatOptions {
 	onConnect?: () => void;
 	onDisconnect?: () => void;
 	onTitleGenerated?: (title: string) => void;
+	onSources?: (sources: ChatSource[]) => void;
 	backendUrl?: string;
 }
 
@@ -59,7 +62,11 @@ export class WebSocketChat {
 						// Connection acknowledged
 						console.log('[WebSocket] Connected to server');
 					} else if (data.type === 'sources') {
-						// RAG sources received (could be used to display citations)
+						// RAG sources actually retrieved for this response
+						const sources = data.data?.sources;
+						if (Array.isArray(sources)) {
+							this.options.onSources?.(sources);
+						}
 					} else if (data.type === 'metadata') {
 						// Metadata received (processing time, RAG status, etc.)
 					} else if (data.type === 'title') {

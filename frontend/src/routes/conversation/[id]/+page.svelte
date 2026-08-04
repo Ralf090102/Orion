@@ -209,6 +209,27 @@
 					console.warn('[WebSocket] No assistant message to update');
 				}
 			},
+			onSources: (sources) => {
+				// Attach the RAG sources actually retrieved for this response to
+				// the last assistant message, same reactivity pattern as onMessage.
+				const lastIndex = messages.length - 1;
+				const lastMsg = messages[lastIndex];
+
+				if (lastMsg && lastMsg.from === 'assistant') {
+					messageUpdateTrigger++;
+
+					const updatedMessage: Message = {
+						...lastMsg,
+						sources,
+						_updateCount: messageUpdateTrigger
+					} as Message;
+
+					messages = [
+						...messages.slice(0, lastIndex),
+						updatedMessage
+					];
+				}
+			},
 			onTitleGenerated: (title) => {
 				console.log('[WebSocket] Title generated:', title);
 				// Update sidebar via titleUpdate store

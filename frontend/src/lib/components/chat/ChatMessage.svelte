@@ -14,6 +14,7 @@
 	import UploadedFile from "./UploadedFile.svelte";
 
 	import MarkdownRenderer from "./MarkdownRenderer.svelte";
+	import type { SimpleSource } from "$lib/utils/marked";
 	import OpenReasoningResults from "./OpenReasoningResults.svelte";
 	import Alternatives from "./Alternatives.svelte";
 	import MessageAvatar from "./MessageAvatar.svelte";
@@ -369,6 +370,17 @@
 		message.content.replace(THINK_BLOCK_REGEX, "").trim()
 	);
 
+	// RAG sources actually retrieved for this message, mapped to the shape
+	// MarkdownRenderer's inline-citation linking expects. Local documents have
+	// no navigable link -- addInlineCitations falls back to a citation-text
+	// tooltip in that case.
+	let markdownSources: SimpleSource[] = $derived(
+		(message.sources ?? []).map((s) => ({
+			title: s.title ?? undefined,
+			citation: s.citation,
+		}))
+	);
+
 	type Block =
 		| { type: "text"; content: string }
 		| { type: "tool"; uuid: string; updates: MessageToolUpdate[] };
@@ -539,7 +551,7 @@
 									<div
 										class="prose max-w-none dark:prose-invert max-sm:prose-sm prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-base prose-pre:bg-gray-800 prose-img:my-0 prose-img:rounded-lg dark:prose-pre:bg-gray-900"
 									>
-										<MarkdownRenderer content={part} loading={isLast && loading} />
+										<MarkdownRenderer content={part} sources={markdownSources} loading={isLast && loading} />
 									</div>
 								{/if}
 							{/each}
@@ -547,12 +559,29 @@
 							<div
 								class="prose max-w-none dark:prose-invert max-sm:prose-sm prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-base prose-pre:bg-gray-800 prose-img:my-0 prose-img:rounded-lg dark:prose-pre:bg-gray-900"
 							>
-								<MarkdownRenderer content={block.content} loading={isLast && loading} />
+								<MarkdownRenderer content={block.content} sources={markdownSources} loading={isLast && loading} />
 							</div>
 						{/if}
 					{/if}
 				{/each}
 			</div>
+
+			{#if !loading && message.sources?.length}
+				<div
+					data-exclude-from-copy
+					class="flex flex-wrap gap-1.5 border-t border-gray-100 pt-2 text-xs dark:border-gray-700"
+				>
+					<span class="text-gray-400 dark:text-gray-500">Sources:</span>
+					{#each message.sources as source (source.index)}
+						<span
+							class="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+							title={source.content}
+						>
+							{source.citation || source.title || source.source_file || `Source ${source.index}`}
+						</span>
+					{/each}
+				</div>
+			{/if}
 		</div>
 
 		{#if message.routerMetadata || (!loading && message.content)}

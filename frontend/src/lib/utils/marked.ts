@@ -3,10 +3,14 @@ import "katex/dist/contrib/mhchem.mjs";
 import { Marked } from "marked";
 import type { Tokens, TokenizerExtension, RendererExtension } from "marked";
 import { parseDocument } from "htmlparser2";
-// Simple type to replace removed WebSearchSource
-type SimpleSource = {
+// Simple type to replace removed WebSearchSource. `link` is optional since
+// local RAG document sources (PDFs, ingested files) have no navigable URL --
+// they're identified by `citation` text (e.g. "somatosensory.pdf, p.5")
+// instead of a link.
+export type SimpleSource = {
 	title?: string;
-	link: string;
+	link?: string;
+	citation?: string;
 };
 import hljs from "highlight.js/lib/core";
 import type { LanguageFn } from "highlight.js";
@@ -225,19 +229,25 @@ function escapeHTML(content: string) {
 	);
 }
 
-function addInlineCitations(md: string, webSearchSources: SimpleSource[] = []): string {
+function addInlineCitations(md: string, sources: SimpleSource[] = []): string {
 	const linkStyle =
 		"color: rgb(59, 130, 246); text-decoration: none; hover:text-decoration: underline;";
+	const badgeStyle =
+		"color: rgb(59, 130, 246); text-decoration: none; cursor: help; border-bottom: 1px dotted currentColor;";
 	return md.replace(/\[(\d+)\]/g, (match: string) => {
 		const indices: number[] = (match.match(/\d+/g) || []).map(Number);
 		const links: string = indices
 			.map((index: number) => {
 				if (index === 0) return false;
-				const source = webSearchSources[index - 1];
-				if (source) {
+				const source = sources[index - 1];
+				if (!source) return "";
+				if (source.link) {
 					return `<a href="${escapeHTML(source.link)}" target="_blank" rel="noreferrer" style="${linkStyle}">${index}</a>`;
 				}
-				return "";
+				// Local RAG document source, no navigable link -- render as a
+				// non-navigating badge with the citation text as a tooltip.
+				const tooltip = escapeHTML(source.citation || source.title || "");
+				return `<span title="${tooltip}" style="${badgeStyle}">${index}</span>`;
 			})
 			.filter(Boolean)
 			.join(", ");

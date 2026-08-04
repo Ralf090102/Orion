@@ -243,10 +243,18 @@ async def ask_question(
             sources = [
                 Source(
                     index=i + 1,
-                    content=src.get("content", ""),
+                    content=src.get("text", ""),
                     citation=src.get("citation", ""),
                     score=src.get("score", 0.0),
-                    metadata=src.get("metadata", {}),
+                    metadata={
+                        k: v
+                        for k, v in {
+                            "title": src.get("title"),
+                            "source_file": src.get("source_file"),
+                            "page": src.get("page"),
+                        }.items()
+                        if v is not None
+                    },
                 )
                 for i, src in enumerate(result.sources)
             ]
@@ -276,7 +284,7 @@ async def ask_question(
             metadata={
                 "mode": result.mode,
                 "model": config.rag.llm.model,
-                "temperature": request.temperature or config.rag.llm.temperature,
+                "temperature": request.temperature if request.temperature is not None else config.rag.llm.temperature,
                 "k": k,
             },
             timing=timing_breakdown,  # Only included when verbose=True
@@ -392,7 +400,7 @@ async def ask_stream(
                 token_buffer.append(token)
             
             # Override generation settings if provided
-            temperature = request.temperature or config.rag.llm.temperature
+            temperature = request.temperature if request.temperature is not None else config.rag.llm.temperature
             max_tokens = request.max_tokens
             
             # Generate with streaming (follows run.py pattern)
