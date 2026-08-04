@@ -14,7 +14,17 @@
 	import Volume2Icon from "~icons/lucide/volume-2";
 	import LoaderIcon from "~icons/lucide/loader-2";
 	import SettingsIcon from "~icons/lucide/settings";
-	
+
+	interface Props {
+		// Set when there's no active conversation to attach voice mode to
+		// (the empty "/" screen). Handles picking/creating a session and
+		// navigating there instead of toggling state that has nothing to
+		// attach to yet.
+		onStartFromEmpty?: () => void | Promise<void>;
+	}
+
+	let { onStartFromEmpty }: Props = $props();
+
 	// Settings popover state
 	let showSettings = $state(false);
 	let settingsRef: HTMLDivElement | null = null;
@@ -95,6 +105,10 @@
 	function handleClick() {
 		if (status === 'processing' || status === 'speaking') {
 			// Don't toggle during active operation
+			return;
+		}
+		if (onStartFromEmpty) {
+			onStartFromEmpty();
 			return;
 		}
 		toggleConversationMode();

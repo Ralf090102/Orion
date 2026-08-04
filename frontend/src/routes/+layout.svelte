@@ -24,6 +24,7 @@
 	import ConvoModeToggle from "$lib/components/ConvoModeToggle.svelte";
 	import { BACKEND_URL } from '$lib/utils/backendUrl';
 	import { isTauri } from '$lib/tauri';
+	import { initConversationMode, enableConversationMode } from "$lib/stores/conversationMode.svelte";
 
 	let { data = $bindable(), children } = $props();
 	
@@ -117,6 +118,53 @@
 		} catch (err) {
 			console.error('Failed to update session title:', err);
 			$error = String(err);
+		}
+	}
+
+	// Voice mode has no conversation to attach to on the empty "/" screen
+	// (a session only exists once something is sent). Mirrors how text chat
+	// lazily creates a session on first message: jump to the most recently
+	// active session if one exists, otherwise create a fresh one, then start
+	// voice mode there.
+	async function startVoiceModeFromEmpty() {
+		try {
+			let targetId: string;
+
+			if (conversations.length > 0) {
+				const topmost = [...conversations].sort(
+					(a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()
+				)[0];
+				targetId = topmost.id;
+			} else {
+				const response = await fetch(`${BACKEND_URL}/api/chat/sessions`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						metadata: {
+							model: $settings.activeModel || "default",
+							title: "New Chat",
+						},
+					}),
+				});
+
+				if (!response.ok) {
+					throw new Error(`Failed to create session: ${response.statusText}`);
+				}
+
+				const responseData = await response.json();
+				targetId = responseData.session?.session_id || responseData.session_id;
+
+				if (!targetId) {
+					throw new Error("No session ID returned from server");
+				}
+			}
+
+			initConversationMode(targetId);
+			enableConversationMode();
+			await goto(`${base}/conversation/${targetId}`, { invalidateAll: true });
+		} catch (err) {
+			console.error("Failed to start voice mode:", err);
+			$error = (err as Error).message || String(err);
 		}
 	}
 
@@ -296,9 +344,7 @@
 	<!-- Top-right header controls -->
 	<div class="hidden md:absolute md:right-6 md:top-5 md:flex items-center gap-2">
 		<!-- Conversation Mode Toggle -->
-		{#if page.params.id}
-			<ConvoModeToggle />
-		{/if}
+		<ConvoModeToggle onStartFromEmpty={page.params.id ? undefined : startVoiceModeFromEmpty} />
 		
 		<!-- Share Button -->
 		{#if canShare}
