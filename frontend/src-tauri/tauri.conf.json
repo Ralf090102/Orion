@@ -40,7 +40,16 @@
     "resources": {
       "../../python-runtime": "python-runtime",
       "../../backend": "backend",
-      "../../src": "src"
+      "../../src": "src",
+      "../../data/tts": "data/tts"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUyQkVCRDQxQUIwNkMyMTUKUldRVndnYXJRYjIrNHY1ZUlKdGRuQjB5UmdGRm0zOTNNNUdRU2oxL2hKT3ZjcXMvRjNXMUZ0T2IK",
+      "endpoints": [
+        "https://github.com/Ralf090102/Orion/releases/latest/download/latest.json"
+      ]
     }
   }
 }

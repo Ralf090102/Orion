@@ -31,6 +31,16 @@
 	let backendConnected = $state(true);
 	let backendCheckInterval: ReturnType<typeof setInterval> | null = null;
 
+	// App update state
+	let updateReady = $state(false);
+	let restarting = $state(false);
+
+	async function restartToApplyUpdate() {
+		restarting = true;
+		const { relaunch } = await import("@tauri-apps/plugin-process");
+		await relaunch();
+	}
+
 	setContext("publicConfig", data.publicConfig);
 
 	const publicConfig = data.publicConfig;
@@ -174,6 +184,23 @@
 	});
 
 	onMount(async () => {
+		// Check for an app update once on startup. Silent no-op outside Tauri
+		// or when already up to date; installs in the background and just
+		// flags a restart banner rather than force-relaunching mid-session.
+		if (!isTauri()) return;
+		try {
+			const { check } = await import("@tauri-apps/plugin-updater");
+			const update = await check();
+			if (update) {
+				await update.downloadAndInstall();
+				updateReady = true;
+			}
+		} catch (err) {
+			console.error("Update check failed:", err);
+		}
+	});
+
+	onMount(async () => {
 		// Check backend connectivity immediately and periodically
 		await checkBackendHealth();
 		backendCheckInterval = setInterval(checkBackendHealth, 10000); // Check every 10s
@@ -310,18 +337,34 @@
 		<Toast message={currentError} />
 	{/if}
 	
-	<!-- Backend disconnected warning banner -->
-	{#if !backendConnected}
-		<div class="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-black px-4 py-2 text-center text-sm font-medium shadow-lg">
-			<span class="mr-2">⚠️</span>
-			Backend not connected. 
-			{#if isTauri()}
-				Start it via Settings → Application, or run <code class="bg-amber-600/30 px-1 rounded">python run.py</code> manually.
-			{:else}
-				Please start the backend: <code class="bg-amber-600/30 px-1 rounded">python run.py</code>
-			{/if}
-		</div>
-	{/if}
+	<!-- Backend/update status banners -->
+	<div class="fixed top-0 left-0 right-0 z-50 flex flex-col">
+		{#if !backendConnected}
+			<div class="bg-amber-500 text-black px-4 py-2 text-center text-sm font-medium shadow-lg">
+				<span class="mr-2">⚠️</span>
+				Backend not connected.
+				{#if isTauri()}
+					Start it via Settings → Application, or run <code class="bg-amber-600/30 px-1 rounded">python run.py</code> manually.
+				{:else}
+					Please start the backend: <code class="bg-amber-600/30 px-1 rounded">python run.py</code>
+				{/if}
+			</div>
+		{/if}
+		{#if updateReady}
+			<div class="bg-emerald-600 text-white px-4 py-2 text-center text-sm font-medium shadow-lg">
+				<span class="mr-2">⬆️</span>
+				An update has been installed.
+				<button
+					type="button"
+					class="ml-2 underline font-semibold disabled:opacity-60"
+					onclick={restartToApplyUpdate}
+					disabled={restarting}
+				>
+					{restarting ? "Restarting…" : "Restart now"}
+				</button>
+			</div>
+		{/if}
+	</div>
 	
 	{@render children()}
 

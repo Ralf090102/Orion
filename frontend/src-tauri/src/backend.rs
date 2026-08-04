@@ -34,6 +34,9 @@ impl BackendProcess {
         let mut child = Command::new(&runtime.python_cmd)
             .args(["-m", "backend.app"])  // Run as module: python -m backend.app
             .current_dir(&runtime.working_dir)
+            .env("ORION_DATA_DIR", &runtime.data_dir)
+            .env("ORION_VECTORSTORE_PERSIST_DIRECTORY", runtime.data_dir.join("chroma-data"))
+            .env("PYTHONUNBUFFERED", "1")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -129,6 +132,11 @@ impl Drop for BackendProcess {
 pub struct PythonRuntime {
     pub python_cmd: PathBuf,
     pub working_dir: PathBuf,
+    /// Stable, per-user directory (Tauri's `app_data_dir`) for data that must
+    /// survive reinstalls/updates -- chat sessions, the vector store, etc.
+    /// Unlike `working_dir` (the NSIS resource dir in production), this is
+    /// never wiped when the app is reinstalled or auto-updated.
+    pub data_dir: PathBuf,
 }
 
 // Global backend state
@@ -194,6 +202,17 @@ fn wait_for_backend_ready(
 /// find the repo checkout (identified by `backend/app.py`) and preferring
 /// its `.venv` if present.
 fn resolve_python_runtime(app: &AppHandle) -> Result<PythonRuntime, String> {
+    // Resolved the same way in dev and production, so both modes persist
+    // user data (sessions, vector store) to the same stable OS-appropriate
+    // location instead of a path that happens to differ by run mode.
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|e| format!("Failed to create app data dir {:?}: {}", data_dir, e))?;
+    log::info!("App data dir: {:?}", data_dir);
+
     match app.path().resource_dir() {
         Ok(resource_dir) => {
             let bundled_python = resource_dir.join("python-runtime").join("python.exe");
@@ -207,6 +226,7 @@ fn resolve_python_runtime(app: &AppHandle) -> Result<PythonRuntime, String> {
                 return Ok(PythonRuntime {
                     python_cmd: bundled_python,
                     working_dir: resource_dir,
+                    data_dir,
                 });
             }
         }
@@ -246,6 +266,7 @@ fn resolve_python_runtime(app: &AppHandle) -> Result<PythonRuntime, String> {
     Ok(PythonRuntime {
         python_cmd,
         working_dir: project_root,
+        data_dir,
     })
 }
 
@@ -265,6 +286,7 @@ pub fn init_backend(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 runtime: PythonRuntime {
                     python_cmd: PathBuf::from("python"),
                     working_dir: PathBuf::new(),
+                    data_dir: PathBuf::new(),
                 },
             });
             return Ok(()); // Don't fail startup, just skip backend auto-start
