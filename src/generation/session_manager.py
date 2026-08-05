@@ -561,6 +561,46 @@ class SessionManager:
         Returns:
             List of session summaries
         """
+        if self.persist_to_disk and self.db_path and self.db_path.exists():
+            # Query the DB directly rather than trusting self.sessions'
+            # membership. A session can be evicted from the in-memory cache
+            # at any time (update_session_metadata() invalidates it after
+            # every persisted write -- e.g. every auto-generated title) --
+            # get_session() re-populates it lazily on the next lookup, but
+            # nothing calls get_session() for every known ID just to build
+            # a listing. Iterating self.sessions.values() here meant any
+            # session whose cache entry had been evicted silently vanished
+            # from this list (and therefore the sidebar) even though it was
+            # still intact on disk -- found live: creating a second session
+            # made the first (already titled, so already evicted) disappear.
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT session_id, created_at, updated_at, title, message_count, metadata_json
+                    FROM sessions
+                    ORDER BY updated_at DESC
+                """)
+                rows = cursor.fetchall()
+                conn.close()
+
+                results = []
+                for session_id, created_at, updated_at, title, message_count, metadata_json in rows:
+                    metadata = json.loads(metadata_json) if metadata_json else {}
+                    metadata["title"] = title
+                    results.append({
+                        "session_id": session_id,
+                        "created_at": created_at,
+                        "updated_at": updated_at,
+                        "message_count": message_count,
+                        "metadata": metadata,
+                    })
+                return results
+            except Exception as e:
+                logger.error(f"Failed to list sessions from database: {e}")
+                # Fall through to the in-memory listing below rather than
+                # returning nothing.
+
         return [
             {
                 "session_id": session.session_id,

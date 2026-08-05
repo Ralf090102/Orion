@@ -7,6 +7,7 @@ Provides REST API for:
 - Whisper configuration management
 """
 
+import asyncio
 import base64
 import io
 import logging
@@ -147,9 +148,21 @@ async def transcribe_audio(
         
         logger.info(f"Saved to temporary file: {temp_path}")
         
-        # Get Whisper manager and transcribe
+        # Get Whisper manager and transcribe. WhisperManager.transcribe() is
+        # a plain synchronous method -- lazy model load on first call plus
+        # the actual CPU/GPU-bound faster-whisper inference, easily several
+        # seconds. Running it inline here would block this process's single
+        # asyncio event loop for that whole time, so nothing else -- not
+        # even GET /health -- gets serviced until it returns. That's exactly
+        # what caused the frontend's periodic health check (every 10s, 3s
+        # client-side timeout) to time out and show a false "backend not
+        # running" banner during/right after a real transcription, even
+        # though the backend was alive the whole time and the transcription
+        # itself succeeded. Offload to a worker thread so the event loop
+        # stays free to handle other requests concurrently.
         whisper_manager = get_whisper_manager()
-        result = whisper_manager.transcribe(
+        result = await asyncio.to_thread(
+            whisper_manager.transcribe,
             audio_path=temp_path,
             language=language,
         )
