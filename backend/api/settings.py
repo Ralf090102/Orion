@@ -10,6 +10,7 @@ Endpoints for managing system configuration dynamically:
 
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -50,8 +51,21 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Settings persistence file
-SETTINGS_FILE = Path("./data/settings.json")
+
+def _settings_file_path() -> Path:
+    """
+    Where to persist saved settings.
+
+    Same reasoning as `backend/dependencies.py`'s `_session_storage_dir()`:
+    Tauri sets ORION_DATA_DIR to a stable per-user app-data directory that
+    survives reinstalls/updates (unlike the NSIS resource dir, which gets
+    wiped and re-extracted every time). Computed fresh on each call rather
+    than frozen at import time, matching that same helper's pattern. Falls
+    back to "./data/settings.json" when unset, e.g. running the backend
+    directly for API dev or tests outside of Tauri.
+    """
+    data_dir = os.environ.get("ORION_DATA_DIR")
+    return Path(data_dir) / "settings.json" if data_dir else Path("./data/settings.json")
 
 
 # ========== HELPER FUNCTIONS ==========
@@ -581,41 +595,45 @@ async def save_settings(
 ):
     """
     Save current settings to file.
-    
-    Persists settings to ./data/settings.json for loading on startup.
-    
+
+    Persists settings to settings.json (under ORION_DATA_DIR when set,
+    "./data" otherwise -- see `_settings_file_path()`) for loading later.
+
     Args:
         config: Configuration instance (injected)
-        
+
     Returns:
         SettingsSaveResponse with save status
-        
+
     Raises:
         HTTPException: If save operation fails
     """
     try:
-        logger.info(f"Saving settings to {SETTINGS_FILE}")
-        
+        settings_file = _settings_file_path()
+        logger.info(f"Saving settings to {settings_file}")
+
         # Ensure directory exists
-        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Convert config to dict
-        settings_dict = config.model_dump()
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Save the same shape the GET/PUT endpoints already use, not a raw
+        # config.model_dump() -- this is what makes load_settings() below
+        # able to feed the file straight back into SettingsUpdateRequest.
+        settings_dict = _config_to_settings_response(config).model_dump()
         settings_dict["last_updated"] = datetime.now().isoformat()
-        
+
         # Save to file
-        with open(SETTINGS_FILE, "w") as f:
+        with open(settings_file, "w", encoding="utf-8") as f:
             json.dump(settings_dict, f, indent=2, default=str)
-        
+
         logger.info("Settings saved successfully")
-        
+
         return SettingsSaveResponse(
             status="success",
             message="Settings saved successfully",
-            file_path=str(SETTINGS_FILE),
+            file_path=str(settings_file),
             timestamp=datetime.now(),
         )
-        
+
     except Exception as e:
         logger.error(f"Failed to save settings: {e}", exc_info=True)
         raise HTTPException(
@@ -636,46 +654,63 @@ async def load_settings(
     config: OrionConfig = Depends(get_config_dependency),
 ):
     """
-    Load settings from file.
-    
-    Loads settings from ./data/settings.json and applies them.
-    
+    Load settings from file and apply them to the live configuration.
+
+    Loads settings.json (see `_settings_file_path()`) and applies it through
+    the same `_apply_settings_updates()` path PUT /api/settings uses, so a
+    save-then-load round-trip actually changes the running config instead of
+    just reporting success.
+
     Args:
         config: Configuration instance (injected)
-        
+
     Returns:
         SettingsLoadResponse with loaded settings
-        
+
     Raises:
         HTTPException: If file doesn't exist or load fails
     """
     try:
-        if not SETTINGS_FILE.exists():
+        settings_file = _settings_file_path()
+        if not settings_file.exists():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Settings file not found: {SETTINGS_FILE}",
+                detail=f"Settings file not found: {settings_file}",
             )
-        
-        logger.info(f"Loading settings from {SETTINGS_FILE}")
-        
+
+        logger.info(f"Loading settings from {settings_file}")
+
         # Load from file
-        with open(SETTINGS_FILE, "r") as f:
+        with open(settings_file, "r", encoding="utf-8") as f:
             settings_dict = json.load(f)
-        
-        # Apply loaded settings (this is simplified - in production you'd want more robust loading)
-        # For now, we'll just log that settings were loaded
-        logger.info("Settings loaded successfully")
-        
+
+        # Apply loaded settings via the same mechanism PUT /api/settings
+        # uses -- settings_dict has the SettingsResponse shape (see
+        # save_settings() above), which SettingsUpdateRequest's fields
+        # (embedding/chunking/retrieval/reranker/generation/vectorstore/gpu)
+        # accept directly; extra keys like "last_updated" are ignored.
+        updates = SettingsUpdateRequest.model_validate(settings_dict)
+        updated_categories, requires_restart, _warnings = _apply_settings_updates(config, updates)
+
+        if "retriever" in requires_restart:
+            logger.info("Re-initializing retriever after settings load")
+            reset_retriever()
+        if "generator" in requires_restart:
+            logger.info("Re-initializing generator after settings load")
+            reset_generator()
+
+        logger.info(f"Settings loaded and applied successfully: {updated_categories}")
+
         updated_settings = _config_to_settings_response(config)
-        
+
         return SettingsLoadResponse(
             status="success",
-            message="Settings loaded successfully",
-            file_path=str(SETTINGS_FILE),
+            message=f"Settings loaded and applied ({len(updated_categories)} categories)",
+            file_path=str(settings_file),
             loaded_at=datetime.now(),
             settings=updated_settings,
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:

@@ -326,14 +326,26 @@ class ContextPreparer:
             metadata = {}
         else:
             text = context.get("content", context.get("text", ""))
-            final_score = context.get("final_score", 0.0)
+            # Accept both "final_score" (an already-prepared context) and
+            # "score" (SearchResult.to_dict()'s key) -- these used to only
+            # check "final_score", so every real context coming straight out
+            # of retrieval silently lost its score here.
+            final_score = context.get("final_score", context.get("score", 0.0))
 
+            # Metadata may already be flat on the context dict (an
+            # already-prepared context re-entering this function) or nested
+            # under "metadata" (SearchResult.to_dict()'s shape, e.g.
+            # {"metadata": {"source_file": ..., "page": ...}, "score": ...}).
+            # This used to only check the flat form, so source_file/page/
+            # title/date/url came back None for every real retrieval result
+            # -- citations were empty for every source, not just markdown.
+            nested_metadata = context.get("metadata") or {}
             metadata = {
-                "source_file": context.get("source_file"),
-                "page": context.get("page"),
-                "title": context.get("title"),
-                "date": context.get("date"),
-                "url": context.get("url"),
+                "source_file": context.get("source_file") or nested_metadata.get("source_file"),
+                "page": context.get("page") or nested_metadata.get("page"),
+                "title": context.get("title") or nested_metadata.get("title"),
+                "date": context.get("date") or nested_metadata.get("date"),
+                "url": context.get("url") or nested_metadata.get("url"),
             }
 
         # Apply text cleaning
