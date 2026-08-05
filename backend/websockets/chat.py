@@ -392,6 +392,11 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
             # can safely hop back onto the event loop.
             self._loop = asyncio.get_running_loop()
 
+            # Tracks whether any token actually made it to the client, so we
+            # can tell a real (if empty) response apart from a generation
+            # that failed before streaming started -- see the fallback below.
+            tokens_sent = 0
+
             # Define sync callback for token streaming (called by Ollama)
             def stream_token(token: str):
                 """
@@ -400,6 +405,8 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
                 This is called from the sync Ollama streaming callback.
                 Tokens are queued and sent by the async queue processor.
                 """
+                nonlocal tokens_sent
+                tokens_sent += 1
                 self.queue_token(token)
 
             # Generate chat response with streaming. generate_chat_response is
@@ -420,10 +427,25 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
                 voice_mode=voice_mode,
                 **generation_kwargs,
             )
-            
+
             # Stop token streaming (sends end-of-stream signal)
             await self.stop_token_streaming()
-            
+
+            # generate_chat_response() catches LLM failures (e.g. Ollama
+            # errors like "model requires more system memory") internally
+            # and returns a normal GenerationResult with a friendly
+            # result.answer describing what went wrong, rather than raising
+            # -- so the try/except around this whole handler never sees it,
+            # and since the failure happens before Ollama streams anything,
+            # stream_token() above is never called either. Previously that
+            # meant result.answer was silently discarded: the client got no
+            # "token" messages, just "metadata" then "done", leaving the
+            # assistant's message bubble permanently empty with no
+            # indication anything went wrong. Forward it now as a token so
+            # it renders like a normal (if apologetic) response.
+            if tokens_sent == 0 and result.metadata.get("llm_generation_failed") and result.answer:
+                await self.send_message(message_type="token", content=result.answer)
+
             # Send sources if available
             if include_sources and result.rag_triggered and hasattr(result, "sources") and result.sources:
                 sources = [

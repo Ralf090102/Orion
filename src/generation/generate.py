@@ -400,8 +400,38 @@ class AnswerGenerator:
             logger.error(f"LLM generation failed: {e}")
             timing.llm_generation_time = time.time() - llm_start
             timing.total_time = time.time() - overall_start
+            error_answer = f"I encountered an error while generating the response: {str(e)}"
+
+            # This early return used to skip the "store messages in session"
+            # block entirely (it only runs after this try/except, on the
+            # success path below) -- so a failed generation (e.g. a real
+            # Ollama error like "model requires more system memory") left
+            # *no trace at all* in the session: not the user's message, not
+            # even an error note. Reopening the conversation later showed it
+            # as if nothing had ever been sent. Persist both sides here too,
+            # mirroring the success path, so the history is honest about
+            # what was actually asked and that it failed.
+            if session_manager and session_id:
+                session_manager.add_message(
+                    session_id=session_id,
+                    role="user",
+                    content=message,
+                    tokens=len(message) // 4,
+                )
+                session_manager.add_message(
+                    session_id=session_id,
+                    role="assistant",
+                    content=error_answer,
+                    tokens=len(error_answer) // 4,
+                    model=self.config.rag.llm.model,
+                    rag_triggered=False,
+                    processing_time_ms=int(timing.total_time * 1000),
+                    metadata={"error": str(e), "llm_generation_failed": True},
+                )
+                logger.debug(f"Stored failed-generation messages in session {session_id}")
+
             return GenerationResult(
-                answer=f"I encountered an error while generating the response: {str(e)}",
+                answer=error_answer,
                 sources=[],
                 query_type=classification.query_type,
                 mode="chat",
