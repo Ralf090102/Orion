@@ -98,8 +98,8 @@ python -m venv .venv
 # Install dependencies
 pip install -r requirements.txt
 
-# Start the backend
-python run.py
+# Start the backend (FastAPI server)
+python -m backend.app
 ```
 
 ### GPU Acceleration (Recommended)
@@ -147,7 +147,7 @@ On first launch the backend can take up to ~60s to become ready (loading the emb
 
 This downloads the official Python embeddable package into `python-runtime/` (gitignored — it's a build artifact, ~1.8GB with the CPU-only ML stack) and installs `requirements.txt` into it. `tauri.conf.json`'s `bundle.resources` then packages `python-runtime/`, `backend/`, and `src/` alongside the installer; at runtime, `backend.rs` prefers this bundled runtime and only falls back to a dev `.venv` (or system Python) when it isn't present.
 
-**Verified end-to-end 2026-07-30**: `bundle.targets` is currently scoped to `"nsis"` (WiX/MSI has more historical friction with the large, deeply-nested file tree an ML stack produces — untested here, but a one-line config change to add back if wanted). A real release build (`npx tauri build`, no `--debug`/`--no-bundle`) produced `Orion_0.1.0_x64-setup.exe` (~540MB, compressed from the ~1.8-2GB bundled runtime) in about 15 minutes on this machine — installed and launched from the Start Menu, backend came up on the bundled runtime with zero dependency on this repo's `.venv`, and chat worked. Known gap from this pass: TTS doesn't work in the installed build yet (untriaged — tracked as a follow-up, not blocking).
+**Verified end-to-end 2026-08-05**: `bundle.targets` is currently scoped to `"nsis"` (WiX/MSI has more historical friction with the large, deeply-nested file tree an ML stack produces — untested here, but a one-line config change to add back if wanted). A real release build (`npx tauri build`, no `--debug`/`--no-bundle`) produced `Orion_0.1.0_x64-setup.exe` (~626MB, compressed from the ~1.86GB bundled runtime) — roughly 7 minutes to compile the Rust release binary, then another ~15-20 minutes for NSIS to LZMA-compress the resource payload (single-threaded, genuinely slow on this much data but not stuck). Installed silently over a real pre-existing install, launched cleanly (backend healthy in ~5s), and a full RAG round-trip through the actual REST API returned a correctly grounded answer with real citations and sources — the same verification depth as dev mode, not just a smoke test. TTS, sessions, and the vector store all resolve correctly in the installed build (fixed 2026-08-04, re-confirmed 2026-08-05).
 
 ---
 
@@ -249,25 +249,6 @@ Orion/
 ```
 
 Tests use FastAPI's `dependency_overrides` to fake out the ML stack (retriever, generator, session manager), so they run in seconds without needing Ollama or ChromaDB. See `test/conftest.py` for the fixtures.
-
----
-
-## Roadmap
-
-- [x] Core RAG pipeline (embeddings, vector store, hybrid search)
-- [x] Cross-encoder reranking
-- [x] File watchdog with incremental ingestion
-- [x] FastAPI backend with WebSocket support
-- [x] Chat-UI frontend
-- [x] Piper TTS integration
-- [x] Qwen3-TTS voice synthesis
-- [x] Tauri desktop application
-- [x] System tray with quick actions
-- [ ] Auto-update mechanism
-- [x] Automated test suite
-- [x] Production packaging for the desktop backend sidecar (bundled portable Python runtime — see Desktop App section)
-
-See [Tauri Roadmap.md](Tauri%20Roadmap.md) for how the desktop app was built. `Orion_Roadmap.md` is superseded by this checklist and kept for historical reference only.
 
 ---
 

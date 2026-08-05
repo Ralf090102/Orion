@@ -6,6 +6,7 @@ Uses singleton pattern for heavy components (retriever, generator).
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
@@ -17,6 +18,42 @@ from src.retrieval.retriever import OrionRetriever
 from src.utilities.config import OrionConfig, get_config
 
 logger = logging.getLogger(__name__)
+
+
+def _session_storage_dir() -> Optional[Path]:
+    """
+    Where to persist chat sessions.
+
+    Tauri sets ORION_DATA_DIR to a stable per-user app-data directory that
+    survives reinstalls/updates (unlike the NSIS resource dir, which gets
+    wiped and re-extracted every time). Falls back to SessionManager's own
+    "./data/chat-data" default when unset, e.g. running the backend directly
+    for API dev or tests outside of Tauri.
+    """
+    data_dir = os.environ.get("ORION_DATA_DIR")
+    return Path(data_dir) / "chat-data" if data_dir else None
+
+
+def _build_config() -> OrionConfig:
+    """
+    Build the app configuration.
+
+    get_config() defaults to from_env=False and otherwise ignores env vars
+    entirely, so ORION_VECTORSTORE_PERSIST_DIRECTORY (set by Rust alongside
+    ORION_DATA_DIR) would silently do nothing without this explicit override.
+    Same "survive reinstalls" motivation as _session_storage_dir() above.
+
+    The TTS audio cache (config.tts.cache_dir) had the identical CWD-relative
+    default ("./data/tts/cache") and was missed in the original sweep -- it's
+    lower stakes than the vector store (a regenerable cache, not primary
+    data), but still gets wiped on every reinstall/update without this.
+    """
+    config = get_config()
+    data_dir = os.environ.get("ORION_DATA_DIR")
+    if data_dir:
+        config.rag.vectorstore.persist_directory = str(Path(data_dir) / "chroma-data")
+        config.tts.cache_dir = Path(data_dir) / "tts-cache"
+    return config
 
 
 # ========== GLOBAL INSTANCES (SINGLETONS) ==========
@@ -43,12 +80,13 @@ def initialize_resources():
     logger.info("Initializing shared resources...")
     
     # 1. Load configuration
-    _config = get_config()
+    _config = _build_config()
     logger.info(f"✓ Configuration loaded (version: {_config.version})")
     
     # 2. Initialize session manager with persistence
     _session_manager = get_session_manager(
         persist_to_disk=True,
+        storage_dir=_session_storage_dir(),
         session_expiry_days=7,
         auto_cleanup=True,
     )
@@ -107,8 +145,8 @@ def get_config_dependency() -> OrionConfig:
     
     if _config is None:
         # Lazy initialization
-        _config = get_config()
-    
+        _config = _build_config()
+
     return _config
 
 
@@ -128,6 +166,7 @@ def get_session_manager_dependency() -> SessionManager:
         # Lazy initialization
         _session_manager = get_session_manager(
             persist_to_disk=True,
+            storage_dir=_session_storage_dir(),
             session_expiry_days=7,
             auto_cleanup=True,
         )

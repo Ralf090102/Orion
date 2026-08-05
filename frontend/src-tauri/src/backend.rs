@@ -34,6 +34,22 @@ impl BackendProcess {
         let mut child = Command::new(&runtime.python_cmd)
             .args(["-m", "backend.app"])  // Run as module: python -m backend.app
             .current_dir(&runtime.working_dir)
+            .env("ORION_DATA_DIR", &runtime.data_dir)
+            .env("ORION_VECTORSTORE_PERSIST_DIRECTORY", runtime.data_dir.join("chroma-data"))
+            .env("PYTHONUNBUFFERED", "1")
+            // On Windows, Python only gets real UTF-8 stdio automatically when
+            // attached to an interactive console -- piped here (this process
+            // captures stdout/stderr below), it falls back to the legacy system
+            // codepage (cp1252), which can't encode the emoji/checkmarks used
+            // throughout the codebase's logging. That crashed in multiple
+            // independent places (the `logging` module, `rich.Console`, plain
+            // `print()`/`open()`) because each one decides its own encoding --
+            // no single in-code fix covers all of them. PYTHONUTF8=1 (PEP 540)
+            // sets Python's default I/O encoding globally before any of that
+            // code runs, closing the whole bug class in one place instead of
+            // chasing it writer-by-writer. See CLAUDE.md / Eru Polishing.md for
+            // the charmap bug history this replaces piecemeal fixes for.
+            .env("PYTHONUTF8", "1")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -129,6 +145,11 @@ impl Drop for BackendProcess {
 pub struct PythonRuntime {
     pub python_cmd: PathBuf,
     pub working_dir: PathBuf,
+    /// Stable, per-user directory (Tauri's `app_data_dir`) for data that must
+    /// survive reinstalls/updates -- chat sessions, the vector store, etc.
+    /// Unlike `working_dir` (the NSIS resource dir in production), this is
+    /// never wiped when the app is reinstalled or auto-updated.
+    pub data_dir: PathBuf,
 }
 
 // Global backend state
@@ -194,6 +215,17 @@ fn wait_for_backend_ready(
 /// find the repo checkout (identified by `backend/app.py`) and preferring
 /// its `.venv` if present.
 fn resolve_python_runtime(app: &AppHandle) -> Result<PythonRuntime, String> {
+    // Resolved the same way in dev and production, so both modes persist
+    // user data (sessions, vector store) to the same stable OS-appropriate
+    // location instead of a path that happens to differ by run mode.
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|e| format!("Failed to create app data dir {:?}: {}", data_dir, e))?;
+    log::info!("App data dir: {:?}", data_dir);
+
     match app.path().resource_dir() {
         Ok(resource_dir) => {
             let bundled_python = resource_dir.join("python-runtime").join("python.exe");
@@ -207,6 +239,7 @@ fn resolve_python_runtime(app: &AppHandle) -> Result<PythonRuntime, String> {
                 return Ok(PythonRuntime {
                     python_cmd: bundled_python,
                     working_dir: resource_dir,
+                    data_dir,
                 });
             }
         }
@@ -246,6 +279,7 @@ fn resolve_python_runtime(app: &AppHandle) -> Result<PythonRuntime, String> {
     Ok(PythonRuntime {
         python_cmd,
         working_dir: project_root,
+        data_dir,
     })
 }
 
@@ -265,6 +299,7 @@ pub fn init_backend(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 runtime: PythonRuntime {
                     python_cmd: PathBuf::from("python"),
                     working_dir: PathBuf::new(),
+                    data_dir: PathBuf::new(),
                 },
             });
             return Ok(()); // Don't fail startup, just skip backend auto-start
@@ -277,26 +312,36 @@ pub fn init_backend(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         runtime: runtime.clone(),
     });
 
-    // Auto-start the Python backend
-    log::info!("Auto-starting Python backend from: {:?}", runtime.working_dir);
-    {
-        let mut backend_guard = backend_mutex.lock().unwrap();
-        if let Err(e) = backend_guard.start(&runtime) {
-            log::error!("Failed to auto-start backend: {}. Please start manually with 'python -m backend.app'", e);
-            return Ok(());
+    // Start the Python backend and wait for it to become ready on a
+    // background thread, not here. `init_backend` runs inside Tauri's
+    // `.setup()`, which blocks the window's event loop until it returns --
+    // waiting synchronously (up to 120s below) meant the window couldn't
+    // process messages yet, which is exactly what makes Windows report
+    // "Orion is not responding" regardless of how fast the backend actually
+    // starts. The frontend already polls /health and shows its own
+    // "backend not connected" banner, so there's nothing for setup() to wait
+    // on here.
+    thread::spawn(move || {
+        log::info!("Auto-starting Python backend from: {:?}", runtime.working_dir);
+        {
+            let mut backend_guard = backend_mutex.lock().unwrap();
+            if let Err(e) = backend_guard.start(&runtime) {
+                log::error!("Failed to auto-start backend: {}. Please start manually with 'python -m backend.app'", e);
+                return;
+            }
+        } // Release lock
+
+        // Wait for backend to become ready (up to 120 seconds, checking every 500ms).
+        // Cold start loads the embedding + reranker models before Uvicorn binds the
+        // port, which measured ~65s on a cold process — the old 15s budget gave up
+        // long before that, so the UI always reported "backend down" on first launch.
+        log::info!("Waiting for backend to become ready...");
+        if wait_for_backend_ready(backend_mutex.clone(), 8000, 240, 500) {
+            log::info!("Backend is ready!");
+        } else {
+            log::warn!("Backend may not be fully ready. Check the console for Python errors.");
         }
-    } // Release lock
-    
-    // Wait for backend to become ready (up to 120 seconds, checking every 500ms).
-    // Cold start loads the embedding + reranker models before Uvicorn binds the
-    // port, which measured ~65s on a cold process — the old 15s budget gave up
-    // long before that, so the UI always reported "backend down" on first launch.
-    log::info!("Waiting for backend to become ready...");
-    if wait_for_backend_ready(backend_mutex.clone(), 8000, 240, 500) {
-        log::info!("Backend is ready!");
-    } else {
-        log::warn!("Backend may not be fully ready. Check the console for Python errors.");
-    }
+    });
 
     Ok(())
 }

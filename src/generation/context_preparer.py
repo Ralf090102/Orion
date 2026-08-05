@@ -63,24 +63,42 @@ class ContextPreparer:
     def _extract_pdf_title(self, source_file: str) -> str | None:
         """
         Extract a human-readable title from a PDF filename.
-        
+
         Args:
             source_file: Path to PDF file
-            
+
         Returns:
             Formatted title or None if not a PDF
         """
         if not source_file or not source_file.endswith(".pdf"):
             return None
 
+        return self._title_from_filename(source_file)
+
+    def _title_from_filename(self, source_file: str) -> str | None:
+        """
+        Build a human-readable title from a source filename's stem.
+
+        Shared by the PDF title extraction above and the generic fallback
+        in `_format_citation` for any other local file type.
+
+        Args:
+            source_file: Path to source file
+
+        Returns:
+            Formatted title, or None if no filename is available
+        """
         normalized = self._normalize_source_file(source_file)
         filename = Path(normalized).stem
+
+        if not filename:
+            return None
 
         # Replace separators with spaces and capitalize words
         title = filename.replace("-", " ").replace("_", " ")
         title = " ".join(word.capitalize() for word in title.split())
 
-        return title
+        return title or None
 
     def _categorize_source(self, source_file: str) -> str:
         """
@@ -211,6 +229,23 @@ class ContextPreparer:
                 else:
                     citation["citation_text"] = title
 
+        # Generic fallback: source_type "unknown" (markdown, plain text, CSV,
+        # code files, etc. -- anything that isn't PDF/Wikipedia/news_site/
+        # books) previously had no branch above at all, so citation_text
+        # stayed None unconditionally and the frontend fell back to generic
+        # "Source 1"/"Source 2" labels. Also covers the categorized branches
+        # above when their own title lookup came up empty.
+        if citation["citation_text"] is None and source_file:
+            title = self._title_from_filename(source_file)
+            page = context.get("page")
+
+            if title:
+                citation["title"] = title
+                if page is not None:
+                    citation["citation_text"] = f"{title}, p. {page}"
+                else:
+                    citation["citation_text"] = title
+
         return citation
 
     def _remove_repetitive_phrases(self, text: str) -> str:
@@ -291,14 +326,26 @@ class ContextPreparer:
             metadata = {}
         else:
             text = context.get("content", context.get("text", ""))
-            final_score = context.get("final_score", 0.0)
+            # Accept both "final_score" (an already-prepared context) and
+            # "score" (SearchResult.to_dict()'s key) -- these used to only
+            # check "final_score", so every real context coming straight out
+            # of retrieval silently lost its score here.
+            final_score = context.get("final_score", context.get("score", 0.0))
 
+            # Metadata may already be flat on the context dict (an
+            # already-prepared context re-entering this function) or nested
+            # under "metadata" (SearchResult.to_dict()'s shape, e.g.
+            # {"metadata": {"source_file": ..., "page": ...}, "score": ...}).
+            # This used to only check the flat form, so source_file/page/
+            # title/date/url came back None for every real retrieval result
+            # -- citations were empty for every source, not just markdown.
+            nested_metadata = context.get("metadata") or {}
             metadata = {
-                "source_file": context.get("source_file"),
-                "page": context.get("page"),
-                "title": context.get("title"),
-                "date": context.get("date"),
-                "url": context.get("url"),
+                "source_file": context.get("source_file") or nested_metadata.get("source_file"),
+                "page": context.get("page") or nested_metadata.get("page"),
+                "title": context.get("title") or nested_metadata.get("title"),
+                "date": context.get("date") or nested_metadata.get("date"),
+                "url": context.get("url") or nested_metadata.get("url"),
             }
 
         # Apply text cleaning

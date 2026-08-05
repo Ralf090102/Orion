@@ -251,27 +251,35 @@ class ChatWebSocketHandler:
             if not session:
                 return
             
-            # Only generate if no title or title is default "New Chat"
+            # Only generate if no title or title is default "New Chat" -- this
+            # is the sole idempotency guard now (see below for why).
             existing_title = session.metadata.get("title", "")
             if existing_title and existing_title != "New Chat":
                 logger.debug(f"Session {self.session_id} already has title: '{existing_title}'")
                 return
-            
-            # Only generate for the first exchange (2 messages: 1 user + 1 assistant)
-            # Note: We just added both messages, so should have exactly 2
-            message_count = len(session.messages)
-            logger.debug(f"Session {self.session_id} has {message_count} messages")
-            
-            if message_count != 2:
-                logger.debug(f"Skipping title generation - need exactly 2 messages, have {message_count}")
-                return
-            
+
+            # Used to also require message_count == 2 exactly (the first
+            # exchange). That broke as soon as *any* earlier attempt in the
+            # session had already added messages -- e.g. a failed generation
+            # (generate_chat_response()'s except block now persists the
+            # user's message and an error response too, so a real memory-
+            # pressure failure followed by a successful retry leaves 4
+            # messages, never 2 again) -- so the session stayed "New Chat"
+            # forever even after a later reply succeeded. The existing_title
+            # check above is already sufficient idempotency (generate once,
+            # whenever no real title exists yet); message_count added
+            # nothing but fragility.
+            first_user_message = next(
+                (m.get("content") for m in session.messages if m.get("role") == "user"),
+                first_message,
+            )
+
             logger.info(f"Auto-generating title for session {self.session_id}")
-            
+
             # Use LLM to generate a concise title
             title_prompt = f"""Generate a very short, concise title (maximum 6 words) for a conversation that starts with this message:
 
-"{first_message}"
+"{first_user_message}"
 
 Reply with ONLY the title, nothing else. No quotes, no explanations."""
 
@@ -303,7 +311,7 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
             if len(generated_title) > 60:
                 generated_title = generated_title[:57] + "..."
             
-            if generated_title and generated_title != first_message:
+            if generated_title and generated_title != first_user_message:
                 # Update session metadata with generated title
                 self.session_manager.update_session_metadata(
                     self.session_id,
@@ -392,6 +400,11 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
             # can safely hop back onto the event loop.
             self._loop = asyncio.get_running_loop()
 
+            # Tracks whether any token actually made it to the client, so we
+            # can tell a real (if empty) response apart from a generation
+            # that failed before streaming started -- see the fallback below.
+            tokens_sent = 0
+
             # Define sync callback for token streaming (called by Ollama)
             def stream_token(token: str):
                 """
@@ -400,6 +413,8 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
                 This is called from the sync Ollama streaming callback.
                 Tokens are queued and sent by the async queue processor.
                 """
+                nonlocal tokens_sent
+                tokens_sent += 1
                 self.queue_token(token)
 
             # Generate chat response with streaming. generate_chat_response is
@@ -420,18 +435,36 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
                 voice_mode=voice_mode,
                 **generation_kwargs,
             )
-            
+
             # Stop token streaming (sends end-of-stream signal)
             await self.stop_token_streaming()
-            
+
+            # generate_chat_response() catches LLM failures (e.g. Ollama
+            # errors like "model requires more system memory") internally
+            # and returns a normal GenerationResult with a friendly
+            # result.answer describing what went wrong, rather than raising
+            # -- so the try/except around this whole handler never sees it,
+            # and since the failure happens before Ollama streams anything,
+            # stream_token() above is never called either. Previously that
+            # meant result.answer was silently discarded: the client got no
+            # "token" messages, just "metadata" then "done", leaving the
+            # assistant's message bubble permanently empty with no
+            # indication anything went wrong. Forward it now as a token so
+            # it renders like a normal (if apologetic) response.
+            if tokens_sent == 0 and result.metadata.get("llm_generation_failed") and result.answer:
+                await self.send_message(message_type="token", content=result.answer)
+
             # Send sources if available
             if include_sources and result.rag_triggered and hasattr(result, "sources") and result.sources:
                 sources = [
                     {
                         "index": i + 1,
                         "citation": src.get("citation", ""),
-                        "content": src.get("content", "")[:200],  # Truncate
+                        "content": src.get("text", ""),
                         "score": src.get("score", 0.0),
+                        "title": src.get("title"),
+                        "source_file": src.get("source_file"),
+                        "page": src.get("page"),
                     }
                     for i, src in enumerate(result.sources)
                 ]

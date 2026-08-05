@@ -193,17 +193,36 @@ export const api = {
 			};
 		},
 
-		// Text-to-Speech (placeholder)
-		synthesize: (text: string, options?: {
+		// Text-to-Speech
+		// Not routed through fetchAPI(): that helper always calls
+		// response.json(), but /api/speech/synthesize returns raw binary
+		// audio (WAV/MP3/opus), not JSON -- calling .json() on it would
+		// throw a parse error every time. Same direct-fetch pattern as
+		// transcribe() above, and as ChatMessage.svelte's read-aloud and
+		// the Speech settings page's preview buttons already use.
+		synthesize: async (text: string, options?: {
 			language?: string;
 			voice?: string;
 			speed?: number;
 			format?: 'mp3' | 'wav' | 'opus';
-		}) =>
-			fetchAPI<Blob>('/api/speech/synthesize', {
+		}) => {
+			const response = await fetch(`${BACKEND_URL}/api/speech/synthesize`, {
 				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ text, ...options }),
-			}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json().catch(() => null);
+				throw new APIError(
+					errorData?.detail || `HTTP ${response.status}: ${response.statusText}`,
+					response.status,
+					errorData
+				);
+			}
+
+			return await response.blob();
+		},
 
 		// Whisper Configuration
 		getWhisperConfig: () =>

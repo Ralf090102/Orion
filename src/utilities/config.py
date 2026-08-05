@@ -362,7 +362,7 @@ class GenerationConfig(BaseConfig):
     # Chat mode settings
     max_history_messages: int = 10  # Number of conversation turns to keep
     enable_rag_augmentation: bool = True  # Use RAG in chat mode
-    rag_trigger_mode: str = "auto"  # "always", "auto", "manual", "never"
+    rag_trigger_mode: str = "always"  # "always", "auto", "manual", "never"
 
     # Context window management
     max_total_tokens: int = 4096  # Model context limit
@@ -381,7 +381,7 @@ class GenerationConfig(BaseConfig):
             expand_citations=get_env_bool("ORION_GENERATION_EXPAND_CITATIONS", False),
             max_history_messages=get_env_int("ORION_GENERATION_MAX_HISTORY", 10),
             enable_rag_augmentation=get_env_bool("ORION_GENERATION_RAG_AUGMENTATION", True),
-            rag_trigger_mode=get_env_str("ORION_GENERATION_RAG_TRIGGER", "auto"),
+            rag_trigger_mode=get_env_str("ORION_GENERATION_RAG_TRIGGER", "always"),
             max_total_tokens=get_env_int("ORION_GENERATION_MAX_TOKENS", 4096),
             reserve_tokens_for_response=get_env_int("ORION_GENERATION_RESERVE_TOKENS", 1024),
             chars_per_token=get_env_int("ORION_GENERATION_CHARS_PER_TOKEN", 4),

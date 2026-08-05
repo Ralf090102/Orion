@@ -24,12 +24,23 @@
 	import ConvoModeToggle from "$lib/components/ConvoModeToggle.svelte";
 	import { BACKEND_URL } from '$lib/utils/backendUrl';
 	import { isTauri } from '$lib/tauri';
+	import { initConversationMode, enableConversationMode } from "$lib/stores/conversationMode.svelte";
 
 	let { data = $bindable(), children } = $props();
 	
 	// Backend connectivity state
 	let backendConnected = $state(true);
 	let backendCheckInterval: ReturnType<typeof setInterval> | null = null;
+
+	// App update state
+	let updateReady = $state(false);
+	let restarting = $state(false);
+
+	async function restartToApplyUpdate() {
+		restarting = true;
+		const { relaunch } = await import("@tauri-apps/plugin-process");
+		await relaunch();
+	}
 
 	setContext("publicConfig", data.publicConfig);
 
@@ -110,6 +121,53 @@
 		}
 	}
 
+	// Voice mode has no conversation to attach to on the empty "/" screen
+	// (a session only exists once something is sent). Mirrors how text chat
+	// lazily creates a session on first message: jump to the most recently
+	// active session if one exists, otherwise create a fresh one, then start
+	// voice mode there.
+	async function startVoiceModeFromEmpty() {
+		try {
+			let targetId: string;
+
+			if (conversations.length > 0) {
+				const topmost = [...conversations].sort(
+					(a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()
+				)[0];
+				targetId = topmost.id;
+			} else {
+				const response = await fetch(`${BACKEND_URL}/api/chat/sessions`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						metadata: {
+							model: $settings.activeModel || "default",
+							title: "New Chat",
+						},
+					}),
+				});
+
+				if (!response.ok) {
+					throw new Error(`Failed to create session: ${response.statusText}`);
+				}
+
+				const responseData = await response.json();
+				targetId = responseData.session?.session_id || responseData.session_id;
+
+				if (!targetId) {
+					throw new Error("No session ID returned from server");
+				}
+			}
+
+			initConversationMode(targetId);
+			enableConversationMode();
+			await goto(`${base}/conversation/${targetId}`, { invalidateAll: true });
+		} catch (err) {
+			console.error("Failed to start voice mode:", err);
+			$error = (err as Error).message || String(err);
+		}
+	}
+
 	onDestroy(() => {
 		clearTimeout(errorToastTimeout);
 		if (backendCheckInterval) {
@@ -171,6 +229,23 @@
 
 		window.addEventListener("keydown", onKeydown, { capture: true });
 		onDestroy(() => window.removeEventListener("keydown", onKeydown, { capture: true }));
+	});
+
+	onMount(async () => {
+		// Check for an app update once on startup. Silent no-op outside Tauri
+		// or when already up to date; installs in the background and just
+		// flags a restart banner rather than force-relaunching mid-session.
+		if (!isTauri()) return;
+		try {
+			const { check } = await import("@tauri-apps/plugin-updater");
+			const update = await check();
+			if (update) {
+				await update.downloadAndInstall();
+				updateReady = true;
+			}
+		} catch (err) {
+			console.error("Update check failed:", err);
+		}
 	});
 
 	onMount(async () => {
@@ -269,9 +344,7 @@
 	<!-- Top-right header controls -->
 	<div class="hidden md:absolute md:right-6 md:top-5 md:flex items-center gap-2">
 		<!-- Conversation Mode Toggle -->
-		{#if page.params.id}
-			<ConvoModeToggle />
-		{/if}
+		<ConvoModeToggle onStartFromEmpty={page.params.id ? undefined : startVoiceModeFromEmpty} />
 		
 		<!-- Share Button -->
 		{#if canShare}
@@ -310,18 +383,34 @@
 		<Toast message={currentError} />
 	{/if}
 	
-	<!-- Backend disconnected warning banner -->
-	{#if !backendConnected}
-		<div class="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-black px-4 py-2 text-center text-sm font-medium shadow-lg">
-			<span class="mr-2">⚠️</span>
-			Backend not connected. 
-			{#if isTauri()}
-				Start it via Settings → Application, or run <code class="bg-amber-600/30 px-1 rounded">python run.py</code> manually.
-			{:else}
-				Please start the backend: <code class="bg-amber-600/30 px-1 rounded">python run.py</code>
-			{/if}
-		</div>
-	{/if}
+	<!-- Backend/update status banners -->
+	<div class="fixed top-0 left-0 right-0 z-50 flex flex-col">
+		{#if !backendConnected}
+			<div class="bg-amber-500 text-black px-4 py-2 text-center text-sm font-medium shadow-lg">
+				<span class="mr-2">⚠️</span>
+				Backend not connected.
+				{#if isTauri()}
+					Start it via Settings → Application, or run <code class="bg-amber-600/30 px-1 rounded">python -m backend.app</code> manually.
+				{:else}
+					Please start the backend: <code class="bg-amber-600/30 px-1 rounded">python -m backend.app</code>
+				{/if}
+			</div>
+		{/if}
+		{#if updateReady}
+			<div class="bg-emerald-600 text-white px-4 py-2 text-center text-sm font-medium shadow-lg">
+				<span class="mr-2">⬆️</span>
+				An update has been installed.
+				<button
+					type="button"
+					class="ml-2 underline font-semibold disabled:opacity-60"
+					onclick={restartToApplyUpdate}
+					disabled={restarting}
+				>
+					{restarting ? "Restarting…" : "Restart now"}
+				</button>
+			</div>
+		{/if}
+	</div>
 	
 	{@render children()}
 

@@ -8,6 +8,49 @@
 		/>
 		<meta name="theme-color" content="rgb(249, 250, 251)" />
 		<script>
+			// Real globals, not Vite `define` text-substitutions -- see the
+			// removed vite.config.ts workaround for why. SvelteKit's client
+			// runtime reads several __SVELTEKIT_*__ identifiers as bare
+			// top-level module-scope references during hydration
+			// (sveltejs/kit#13249): upstream's own root-cause diagnosis is
+			// that `define` doesn't reliably rewrite these for code
+			// evaluated early in the dev-server's module graph, so they
+			// intermittently stay undeclared and throw ReferenceError.
+			// Confirmed live: fixing only __SVELTEKIT_PAYLOAD__ first just
+			// meant __SVELTEKIT_PATHS_BASE__ crashed on the very next fresh
+			// load instead -- this isn't one flaky identifier, it's the same
+			// unreliable mechanism behind *every* global SvelteKit's own
+			// Vite plugin tries to `define` in dev mode (see
+			// @sveltejs/kit/src/exports/vite/index.js's `define` object,
+			// which sets up exactly these keys automatically -- Orion's own
+			// vite.config.ts never configured most of these itself).
+			//
+			// Declaring the real globals here, before any SvelteKit module
+			// import executes, sidesteps the unreliable substitution
+			// entirely: normal scope-chain lookup finds them on `window`
+			// directly, no compile-time rewrite required. Values below are
+			// SvelteKit's documented defaults for an unconfigured `kit.*`
+			// section (confirmed against svelte.config.js, which sets
+			// neither `paths`, `appDir`, `router`, nor `experimental` --
+			// this app uses every default). __SVELTEKIT_PAYLOAD__ is `{}`
+			// for a different reason: Orion runs with `ssr` disabled (see
+			// src/routes/+layout.ts), so there's no real SSR payload to
+			// hydrate -- an empty object is the actually-correct value,
+			// not a placeholder.
+			window.__SVELTEKIT_PAYLOAD__ = window.__SVELTEKIT_PAYLOAD__ || {};
+			window.__SVELTEKIT_PATHS_BASE__ = window.__SVELTEKIT_PATHS_BASE__ ?? "";
+			window.__SVELTEKIT_PATHS_ASSETS__ = window.__SVELTEKIT_PATHS_ASSETS__ ?? "";
+			window.__SVELTEKIT_PATHS_RELATIVE__ = window.__SVELTEKIT_PATHS_RELATIVE__ ?? true;
+			window.__SVELTEKIT_APP_DIR__ = window.__SVELTEKIT_APP_DIR__ ?? "_app";
+			window.__SVELTEKIT_EMBEDDED__ = window.__SVELTEKIT_EMBEDDED__ ?? false;
+			window.__SVELTEKIT_CLIENT_ROUTING__ = window.__SVELTEKIT_CLIENT_ROUTING__ ?? true;
+			window.__SVELTEKIT_HASH_ROUTING__ = window.__SVELTEKIT_HASH_ROUTING__ ?? false;
+			window.__SVELTEKIT_SERVER_TRACING_ENABLED__ = window.__SVELTEKIT_SERVER_TRACING_ENABLED__ ?? false;
+			window.__SVELTEKIT_EXPERIMENTAL__REMOTE_FUNCTIONS__ =
+				window.__SVELTEKIT_EXPERIMENTAL__REMOTE_FUNCTIONS__ ?? false;
+			window.__SVELTEKIT_FORK_PRELOADS__ = window.__SVELTEKIT_FORK_PRELOADS__ ?? false;
+		</script>
+		<script>
 			(function () {
 				try {
 					var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
