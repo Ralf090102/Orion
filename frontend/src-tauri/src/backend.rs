@@ -37,6 +37,19 @@ impl BackendProcess {
             .env("ORION_DATA_DIR", &runtime.data_dir)
             .env("ORION_VECTORSTORE_PERSIST_DIRECTORY", runtime.data_dir.join("chroma-data"))
             .env("PYTHONUNBUFFERED", "1")
+            // On Windows, Python only gets real UTF-8 stdio automatically when
+            // attached to an interactive console -- piped here (this process
+            // captures stdout/stderr below), it falls back to the legacy system
+            // codepage (cp1252), which can't encode the emoji/checkmarks used
+            // throughout the codebase's logging. That crashed in multiple
+            // independent places (the `logging` module, `rich.Console`, plain
+            // `print()`/`open()`) because each one decides its own encoding --
+            // no single in-code fix covers all of them. PYTHONUTF8=1 (PEP 540)
+            // sets Python's default I/O encoding globally before any of that
+            // code runs, closing the whole bug class in one place instead of
+            // chasing it writer-by-writer. See CLAUDE.md / Eru Polishing.md for
+            // the charmap bug history this replaces piecemeal fixes for.
+            .env("PYTHONUTF8", "1")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
