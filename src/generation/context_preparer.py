@@ -63,24 +63,42 @@ class ContextPreparer:
     def _extract_pdf_title(self, source_file: str) -> str | None:
         """
         Extract a human-readable title from a PDF filename.
-        
+
         Args:
             source_file: Path to PDF file
-            
+
         Returns:
             Formatted title or None if not a PDF
         """
         if not source_file or not source_file.endswith(".pdf"):
             return None
 
+        return self._title_from_filename(source_file)
+
+    def _title_from_filename(self, source_file: str) -> str | None:
+        """
+        Build a human-readable title from a source filename's stem.
+
+        Shared by the PDF title extraction above and the generic fallback
+        in `_format_citation` for any other local file type.
+
+        Args:
+            source_file: Path to source file
+
+        Returns:
+            Formatted title, or None if no filename is available
+        """
         normalized = self._normalize_source_file(source_file)
         filename = Path(normalized).stem
+
+        if not filename:
+            return None
 
         # Replace separators with spaces and capitalize words
         title = filename.replace("-", " ").replace("_", " ")
         title = " ".join(word.capitalize() for word in title.split())
 
-        return title
+        return title or None
 
     def _categorize_source(self, source_file: str) -> str:
         """
@@ -202,6 +220,23 @@ class ContextPreparer:
 
         elif source_type == "books":
             title = context.get("title", "")
+            page = context.get("page")
+
+            if title:
+                citation["title"] = title
+                if page is not None:
+                    citation["citation_text"] = f"{title}, p. {page}"
+                else:
+                    citation["citation_text"] = title
+
+        # Generic fallback: source_type "unknown" (markdown, plain text, CSV,
+        # code files, etc. -- anything that isn't PDF/Wikipedia/news_site/
+        # books) previously had no branch above at all, so citation_text
+        # stayed None unconditionally and the frontend fell back to generic
+        # "Source 1"/"Source 2" labels. Also covers the categorized branches
+        # above when their own title lookup came up empty.
+        if citation["citation_text"] is None and source_file:
+            title = self._title_from_filename(source_file)
             page = context.get("page")
 
             if title:

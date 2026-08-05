@@ -5,6 +5,7 @@ Main FastAPI application with CORS, lifespan events, and route registration.
 """
 
 import logging
+import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,6 +16,19 @@ from fastapi.responses import JSONResponse
 
 from backend.dependencies import cleanup_resources, initialize_resources
 from backend.metrics import metrics_collector
+
+# On Windows, stdout/stderr only get UTF-8 automatically when attached to a
+# real console. When this process is piped instead -- e.g. Tauri's sidecar
+# spawn, or `python -m backend.app > log.txt` -- Python falls back to the
+# system's legacy codepage (often cp1252), which can't encode the emoji/
+# checkmarks used in log messages below and throughout backend/dependencies.py.
+# That crashed startup and request logging (e.g. on /api/ingest) with
+# `UnicodeEncodeError: 'charmap' codec can't encode character ...`. Force
+# UTF-8 here so logging behaves the same regardless of how the process is
+# launched, rather than relying on the caller to set PYTHONIOENCODING.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 # Configure logging
 logging.basicConfig(
