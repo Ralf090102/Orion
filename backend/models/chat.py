@@ -178,6 +178,11 @@ class Message(BaseModel):
         default=False,
         description="Whether conversation mode was active when message was sent",
     )
+    sources: list[dict] = Field(
+        default_factory=list,
+        description="RAG source citations for this message, if any (empty for user messages "
+        "or assistant messages that didn't use retrieval)",
+    )
 
     class Config:
         json_schema_extra = {

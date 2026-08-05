@@ -444,7 +444,22 @@ class SessionManager:
 
         # Generate UUID for message
         message_id = str(uuid.uuid4())
-        
+
+        # Callers (generate_chat_response()) pass AnswerGenerator's
+        # _format_sources() output, which previews source text under "text",
+        # not "content" -- but everything downstream of this in-memory copy
+        # (backend/api/chat.py's GET handler passes msg["sources"] straight
+        # through, and the frontend's ChatSource type reads "content") reads
+        # "content". Normalize once here so the DB round-trip in
+        # _add_message_sources_to_db() (which also has its own fallback,
+        # belt-and-suspenders) and every same-process read see one
+        # consistent shape, instead of only the live first-response path
+        # (which reads result.sources directly, unnormalized) working.
+        normalized_sources = [
+            {**src, "content": src.get("content") or src.get("text", "")}
+            for src in (sources or [])
+        ]
+
         message = {
             "id": message_id,
             "role": role,
@@ -458,7 +473,7 @@ class SessionManager:
             "parent_id": parent_id,
             "is_active": True,
             "version": 1,
-            "sources": sources or [],
+            "sources": normalized_sources,
         }
 
         session.messages.append(message)
@@ -469,8 +484,8 @@ class SessionManager:
             self._update_session_timestamp(session_id)
             
             # Add sources if provided
-            if sources:
-                self._add_message_sources_to_db(message_id, sources)
+            if normalized_sources:
+                self._add_message_sources_to_db(message_id, normalized_sources)
 
         logger.debug(f"Added {role} message {message_id} to session {session_id}")
         return message_id
@@ -580,9 +595,15 @@ class SessionManager:
         if self.persist_to_disk:
             self._update_session_metadata_in_db(session_id, session.metadata)
             self._update_session_timestamp(session_id)
-        
-        # Invalidate cache to ensure fresh data on next access
-        self.invalidate_cache(session_id)
+
+            # Invalidate cache so the next access reloads the just-written
+            # row from disk (guards against drift between the in-memory
+            # object and the DB). Only safe when persistence is on --
+            # otherwise there's nothing to reload from and this would
+            # evict the session from the cache permanently (get_session's
+            # DB-fallback path also requires persist_to_disk), losing the
+            # update we just made in memory.
+            self.invalidate_cache(session_id)
 
         return True
 
@@ -673,15 +694,25 @@ class SessionManager:
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
+
             for rank, source in enumerate(sources):
+                # add_message()'s only real caller (generate_chat_response())
+                # passes AnswerGenerator._format_sources()'s output straight
+                # through, which previews the source under "text" (see
+                # generate.py: `"text": ctx.get("text", "")[:200] + "..."`),
+                # not "content". Reading only "content" here meant this
+                # INSERT always wrote an empty string -- sources rendered
+                # fine on the live first response (which reads straight off
+                # result.sources) but came back with no preview text after
+                # any reload that hit this table. Accept either key so a
+                # caller using either shape still persists correctly.
                 cursor.execute("""
                     INSERT INTO message_sources (message_id, citation, content, score, rank)
                     VALUES (?, ?, ?, ?, ?)
                 """, (
                     message_id,
                     source.get("citation", ""),
-                    source.get("content", ""),
+                    source.get("content") or source.get("text", ""),
                     source.get("score", 0.0),
                     rank
                 ))
@@ -734,20 +765,32 @@ class SessionManager:
             logger.error(f"Failed to update timestamp for session {session_id}: {e}")
 
     def _update_session_metadata_in_db(self, session_id: str, metadata: dict[str, Any]) -> None:
-        """Update session metadata in database."""
+        """Update session metadata in database.
+
+        The sessions table has no "metadata" column (see CREATE TABLE above:
+        it's "title" + "metadata_json") -- this used to UPDATE a column that
+        never existed, so every metadata update (including every
+        auto-generated title) silently failed to persist here, always
+        hitting the except below. _load_session_from_db() reads "title" as
+        its own column (authoritative -- see the "Merge title ... into
+        metadata" step there), so both it and metadata_json need writing,
+        mirroring _save_session_to_db()'s column set.
+        """
         if not self.persist_to_disk:
             return
 
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
+
+            title = metadata.get("title", "New Chat")
+
             cursor.execute("""
-                UPDATE sessions 
-                SET metadata = ?
+                UPDATE sessions
+                SET title = ?, metadata_json = ?
                 WHERE session_id = ?
-            """, (json.dumps(metadata), session_id))
-            
+            """, (title, json.dumps(metadata), session_id))
+
             conn.commit()
             conn.close()
         except Exception as e:
@@ -816,8 +859,14 @@ class SessionManager:
                     ORDER BY rank ASC
                 """, (msg_id,))
                 
+                # index is 1-based to match the "live" WS/REST source
+                # payloads (_add_message_sources_to_db stores rank 0-based,
+                # in insertion/relevance order) -- the frontend's ChatSource
+                # type requires a numeric index, used to link inline [N]
+                # citation markers back to this list.
                 sources = [
                     {
+                        "index": src[3] + 1,
                         "citation": src[0],
                         "content": src[1],
                         "score": src[2],

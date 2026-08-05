@@ -144,14 +144,24 @@
 			}
 
 			const sessionData = await response.json();
-			
-			// Convert backend messages to frontend format
+
+			// Convert backend messages to frontend format. This is the path
+			// that actually runs on every load in practice -- the $effect
+			// below calls loadMessages() on mount AND on every session-id
+			// change (including a full reload), which runs after and
+			// overwrites whatever +page.ts's load() populated `data.messages`
+			// with. It was missing the `sources` mapping that load() already
+			// had, so citations rendered fine on the live first response
+			// (appended directly via the WebSocket's onSources callback,
+			// never touching this function) but were wiped out by this
+			// function on every subsequent load/reload.
 			messages = sessionData.messages?.map((msg: any) => ({
 				id: generateId(),
 				from: msg.role === 'user' ? 'user' : 'assistant',
 				content: msg.content,
 				createdAt: new Date(msg.timestamp),
 				updatedAt: new Date(msg.timestamp),
+				sources: msg.sources?.length ? msg.sources : undefined,
 			})) || [];
 		} catch (err) {
 			console.error('Failed to load messages:', err);
@@ -306,7 +316,14 @@
 			const assistantMessage = createMessage('assistant', '');
 			messages = [...messages, assistantMessage];
 
-			// Send via WebSocket
+			// Deliberately no rag_mode override here. convoModeState.settings.disableRAG
+			// is voice-mode's own "Use RAG" toggle (it also maps to disable_rag,
+			// honored only inside handle_user_message's voice_mode branch) -- it
+			// isn't meant to affect regular text chat at all. For text chat, RAG
+			// on/off is governed globally by the server's RAG Trigger Mode
+			// (Settings -> RAG Pipeline -> rag_trigger_mode). As long as
+			// WebSocketChat.sendMessage() doesn't inject its own default here,
+			// the backend falls through to that config value.
 			wsChat.sendMessage(prompt, base64Files);
 			files = [];
 

@@ -37,6 +37,14 @@ export const load: PageLoad = async ({ params, depends, fetch, parent }) => {
 				content: msg.content,
 				createdAt: new Date(msg.timestamp),
 				updatedAt: new Date(msg.timestamp),
+				// The backend now includes sources on reload (previously
+				// dropped server-side, see backend/api/chat.py's get_session);
+				// map them through so citations survive leaving and
+				// re-entering a conversation, not just the live first
+				// response. undefined (not []) when empty so ChatMessage's
+				// `message.sources?.length` gate behaves the same as a
+				// message that never had sources at all.
+				sources: msg.sources?.length ? msg.sources : undefined,
 			})) || [],
 			conversations: parentData.conversations,
 			models: parentData.models,

@@ -127,7 +127,17 @@ export class WebSocketChat {
 				content: message,
 				data: {
 					files: files || [],
-					rag_mode: options?.rag_mode ?? 'auto',
+					// No 'auto' fallback here -- omit rag_mode entirely unless a
+					// caller explicitly wants to override it (e.g. voice mode
+					// forcing 'never'). backend/websockets/chat.py's
+					// handle_user_message() already does
+					// `options.get("rag_mode") or self.config.rag.generation.rag_trigger_mode`,
+					// so leaving this out lets the server's own RAG Trigger Mode
+					// setting (Settings -> RAG Pipeline) govern regular text chat.
+					// Forcing a default in here would silently shadow that
+					// setting on every single message, which is exactly what
+					// happened before this fix.
+					...(options?.rag_mode !== undefined && { rag_mode: options.rag_mode }),
 					include_sources: options?.include_sources ?? true,
 					voice_mode: options?.voice_mode ?? false,
 					disable_rag: options?.disable_rag ?? false,

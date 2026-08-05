@@ -251,27 +251,35 @@ class ChatWebSocketHandler:
             if not session:
                 return
             
-            # Only generate if no title or title is default "New Chat"
+            # Only generate if no title or title is default "New Chat" -- this
+            # is the sole idempotency guard now (see below for why).
             existing_title = session.metadata.get("title", "")
             if existing_title and existing_title != "New Chat":
                 logger.debug(f"Session {self.session_id} already has title: '{existing_title}'")
                 return
-            
-            # Only generate for the first exchange (2 messages: 1 user + 1 assistant)
-            # Note: We just added both messages, so should have exactly 2
-            message_count = len(session.messages)
-            logger.debug(f"Session {self.session_id} has {message_count} messages")
-            
-            if message_count != 2:
-                logger.debug(f"Skipping title generation - need exactly 2 messages, have {message_count}")
-                return
-            
+
+            # Used to also require message_count == 2 exactly (the first
+            # exchange). That broke as soon as *any* earlier attempt in the
+            # session had already added messages -- e.g. a failed generation
+            # (generate_chat_response()'s except block now persists the
+            # user's message and an error response too, so a real memory-
+            # pressure failure followed by a successful retry leaves 4
+            # messages, never 2 again) -- so the session stayed "New Chat"
+            # forever even after a later reply succeeded. The existing_title
+            # check above is already sufficient idempotency (generate once,
+            # whenever no real title exists yet); message_count added
+            # nothing but fragility.
+            first_user_message = next(
+                (m.get("content") for m in session.messages if m.get("role") == "user"),
+                first_message,
+            )
+
             logger.info(f"Auto-generating title for session {self.session_id}")
-            
+
             # Use LLM to generate a concise title
             title_prompt = f"""Generate a very short, concise title (maximum 6 words) for a conversation that starts with this message:
 
-"{first_message}"
+"{first_user_message}"
 
 Reply with ONLY the title, nothing else. No quotes, no explanations."""
 
@@ -303,7 +311,7 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
             if len(generated_title) > 60:
                 generated_title = generated_title[:57] + "..."
             
-            if generated_title and generated_title != first_message:
+            if generated_title and generated_title != first_user_message:
                 # Update session metadata with generated title
                 self.session_manager.update_session_metadata(
                     self.session_id,
