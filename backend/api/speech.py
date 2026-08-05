@@ -502,10 +502,13 @@ async def switch_tts_engine(
                 logger.info("Auto-enabling Qwen3-TTS after successful validation")
                 config.qwen3.enabled = True
             
-            # Preload Qwen3 model for voice cloning (may take 7-13 seconds on GPU)
+            # Preload Qwen3 model for voice cloning (may take 7-13 seconds on GPU).
+            # Offloaded to a worker thread -- same reasoning as the STT fix:
+            # a multi-second synchronous call here would otherwise freeze the
+            # whole event loop, including GET /health, for that whole window.
             logger.info("Preloading Qwen3 model for voice cloning...")
             try:
-                tts_manager.qwen3_manager.load_model()
+                await asyncio.to_thread(tts_manager.qwen3_manager.load_model)
                 logger.info("Qwen3 model loaded successfully")
             except Exception as e:
                 logger.warning(f"Failed to preload Qwen3 model (will lazy load later): {e}")
@@ -627,32 +630,52 @@ async def synthesize_speech_stream(
     """Stream TTS audio sentence-by-sentence for low-latency playback."""
     import json as _json
     import base64 as _b64
-    import asyncio
 
     if len(request.text) > 50_000:
         raise HTTPException(status_code=400, detail="Text too long (max 50,000 characters)")
     if not request.text or not request.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
+    _SENTINEL = object()
+
+    def _next_chunk(gen):
+        # tts_manager.synthesize_stream() is a plain synchronous generator
+        # -- each next() call does real CPU/GPU-bound synthesis work for one
+        # sentence-chunk. Calling next() directly on the event loop thread
+        # would freeze it for that chunk's synthesis time, same class of
+        # bug as the STT fix, just per-chunk instead of once. Run each
+        # next() on a worker thread instead (see the while-loop below) so
+        # the event loop stays free between chunks; the previous
+        # `await asyncio.sleep(0)` between yields only ever gave the loop a
+        # chance to run *after* a chunk had already finished computing
+        # inline, not during.
+        try:
+            return next(gen)
+        except StopIteration:
+            return _SENTINEL
+
     async def _generate():
         try:
             tts_manager = get_tts_manager()
-            for i, chunk_bytes in enumerate(
-                tts_manager.synthesize_stream(
-                    text=request.text,
-                    voice_id=request.voice,
-                    speed=request.speed,
-                    output_format="wav",  # always WAV per chunk; frontend decodes
-                    language="en",
-                )
-            ):
+            gen = tts_manager.synthesize_stream(
+                text=request.text,
+                voice_id=request.voice,
+                speed=request.speed,
+                output_format="wav",  # always WAV per chunk; frontend decodes
+                language="en",
+            )
+            i = 0
+            while True:
+                chunk_bytes = await asyncio.to_thread(_next_chunk, gen)
+                if chunk_bytes is _SENTINEL:
+                    break
                 line = _json.dumps({
                     "index": i,
                     "audio_b64": _b64.b64encode(chunk_bytes).decode(),
                     "done": False,
                 }) + "\n"
                 yield line.encode()
-                await asyncio.sleep(0)  # yield control to event loop between chunks
+                i += 1
         except Exception as e:
             logger.error(f"TTS stream failed: {e}")
             yield (_json.dumps({"error": str(e), "done": True}) + "\n").encode()
@@ -705,9 +728,14 @@ async def synthesize_speech(
         
         # Get TTS manager
         tts_manager = get_tts_manager()
-        
-        # Synthesize speech
-        audio_bytes = tts_manager.synthesize(
+
+        # Synthesize speech. Offloaded to a worker thread -- same blocking
+        # class as the STT fix (backend/api/speech.py's transcribe_audio()):
+        # tts_manager.synthesize() is a plain synchronous call that can run
+        # for real seconds, which would otherwise freeze the whole event
+        # loop (including GET /health) for that whole window.
+        audio_bytes = await asyncio.to_thread(
+            tts_manager.synthesize,
             text=request.text,
             voice_id=request.voice,
             speed=request.speed,
@@ -1037,9 +1065,11 @@ async def preview_voice(
             )
         
         tts_manager = get_tts_manager()
-        
-        # Synthesize preview
-        audio_bytes = tts_manager.synthesize(
+
+        # Synthesize preview. Offloaded to a worker thread -- see
+        # synthesize_speech() above for why.
+        audio_bytes = await asyncio.to_thread(
+            tts_manager.synthesize,
             text=preview.text,
             voice_id=preview.voice_id,
             speed=1.0,
@@ -1145,8 +1175,12 @@ async def clone_voice(
                     detail="Qwen3-TTS manager failed to initialize. Check logs for details. Ensure qwen-tts package is installed."
                 )
             
-            # This will copy the temp file to permanent storage
-            embedding = qwen3_manager.extract_voice_embedding(
+            # This will copy the temp file to permanent storage. Offloaded
+            # to a worker thread -- extracting a voice embedding runs real
+            # model inference and would otherwise freeze the event loop for
+            # its duration, same as the STT fix.
+            embedding = await asyncio.to_thread(
+                qwen3_manager.extract_voice_embedding,
                 voice_id=voice_name,
                 audio_path=tmp_path,
                 ref_text=ref_text,
@@ -1379,9 +1413,11 @@ async def synthesize_qwen3(
                 detail="Qwen3-TTS not available"
             )
         
-        # Synthesize using Qwen3
+        # Synthesize using Qwen3. Offloaded to a worker thread -- see
+        # synthesize_speech() above for why.
         qwen3_manager = tts_manager.qwen3_manager
-        audio_array, sample_rate = qwen3_manager.synthesize(
+        audio_array, sample_rate = await asyncio.to_thread(
+            qwen3_manager.synthesize,
             text=request.text,
             voice_id=request.voice_id,
             speed=request.speed,
@@ -1632,9 +1668,11 @@ async def generate_voice(
             )
         
         qwen3_manager = tts_manager.qwen3_manager
-        
-        # Generate speech with designed voice
-        audio_data, sample_rate = qwen3_manager.generate_voice(
+
+        # Generate speech with designed voice. Offloaded to a worker thread
+        # -- see synthesize_speech() above for why.
+        audio_data, sample_rate = await asyncio.to_thread(
+            qwen3_manager.generate_voice,
             text=request.text,
             voice_description=request.voice_description,
             language=request.language,
@@ -1728,8 +1766,10 @@ async def design_and_save_voice(
         
         qwen3_manager = tts_manager.qwen3_manager
         
-        # Design and save the voice
-        embedding = qwen3_manager.design_and_save_voice(
+        # Design and save the voice. Offloaded to a worker thread -- see
+        # synthesize_speech() above for why.
+        embedding = await asyncio.to_thread(
+            qwen3_manager.design_and_save_voice,
             voice_id=request.voice_id,
             voice_description=request.voice_description,
             sample_text=request.sample_text,

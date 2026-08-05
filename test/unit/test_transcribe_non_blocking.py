@@ -79,7 +79,12 @@ class TestTranscribeDoesNotBlockEventLoop:
             heartbeat_task.cancel()
 
         assert result.text == "hello world"
-        assert elapsed >= SLEEP_SECONDS
+        # Small tolerance for timer-precision jitter -- time.sleep(0.3) can
+        # occasionally measure a hair under 0.3s via time.monotonic() under
+        # scheduling load; the real signal that the call actually did its
+        # blocking work (rather than being skipped/mocked away) is this
+        # loose lower bound plus the heartbeat-tick check below.
+        assert elapsed >= SLEEP_SECONDS * 0.9
         # With the event loop free, ~0.3s / 0.02s ticks should land well
         # into double digits; require a conservative minimum to avoid
         # flakiness while still failing hard against a truly blocked loop
