@@ -336,8 +336,21 @@ class OrionRetriever:
             return result
 
         except ValueError as e:
-            # User-facing errors (empty knowledge base, invalid search type)
+            # User-facing errors (empty knowledge base, invalid search type).
+            # formatted=False callers (every real caller in this codebase --
+            # run.py's CLI commands, the REST/streaming API endpoints,
+            # AnswerGenerator) want raw SearchResult objects and already
+            # wrap this call in their own try/except, matching this
+            # method's own documented "Raises: ValueError" contract. Only
+            # formatted=True (a plain human-readable string, no exception
+            # handling expected of the caller) gets the friendly string
+            # instead -- returning a string here unconditionally used to
+            # silently break every formatted=False caller, which would get
+            # a str back where a list was expected and crash later trying
+            # to treat its characters as SearchResult objects.
             log_warning(f"Query failed: {e}", config=self.config)
+            if not formatted:
+                raise
             result = f"Error: {e}"
             if return_timing:
                 timing.total_time = time.time() - overall_start
@@ -345,8 +358,10 @@ class OrionRetriever:
             return result
 
         except Exception as e:
-            # System errors
+            # System errors -- same reasoning as above.
             log_error(f"Unexpected error during query: {e}", config=self.config)
+            if not formatted:
+                raise
             result = f"An error occurred while processing your query: {e}"
             if return_timing:
                 timing.total_time = time.time() - overall_start

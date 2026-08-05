@@ -197,13 +197,18 @@ async def get_session(
                 detail=f"Session not found: {session_id}",
             )
         
-        # Convert messages to response model
+        # Convert messages to response model. sources was previously dropped
+        # here even though SessionManager stores and reloads it correctly
+        # (both the in-memory dict and the SQLite message_sources table) --
+        # the frontend never had a chance to render citations after leaving
+        # and re-entering a conversation, only on the live first response.
         messages = [
             Message(
                 role=msg.get("role", "user"),
                 content=msg.get("content", ""),
                 tokens=msg.get("tokens", 0),
                 timestamp=msg.get("timestamp", ""),
+                sources=msg.get("sources") or [],
             )
             for msg in session.messages
         ]
@@ -542,8 +547,11 @@ async def send_message(
                 {
                     "index": i + 1,
                     "citation": src.get("citation", ""),
-                    "content": src.get("content", "")[:200],  # Truncate
+                    "content": src.get("text", ""),
                     "score": src.get("score", 0.0),
+                    "title": src.get("title"),
+                    "source_file": src.get("source_file"),
+                    "page": src.get("page"),
                 }
                 for i, src in enumerate(result.sources)
             ]
@@ -683,7 +691,11 @@ async def send_message_stream(
                     {
                         "index": i + 1,
                         "citation": src.get("citation", ""),
+                        "content": src.get("text", ""),
                         "score": src.get("score", 0.0),
+                        "title": src.get("title"),
+                        "source_file": src.get("source_file"),
+                        "page": src.get("page"),
                     }
                     for i, src in enumerate(result.sources)
                 ]

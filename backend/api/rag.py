@@ -243,10 +243,18 @@ async def ask_question(
             sources = [
                 Source(
                     index=i + 1,
-                    content=src.get("content", ""),
+                    content=src.get("text", ""),
                     citation=src.get("citation", ""),
                     score=src.get("score", 0.0),
-                    metadata=src.get("metadata", {}),
+                    metadata={
+                        k: v
+                        for k, v in {
+                            "title": src.get("title"),
+                            "source_file": src.get("source_file"),
+                            "page": src.get("page"),
+                        }.items()
+                        if v is not None
+                    },
                 )
                 for i, src in enumerate(result.sources)
             ]
@@ -276,7 +284,7 @@ async def ask_question(
             metadata={
                 "mode": result.mode,
                 "model": config.rag.llm.model,
-                "temperature": request.temperature or config.rag.llm.temperature,
+                "temperature": request.temperature if request.temperature is not None else config.rag.llm.temperature,
                 "k": k,
             },
             timing=timing_breakdown,  # Only included when verbose=True
@@ -350,56 +358,65 @@ async def ask_stream(
                 k=k,
                 formatted=False,
             )
-            
+
             # Prepare and send sources first
             if include_sources and results:
                 sources = [
                     {
                         "index": i + 1,
                         "content": r.content[:500],  # Truncate for streaming
-                        "citation": r.metadata.get("source", "Unknown"),
+                        "citation": r.metadata.get("source_file", "Unknown"),
                         "score": r.score,
                         "metadata": r.metadata,
                     }
                     for i, r in enumerate(results)
                 ]
-                
+
                 chunk = StreamChunk(
                     type="sources",
                     content="",
                     data={"sources": sources},
                 )
                 yield f"data: {chunk.model_dump_json()}\n\n"
-            
+
+            # Convert to dicts before handing off to ContextPreparer -- same
+            # conversion generate_rag_response() does in src/generation/
+            # generate.py. SearchResult objects don't have the flat .get()
+            # shape ContextPreparer expects.
+            results_dicts = [r.to_dict() for r in results]
+
             # Prepare context (same as run.py pipeline)
-            prepared_context = generator.context_preparer.prepare_context(
-                results, request.query
+            prepared_contexts = generator.context_preparer.prepare(
+                contexts=results_dicts,
+                return_full=True,
+                include_citations=False,
+                sort_by_score=True,
             )
-            
+
             # Build prompt (same as run.py pipeline)
-            prompt = generator.prompt_builder.build_rag_prompt(
+            prompt_components = generator.prompt_builder.build_rag_prompt(
                 query=request.query,
-                context=prepared_context,
+                contexts=prepared_contexts,
             )
-            
-            # Stream LLM response with token callback
-            from src.core.llm import generate_response
-            
+
             token_buffer = []
-            
+
             def stream_token(token: str):
                 """Collect tokens for streaming."""
                 token_buffer.append(token)
-            
+
             # Override generation settings if provided
-            temperature = request.temperature or config.rag.llm.temperature
+            temperature = request.temperature if request.temperature is not None else config.rag.llm.temperature
             max_tokens = request.max_tokens
-            
-            # Generate with streaming (follows run.py pattern)
-            generate_response(
-                prompt=prompt,
-                config=config,
+
+            # Generate with streaming, via the same OllamaClient the
+            # non-streaming /api/ask path uses (generator.llm_client) --
+            # it takes a real messages list, not a raw prompt string.
+            generator.llm_client.generate(
+                messages=prompt_components.to_messages(),
+                model=config.rag.llm.model,
                 temperature=temperature,
+                top_p=config.rag.llm.top_p,
                 max_tokens=max_tokens,
                 stream=True,
                 on_token=stream_token,

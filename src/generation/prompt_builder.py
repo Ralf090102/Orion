@@ -30,7 +30,6 @@ Remember: This is speech, not text. Think "podcast conversation" not "written es
 """
 
 if TYPE_CHECKING:
-    from src.retrieval.search import SearchResult
     from src.utilities.config import OrionConfig
 
 
@@ -144,12 +143,24 @@ class PromptBuilder:
         citations = []
 
         for idx, result in enumerate(contexts, start=1):
-            # Extract metadata (using dict access)
-            metadata = result.get("metadata", {})
-            source = metadata.get("file_name", metadata.get("source_file", "Unknown"))
-            file_type = metadata.get("file_type", "Unknown")
+            # `contexts` here are already-prepared context dicts from
+            # ContextPreparer.prepare(return_full=True) -- a flat shape
+            # (source_file/title/citation_text/etc. live directly on the
+            # dict), never nested under a "metadata" key. Reading
+            # result.get("metadata", {}) always returned {} here, so every
+            # citation fell back to "Unknown" regardless of the real source.
+            # citation_text is the best human-readable label available --
+            # it's already formatted per source type (title, "title, p. N",
+            # etc.) -- so prefer it over the raw filename.
+            source = (
+                result.get("citation_text")
+                or result.get("title")
+                or result.get("normalized_source_file")
+                or result.get("source_file")
+                or "Unknown"
+            )
             content = result.get("content", result.get("text", ""))
-            score = result.get("score", result.get("final_score", 0.0))
+            score = result.get("final_score", result.get("score", 0.0))
 
             # Format citation
             if include_citations:
@@ -160,9 +171,9 @@ class PromptBuilder:
                 citations.append(
                     {
                         "index": idx,
-                        "source": metadata.get("source_file", "Unknown"),
+                        "source": result.get("normalized_source_file") or result.get("source_file") or "Unknown",
                         "file_name": source,
-                        "file_type": file_type,
+                        "file_type": result.get("source_type", "Unknown"),
                         "score": score,
                     }
                 )
@@ -211,7 +222,7 @@ class PromptBuilder:
     def build_chat_prompt(
         self,
         query: str,
-        contexts: Optional[List["SearchResult"]] = None,
+        contexts: Optional[List[dict]] = None,
         force_rag: bool = False,
         voice_mode: bool = False,
     ) -> PromptComponents:
@@ -220,7 +231,8 @@ class PromptBuilder:
 
         Args:
             query: User's message
-            contexts: Optional retrieved contexts (if RAG triggered)
+            contexts: Optional prepared context dicts (from
+                ContextPreparer.prepare(return_full=True)), if RAG triggered
             force_rag: Force inclusion of RAG context even if contexts is None
             voice_mode: If True, prepend voice conversation instructions for brief, TTS-friendly responses
 
@@ -239,9 +251,18 @@ class PromptBuilder:
             context_parts = []
 
             for result in contexts:
-                # Extract metadata (using dict access)
-                metadata = result.get("metadata", {})
-                source = metadata.get("file_name", metadata.get("source_file", "document"))
+                # Same flat prepared-context shape as build_rag_prompt() above
+                # -- see the comment there. This used to read result["metadata"],
+                # which never exists here, so every chat turn told the LLM
+                # every source was "[From: document]" regardless of which
+                # file it actually came from.
+                source = (
+                    result.get("citation_text")
+                    or result.get("title")
+                    or result.get("normalized_source_file")
+                    or result.get("source_file")
+                    or "document"
+                )
                 content = result.get("content", result.get("text", ""))
                 context_parts.append(f"[From: {source}]\n{content}")
 

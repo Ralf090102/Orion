@@ -3,11 +3,27 @@ import type { MessageUpdate } from "./MessageUpdate";
 import type { Timestamps } from "./Timestamps";
 import type { v4 } from "uuid";
 
+export type ChatSource = {
+	index: number;
+	citation: string;
+	content?: string;
+	score?: number;
+	title?: string | null;
+	source_file?: string | null;
+	page?: number | null;
+};
+
 export type Message = Partial<Timestamps> & {
 	from: "user" | "assistant" | "system";
 	id: ReturnType<typeof v4>;
 	content: string;
 	updates?: MessageUpdate[];
+
+	// RAG sources actually retrieved for this message, sent by the backend
+	// over the "sources" WebSocket event. Always reflects what was really
+	// retrieved -- independent of whether the LLM's own text includes a
+	// [N] citation marker for it.
+	sources?: ChatSource[];
 
 	// Optional server or client-side reasoning content (<think> blocks)
 	reasoning?: string;
