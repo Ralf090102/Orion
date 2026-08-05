@@ -1140,6 +1140,17 @@ async def clone_voice(
             )
             
             from src.utilities.tts.tts_manager import VoiceInfo
+
+            # embedding.embedding is a 1-element array holding the *path* to
+            # the saved reference audio (see extract_voice_embedding()), not
+            # a raw float32 vector -- len(embedding.embedding) is therefore
+            # always 1, so "len(...) * 4 bytes" always came out to 0.0KB
+            # regardless of the real audio size. Stat the actual file instead.
+            reference_audio_path = Path(str(embedding.embedding[0]))
+            audio_size_kb = (
+                reference_audio_path.stat().st_size / 1024 if reference_audio_path.exists() else 0.0
+            )
+
             tts_manager.voice_catalog[voice_name] = VoiceInfo(
                 voice_id=voice_name,
                 name=voice_name.replace("_", " ").title(),
@@ -1147,7 +1158,7 @@ async def clone_voice(
                 gender="neutral",
                 quality="high",
                 description=f"Cloned voice ({embedding.duration:.1f}s sample)",
-                model_size=f"{len(embedding.embedding) * 4 / 1024:.1f}KB",
+                model_size=f"{audio_size_kb:.1f}KB",
                 sample_rate=embedding.sample_rate,
                 engine="qwen3",
                 is_downloaded=True,

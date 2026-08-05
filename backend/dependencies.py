@@ -42,11 +42,17 @@ def _build_config() -> OrionConfig:
     entirely, so ORION_VECTORSTORE_PERSIST_DIRECTORY (set by Rust alongside
     ORION_DATA_DIR) would silently do nothing without this explicit override.
     Same "survive reinstalls" motivation as _session_storage_dir() above.
+
+    The TTS audio cache (config.tts.cache_dir) had the identical CWD-relative
+    default ("./data/tts/cache") and was missed in the original sweep -- it's
+    lower stakes than the vector store (a regenerable cache, not primary
+    data), but still gets wiped on every reinstall/update without this.
     """
     config = get_config()
     data_dir = os.environ.get("ORION_DATA_DIR")
     if data_dir:
         config.rag.vectorstore.persist_directory = str(Path(data_dir) / "chroma-data")
+        config.tts.cache_dir = Path(data_dir) / "tts-cache"
     return config
 
 
