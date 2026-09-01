@@ -13,6 +13,7 @@ Usage:
 """
 
 import logging
+import threading
 from typing import Optional
 
 from src.retrieval.embeddings import EmbeddingManager
@@ -47,31 +48,44 @@ class OrionRetriever:
         self._reranker = None
         self._mmr_searcher = None
         self._initialized = False
+        # Guards _initialize_components() against a race between a real query
+        # (via .query()/.get_status()) and the background warm-up thread
+        # backend/dependencies.py kicks off right after startup (see
+        # warm_up_retriever_background()) -- without this, both could pass
+        # the `if self._initialized` check before either finishes and end up
+        # loading the embedding/reranker models twice concurrently.
+        self._init_lock = threading.Lock()
 
     def _initialize_components(self):
         """Lazy initialization of retrieval components."""
         if self._initialized:
             return
 
-        try:
-            log_info("Initializing Orion retriever components...", config=self.config)
+        with self._init_lock:
+            # Re-check now that we hold the lock: another thread may have
+            # finished initializing while we were waiting for it.
+            if self._initialized:
+                return
 
-            # Initialize core components
-            self._vector_store = ChromaVectorStore(self.config)
-            self._embedding_manager = EmbeddingManager(self.config)
+            try:
+                log_info("Initializing Orion retriever components...", config=self.config)
 
-            # Initialize reranker
-            self._reranker = RerankerManager(self.config)
+                # Initialize core components
+                self._vector_store = ChromaVectorStore(self.config)
+                self._embedding_manager = EmbeddingManager(self.config)
 
-            # Initialize MMR searcher
-            self._mmr_searcher = MMRSearcher(self._embedding_manager, self.config)
+                # Initialize reranker
+                self._reranker = RerankerManager(self.config)
 
-            self._initialized = True
-            log_info("Orion retriever components initialized successfully", config=self.config)
+                # Initialize MMR searcher
+                self._mmr_searcher = MMRSearcher(self._embedding_manager, self.config)
 
-        except Exception as e:
-            log_error(f"Failed to initialize retriever components: {e}", config=self.config)
-            raise
+                self._initialized = True
+                log_info("Orion retriever components initialized successfully", config=self.config)
+
+            except Exception as e:
+                log_error(f"Failed to initialize retriever components: {e}", config=self.config)
+                raise
 
     def _check_knowledge_base(self) -> int:
         """

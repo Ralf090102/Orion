@@ -7,6 +7,7 @@ Uses singleton pattern for heavy components (retriever, generator).
 
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
@@ -109,6 +110,45 @@ def initialize_resources():
         _generator = None
     
     logger.info("✅ All resources initialized")
+
+
+def warm_up_retriever_background() -> None:
+    """
+    Pre-load the retriever's heavy ML components (embedding model, reranker,
+    Chroma client) on a background thread, right after startup.
+
+    initialize_resources() already constructs the `_retriever` singleton
+    itself, but cheaply -- OrionRetriever.__init__ just sets fields to None
+    (see src/retrieval/retriever.py); the actual embedding/reranker/vector-
+    store loading is deferred to _initialize_components(), normally only
+    triggered by the first real query. Calling that here, on a daemon thread,
+    means it usually finishes warming before the user's first query arrives
+    instead of the query itself paying that cost -- without blocking Uvicorn
+    from binding the port or answering /health in the meantime, and without
+    duplicating work: get_retriever_dependency() below returns this same
+    _retriever instance, and _initialize_components() is idempotent/lock-
+    guarded, so a real query racing this thread just waits on the same
+    in-progress load rather than starting a second one.
+
+    Best-effort: any failure here is logged and swallowed, since the normal
+    lazy-load path in get_retriever_dependency() (or the retriever's own
+    _initialize_components() call from .query()) is still there as a
+    fallback -- a failed warm-up just means the first real query pays the
+    cost it would have paid anyway before this existed.
+    """
+
+    def _warm() -> None:
+        if _retriever is None:
+            logger.info("Skipping retriever warm-up: retriever was not constructed at startup")
+            return
+        try:
+            logger.info("Warming up retriever in background (embedding model, reranker, vector store)...")
+            _retriever._initialize_components()
+            logger.info("✅ Retriever warm-up complete")
+        except Exception as e:
+            logger.warning(f"Retriever warm-up failed, will lazy-load on first query instead: {e}")
+
+    threading.Thread(target=_warm, name="orion-retriever-warmup", daemon=True).start()
 
 
 def cleanup_resources():

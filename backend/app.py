@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.dependencies import cleanup_resources, initialize_resources
+from backend.dependencies import cleanup_resources, initialize_resources, warm_up_retriever_background
 from backend.metrics import metrics_collector
 
 # On Windows, stdout/stderr only get UTF-8 automatically when attached to a
@@ -60,7 +60,15 @@ async def lifespan(app: FastAPI):
         # Initialize shared resources
         initialize_resources()
         logger.info("✅ Resources initialized successfully")
-        
+
+        # Start loading the embedding/reranker/vector-store models on a
+        # background thread now, rather than waiting for the first real RAG
+        # query to pay that cost cold. Non-blocking: the app finishes
+        # starting up (and /health responds) immediately either way. See
+        # warm_up_retriever_background()'s docstring for why this is safe to
+        # race against a real query.
+        warm_up_retriever_background()
+
     except Exception as e:
         logger.error(f"❌ Failed to initialize resources: {e}")
         raise
