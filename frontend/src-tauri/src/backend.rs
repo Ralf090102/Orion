@@ -6,10 +6,22 @@ use std::io::{BufRead, BufReader};
 use std::thread;
 use tauri::{AppHandle, Manager};
 
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
+
 #[derive(Debug)]
 pub struct BackendProcess {
     process: Option<Child>,
     port: u16,
+    // Ties the Python child's lifetime to this process at the OS level, so
+    // it dies even if app.exe is force-killed (taskkill /F, a crash, Task
+    // Manager "End task") and no Rust cleanup code -- Drop, the tray "Quit"
+    // handler, none of it -- ever gets to run. See start()'s comment below
+    // for why a Windows Job Object is the only thing that can guarantee
+    // this; `Option` because job-object setup failure shouldn't fail the
+    // whole backend start, just lose this specific safety net.
+    #[cfg(windows)]
+    job: Option<win32job::Job>,
 }
 
 impl BackendProcess {
@@ -17,6 +29,8 @@ impl BackendProcess {
         Self {
             process: None,
             port,
+            #[cfg(windows)]
+            job: None,
         }
     }
 
@@ -64,7 +78,42 @@ impl BackendProcess {
             ))?;
 
         log::info!("Python backend process started with PID: {:?}", child.id());
-        
+
+        // Assign the child to a Windows Job Object with kill-on-job-close,
+        // so it dies automatically if this process is ever force-killed
+        // (taskkill /F, a crash, Task Manager "End task") rather than being
+        // orphaned. Windows has no built-in parent/child process-tree
+        // relationship -- Child::kill() in stop()/Drop below only reaches
+        // this one PID, and force-killing app.exe runs zero Rust code (no
+        // Drop, no exit handler), so without this the Python process (and
+        // in dev mode, reload=True's own worker subchild -- processes join
+        // their parent's job by default) would simply survive. This is a
+        // pure safety net alongside the existing explicit kill() path, not
+        // a replacement for it: a failure here is logged and otherwise
+        // ignored, since the backend runs fine without it, just loses this
+        // specific guarantee.
+        #[cfg(windows)]
+        {
+            let mut info = win32job::ExtendedLimitInfo::new();
+            info.limit_kill_on_job_close();
+            match win32job::Job::create_with_limit_info(&mut info) {
+                Ok(job) => match job.assign_process(child.as_raw_handle() as isize) {
+                    Ok(()) => {
+                        log::info!("Python backend tied to job object (dies with this process, even on force-kill)");
+                        self.job = Some(job);
+                    }
+                    Err(e) => log::warn!(
+                        "Failed to assign Python backend to job object (force-kill orphan protection unavailable): {}",
+                        e
+                    ),
+                },
+                Err(e) => log::warn!(
+                    "Failed to create job object (force-kill orphan protection unavailable): {}",
+                    e
+                ),
+            }
+        }
+
         // Spawn threads to read stdout and stderr
         if let Some(stdout) = child.stdout.take() {
             thread::spawn(move || {
@@ -99,6 +148,14 @@ impl BackendProcess {
                 Ok(_) => log::info!("Python backend stopped successfully"),
                 Err(e) => log::error!("Failed to stop Python backend: {}", e),
             }
+        }
+        // Drop the job object alongside the process it was tied to -- by
+        // this point the process is already killed above, so this is a
+        // no-op in practice, just keeping the two fields' lifetimes in sync
+        // rather than leaving a stale handle around until the next start().
+        #[cfg(windows)]
+        {
+            self.job = None;
         }
     }
 

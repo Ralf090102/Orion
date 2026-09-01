@@ -11,6 +11,7 @@ from rank_bm25 import BM25Okapi
 from src.utilities.utils import (
     ensure_config,
     log_debug,
+    log_error,
     log_info,
     log_warning,
     timer,
@@ -128,10 +129,18 @@ class SemanticSearcher:
 
                     # Apply threshold filter
                     if similarity_score >= similarity_threshold:
-                        # Get embedding if available from query results
+                        # Get embedding if available from query results. ChromaDB
+                        # returns these as raw numpy.ndarray, not the plain
+                        # list[float] that embeddings.py's own encode_single()/
+                        # encode_batch() always normalize to before returning --
+                        # normalize here too so SearchResult.embedding has one
+                        # consistent type everywhere downstream. Without this, a
+                        # bare truthiness check on the ndarray later (e.g.
+                        # MMRSearcher.search()) raises "The truth value of an
+                        # array with more than one element is ambiguous".
                         result_embedding = None
                         if results.get("embeddings") and results["embeddings"][0]:
-                            result_embedding = results["embeddings"][0][i]
+                            result_embedding = list(results["embeddings"][0][i])
 
                         search_result = SearchResult(
                             document_id=results["ids"][0][i],
@@ -754,11 +763,17 @@ class MMRSearcher:
                 else:
                     candidate_embeddings.append(None)
 
-            # Filter out candidates without embeddings
+            # Filter out candidates without embeddings. `embedding` can be a
+            # plain list[float] (from encode_batch above) or a numpy.ndarray
+            # (from SearchResult.embedding, if it came from a cached semantic
+            # search result) -- a bare `if embedding:` raises "The truth value
+            # of an array with more than one element is ambiguous" for the
+            # latter, so check presence/emptiness explicitly instead (works
+            # identically for both types).
             valid_candidates = []
             valid_embeddings = []
             for result, embedding in zip(candidate_results, candidate_embeddings):
-                if embedding:
+                if embedding is not None and len(embedding) > 0:
                     valid_candidates.append(result)
                     valid_embeddings.append(embedding)
 
@@ -782,7 +797,12 @@ class MMRSearcher:
             return selected_results
 
         except Exception as e:
-            log_warning(f"MMR search failed: {e}", config=self.config)
+            # Graceful degradation is intentional (still return the pre-MMR
+            # candidates rather than failing the whole query), but this means
+            # MMR diversification silently gets skipped -- log at error level
+            # rather than warning so a real failure here doesn't blend into
+            # routine warning-level noise.
+            log_error(f"MMR search failed, returning un-diversified candidates: {e}", config=self.config)
             return candidate_results[:k]
 
     def _mmr_selection(

@@ -29,3 +29,12 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
+
+[target.'cfg(windows)'.dependencies]
+# Ties the spawned Python backend's lifetime to this process at the OS level
+# (Windows Job Object, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE) -- without this,
+# force-killing app.exe (taskkill /F, a crash, Task Manager "End task")
+# orphans the Python child, since Windows has no parent/child process-tree
+# relationship on its own and no Rust cleanup code gets to run when the
+# process is terminated externally. See backend.rs's BackendProcess::start().
+win32job = "2"
