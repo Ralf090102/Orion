@@ -250,21 +250,33 @@ async def startup_message():
 
 
 if __name__ == "__main__":
+    import os
+
     import uvicorn
-    
+
+    # backend.rs sets ORION_PACKAGED=1 when launching the bundled Python
+    # runtime from a packaged/installed build, and 0 (or unset, for anyone
+    # running `python -m backend.app` directly) in dev. Uvicorn's reload=True
+    # spawns an extra file-watcher supervisor process that's pure overhead in
+    # a shipped install -- nobody edits backend/src on an end user's machine
+    # -- and adds avoidable startup latency and file-scan surface.
+    is_packaged = os.environ.get("ORION_PACKAGED") == "1"
+    reload = not is_packaged
+
     # Run with: python -m backend.app
     # Or: uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
     uvicorn.run(
         "backend.app:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,
+        reload=reload,
         # Without reload_dirs, uvicorn watches the whole CWD -- which is the
         # repo root (backend.rs spawns this from the project root) -- so any
         # frontend build (npm run build, npx tauri build) writing to
         # frontend/dist, frontend/.svelte-kit, or frontend/src-tauri/target
         # triggers spurious backend restarts. Only backend/ and src/ contain
-        # Python source that should ever trigger a reload.
-        reload_dirs=["backend", "src"],
+        # Python source that should ever trigger a reload. Only meaningful
+        # when reload=True, so omitted entirely in packaged builds.
+        **({"reload_dirs": ["backend", "src"]} if reload else {}),
         log_level="info",
     )

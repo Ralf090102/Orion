@@ -10,9 +10,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
-import torch
-from sentence_transformers import SentenceTransformer
 
+# torch / sentence-transformers are imported lazily (inside the methods that
+# actually use them, not here) so that importing this module -- which happens
+# unconditionally as part of backend/app.py's startup import chain -- doesn't
+# pull in the whole ML stack before Uvicorn ever binds the port. See
+# src/retrieval/reranker.py and src/retrieval/vector_store.py for the same
+# pattern applied to their own heavy dependencies.
 from src.utilities.utils import (
     ensure_config,
     log_debug,
@@ -108,6 +112,8 @@ class EmbeddingManager:
 
     def _get_device(self) -> str:
         """Determine device for embedding computation."""
+        import torch
+
         if self.config.gpu.enabled and torch.cuda.is_available():
             device = "cuda"
             log_info(f"Using GPU for embeddings: {torch.cuda.get_device_name()}", config=self.config)
@@ -152,6 +158,8 @@ class EmbeddingManager:
 
     def _load_model(self) -> None:
         """Load the embedding model based on configuration."""
+        from sentence_transformers import SentenceTransformer
+
         model_name = self.config.rag.embedding.model
 
         try:
@@ -240,6 +248,8 @@ class EmbeddingManager:
             return cached_embedding
 
         try:
+            import torch
+
             # Generate embedding using sentence-transformers
             with torch.no_grad():
                 embedding = self.model.encode(
@@ -287,6 +297,8 @@ class EmbeddingManager:
             return [[] for _ in texts]
 
         try:
+            import torch
+
             batch_size = self.config.rag.embedding.batch_size
             all_embeddings = []
 

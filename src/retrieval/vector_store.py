@@ -10,9 +10,12 @@ from datetime import datetime
 import hashlib
 import uuid
 
-import chromadb
-from chromadb.config import Settings
-
+# chromadb is imported lazily inside _initialize_client(), its sole use site,
+# rather than here -- this module is on backend/app.py's unconditional
+# startup import chain, and importing chromadb there (it pulls in
+# onnxruntime, opentelemetry, etc.) blocks Uvicorn from binding the port
+# until the whole ML stack has loaded. See src/retrieval/embeddings.py and
+# src/retrieval/reranker.py for the same pattern.
 from src.utilities.utils import (
     ensure_config,
     log_debug,
@@ -138,6 +141,9 @@ class ChromaVectorStore:
     def _initialize_client(self) -> None:
         """Initialize Chroma client and ensure persistence directory exists."""
         try:
+            import chromadb
+            from chromadb.config import Settings
+
             # Create persistence directory if it doesn't exist
             persist_dir = Path(self.vectorstore_config.persist_directory)
             persist_dir.mkdir(parents=True, exist_ok=True)

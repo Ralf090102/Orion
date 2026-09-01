@@ -5,15 +5,24 @@ Provides document reranking using cross-encoder models for improved
 relevance ranking after initial retrieval.
 """
 
+# `from __future__ import annotations` makes every annotation in this file a
+# lazy string (including the `Optional[CrossEncoder]` local-variable
+# annotation in RerankerManager.__init__ below), so torch / CrossEncoder can
+# be imported lazily inside the methods that actually use them instead of at
+# module level -- this module is on backend/app.py's unconditional startup
+# import chain, and importing torch there blocks Uvicorn from binding the
+# port until the whole ML stack has loaded. See src/retrieval/embeddings.py
+# and src/retrieval/vector_store.py for the same pattern.
+from __future__ import annotations
+
 import logging
 from typing import TYPE_CHECKING, Any, Optional
-
-import torch
-from sentence_transformers import CrossEncoder
 
 from src.utilities.utils import ensure_config, log_debug, log_error, log_info, log_warning, timer
 
 if TYPE_CHECKING:
+    from sentence_transformers import CrossEncoder
+
     from src.utilities.config import OrionConfig
 
 logger = logging.getLogger(__name__)
@@ -51,6 +60,8 @@ class RerankerManager:
         Args:
             config: Orion configuration. If None, uses default configuration.
         """
+        import torch
+
         self.config = ensure_config(config)
         self.reranker_config = self.config.rag.reranker
         self.model: Optional[CrossEncoder] = None
@@ -63,6 +74,8 @@ class RerankerManager:
         """Initialize the reranker model if not already loaded."""
         if self.model is None:
             try:
+                from sentence_transformers import CrossEncoder
+
                 log_info(f"Loading cross-encoder model: {self.reranker_config.model}", config=self.config)
                 self.model = CrossEncoder(self.reranker_config.model, device=self._device, max_length=512)
                 log_info("Cross-encoder model loaded successfully", config=self.config)

@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ERUDITION_VAULT_PATH=\"D:\\GitHub\\Orion\" \"C:/Program Files/Python313/python\" -m erudition.server hook session-start"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ERUDITION_VAULT_PATH=\"D:\\GitHub\\Orion\" ERUDITION_LOCAL_MEMORY_DIR=\"C:\\Users\\ralfh\\.claude\\projects\\D--GitHub-Orion\\memory\" \"C:/Program Files/Python313/python\" -m erudition.server hook stop"
+          }
+        ]
+      }
+    ]
+  }
+}

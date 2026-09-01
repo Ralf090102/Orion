@@ -13,6 +13,17 @@ The ingestion pipeline orchestrates the entire process from raw documents
 to searchable vector embeddings stored in ChromaDB.
 """
 
+# `from __future__ import annotations` makes every annotation in this file a
+# lazy string, so `fitz`, `Document` (langchain_core), and
+# `RecursiveCharacterTextSplitter` can be imported lazily inside the specific
+# loader/chunker methods that actually use them instead of at module level.
+# This module is on backend/app.py's unconditional startup import chain (via
+# backend/api/ingestion.py and backend/api/health.py), and importing PyMuPDF
+# and the langchain stack there blocks Uvicorn from binding the port until
+# they've all loaded. See src/retrieval/embeddings.py, reranker.py, and
+# vector_store.py for the same pattern applied to torch/chromadb.
+from __future__ import annotations
+
 import hashlib
 import json
 import re
@@ -20,13 +31,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from difflib import SequenceMatcher
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-import fitz  # PyMuPDF
-from langchain_core.documents import Document
-from langchain_community.document_loaders import TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from tqdm import tqdm
 
 # Local imports
@@ -36,6 +44,8 @@ from src.utilities.config import ChunkerType
 from src.utilities.utils import ensure_config, log_debug, log_error, log_info, log_warning
 
 if TYPE_CHECKING:
+    from langchain_core.documents import Document
+
     from src.utilities.config import OrionConfig
 
 
@@ -48,6 +58,9 @@ class PyMuPDFLoader:
 
     def load(self) -> list[Document]:
         """Load PDF using PyMuPDF with better text extraction"""
+        import fitz  # PyMuPDF
+        from langchain_core.documents import Document
+
         documents = []
 
         try:
@@ -97,6 +110,7 @@ class DOCXLoader:
         """Load DOCX file"""
         try:
             import docx
+            from langchain_core.documents import Document
 
             doc = docx.Document(self.file_path)
             text = "\n".join([paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()])
@@ -126,6 +140,8 @@ class JSONLoader:
     def load(self) -> list[Document]:
         """Load JSON file"""
         try:
+            from langchain_core.documents import Document
+
             with open(self.file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
@@ -156,6 +172,8 @@ class MarkdownLoader:
     def load(self) -> list[Document]:
         """Load Markdown file"""
         try:
+            from langchain_core.documents import Document
+
             with open(self.file_path, "r", encoding="utf-8") as f:
                 text = f.read()
 
@@ -179,6 +197,8 @@ class CSVLoader:
         """Load CSV file"""
         try:
             import csv
+
+            from langchain_core.documents import Document
 
             with open(self.file_path, "r", encoding="utf-8") as f:
                 reader = csv.reader(f)
@@ -206,8 +226,9 @@ class PPTXLoader:
     def load(self) -> list[Document]:
         """Load PPTX file and extract text from slides"""
         try:
+            from langchain_core.documents import Document
             from pptx import Presentation
-            
+
             prs = Presentation(self.file_path)
             all_text = []
             
@@ -248,8 +269,9 @@ class XLSXLoader:
     def load(self) -> list[Document]:
         """Load XLSX file and extract data from sheets"""
         try:
+            from langchain_core.documents import Document
             from openpyxl import load_workbook
-            
+
             wb = load_workbook(self.file_path, data_only=True)
             all_text = []
             
@@ -294,8 +316,9 @@ class RTFLoader:
     def load(self) -> list[Document]:
         """Load RTF file"""
         try:
+            from langchain_core.documents import Document
             from striprtf.striprtf import rtf_to_text
-            
+
             with open(self.file_path, "r", encoding="utf-8", errors="ignore") as f:
                 rtf_content = f.read()
             
@@ -360,40 +383,53 @@ SUPPORTED_EXTENSIONS = {
     ".toml": "TOML Config",
 }
 
-DOCUMENT_LOADERS = {
-    ".pdf": PyMuPDFLoader,
-    ".docx": DOCXLoader,
-    ".pptx": PPTXLoader,
-    ".xlsx": XLSXLoader,
-    ".rtf": RTFLoader,
-    ".txt": TextLoader,
-    ".md": MarkdownLoader,
-    ".json": JSONLoader,
-    ".csv": CSVLoader,
-    # Code files use TextLoader
-    ".py": TextLoader,
-    ".js": TextLoader,
-    ".ts": TextLoader,
-    ".java": TextLoader,
-    ".cpp": TextLoader,
-    ".c": TextLoader,
-    ".html": TextLoader,
-    ".css": TextLoader,
-    ".yaml": TextLoader,
-    ".yml": TextLoader,
-    ".xml": TextLoader,
-    ".ini": TextLoader,
-    ".toml": TextLoader,
-    ".jsx": TextLoader,
-    ".tsx": TextLoader,
-    ".vue": TextLoader,
-    ".go": TextLoader,
-    ".rs": TextLoader,
-    ".rb": TextLoader,
-    ".php": TextLoader,
-    ".swift": TextLoader,
-    ".kt": TextLoader,
-}
+@lru_cache(maxsize=1)
+def _document_loaders() -> dict[str, Any]:
+    """
+    Lazily build the extension -> loader-class mapping.
+
+    Deferred (rather than a module-level dict, as this used to be) so that
+    importing `TextLoader` from `langchain_community` -- part of the heavy
+    startup import chain -- only happens on first actual use, not whenever
+    this module is imported. Cached after the first call since the mapping
+    never changes at runtime.
+    """
+    from langchain_community.document_loaders import TextLoader
+
+    return {
+        ".pdf": PyMuPDFLoader,
+        ".docx": DOCXLoader,
+        ".pptx": PPTXLoader,
+        ".xlsx": XLSXLoader,
+        ".rtf": RTFLoader,
+        ".txt": TextLoader,
+        ".md": MarkdownLoader,
+        ".json": JSONLoader,
+        ".csv": CSVLoader,
+        # Code files use TextLoader
+        ".py": TextLoader,
+        ".js": TextLoader,
+        ".ts": TextLoader,
+        ".java": TextLoader,
+        ".cpp": TextLoader,
+        ".c": TextLoader,
+        ".html": TextLoader,
+        ".css": TextLoader,
+        ".yaml": TextLoader,
+        ".yml": TextLoader,
+        ".xml": TextLoader,
+        ".ini": TextLoader,
+        ".toml": TextLoader,
+        ".jsx": TextLoader,
+        ".tsx": TextLoader,
+        ".vue": TextLoader,
+        ".go": TextLoader,
+        ".rs": TextLoader,
+        ".rb": TextLoader,
+        ".php": TextLoader,
+        ".swift": TextLoader,
+        ".kt": TextLoader,
+    }
 
 
 # ========== DATA STRUCTURES ==========
@@ -498,7 +534,7 @@ class DocumentProcessor:
         if file_ext not in SUPPORTED_EXTENSIONS:
             raise ValueError(f"Unsupported file type: {file_ext}. Supported: {list(SUPPORTED_EXTENSIONS.keys())}")
 
-        loader_class = DOCUMENT_LOADERS.get(file_ext)
+        loader_class = _document_loaders().get(file_ext)
         if not loader_class:
             raise ValueError(f"No loader available for {file_ext}")
 
@@ -756,6 +792,9 @@ class TextChunker:
 
     def _chunk_recursive(self, documents: list[Document]) -> list[Document]:
         """Chunk using recursive character splitter"""
+        from langchain_core.documents import Document
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunking_config.chunk_size,
             chunk_overlap=self.chunking_config.chunk_overlap,

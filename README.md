@@ -139,7 +139,7 @@ npx tauri dev    # dev mode, hot-reloads frontend + Rust
 npx tauri build  # production installer
 ```
 
-On first launch the backend can take up to ~60s to become ready (loading the embedding + reranker models) — this is expected, not a hang.
+App launch itself should be fast (the backend just needs to bind its port) — it's the *first RAG query* that pays a one-time cost loading the embedding + reranker models, not app startup. (Prior to a 2026-09 fix, `backend/app.py` eagerly imported the entire ML stack — torch, sentence-transformers, chromadb — at module load, before the backend could even bind its port; that's what used to make launch itself slow. Those imports are now deferred to first actual use.)
 
 **Building a distributable installer** (i.e. for a machine without this repo's `.venv`): `npx tauri build` needs a bundled, self-contained Python runtime — it doesn't ship one by default. Generate it once (or whenever `requirements.txt` changes) with:
 
@@ -150,6 +150,8 @@ On first launch the backend can take up to ~60s to become ready (loading the emb
 This downloads the official Python embeddable package into `python-runtime/` (gitignored — it's a build artifact, ~1.8GB with the CPU-only ML stack) and installs `requirements.txt` into it. `tauri.conf.json`'s `bundle.resources` then packages `python-runtime/`, `backend/`, and `src/` alongside the installer; at runtime, `backend.rs` prefers this bundled runtime and only falls back to a dev `.venv` (or system Python) when it isn't present.
 
 **Verified end-to-end 2026-08-05**: `bundle.targets` is currently scoped to `"nsis"` (WiX/MSI has more historical friction with the large, deeply-nested file tree an ML stack produces — untested here, but a one-line config change to add back if wanted). A real release build (`npx tauri build`, no `--debug`/`--no-bundle`) produced `Orion_0.1.0_x64-setup.exe` (~626MB, compressed from the ~1.86GB bundled runtime) — roughly 7 minutes to compile the Rust release binary, then another ~15-20 minutes for NSIS to LZMA-compress the resource payload (single-threaded, genuinely slow on this much data but not stuck). Installed silently over a real pre-existing install, launched cleanly (backend healthy in ~5s), and a full RAG round-trip through the actual REST API returned a correctly grounded answer with real citations and sources — the same verification depth as dev mode, not just a smoke test. TTS, sessions, and the vector store all resolve correctly in the installed build (fixed 2026-08-04, re-confirmed 2026-08-05).
+
+**Note (2026-09-01):** despite the ~5s figure above, backend startup on a real installed build was later found to take up to several minutes in practice, traced to `backend/app.py` eagerly importing the entire ML stack (torch, sentence-transformers, chromadb, PyMuPDF/langchain) at module load, before Uvicorn could even bind the port — likely compounded by Windows Defender scanning the ~20,000+ loose files those packages unpack to in the bundled `python-runtime`. Fixed by deferring those imports to the functions that actually use them (so the cost lands on first RAG query / first ingestion instead of app launch); the ~5s figure above predates that regression and hasn't been re-measured against the fix yet — needs a fresh install timing pass to replace this note with a real number.
 
 ---
 

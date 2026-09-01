@@ -50,6 +50,11 @@ impl BackendProcess {
             // chasing it writer-by-writer. See CLAUDE.md / Eru Polishing.md for
             // the charmap bug history this replaces piecemeal fixes for.
             .env("PYTHONUTF8", "1")
+            // Tells backend/app.py whether it's safe to skip Uvicorn's
+            // reload=True file-watcher supervisor -- only relevant when
+            // launched via `python -m backend.app` (dev's `uvicorn --reload`
+            // invocation doesn't go through this env var at all).
+            .env("ORION_PACKAGED", if runtime.is_packaged { "1" } else { "0" })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -150,6 +155,12 @@ pub struct PythonRuntime {
     /// Unlike `working_dir` (the NSIS resource dir in production), this is
     /// never wiped when the app is reinstalled or auto-updated.
     pub data_dir: PathBuf,
+    /// True when running from a packaged/installed build (bundled Python
+    /// runtime + resources found), false for a dev checkout falling back to
+    /// `.venv`/system Python. Used to skip Uvicorn's dev-only `reload=True`
+    /// supervisor in production -- nobody edits `backend`/`src` on an end
+    /// user's machine, so it's pure startup overhead there.
+    pub is_packaged: bool,
 }
 
 // Global backend state
@@ -240,6 +251,7 @@ fn resolve_python_runtime(app: &AppHandle) -> Result<PythonRuntime, String> {
                     python_cmd: bundled_python,
                     working_dir: resource_dir,
                     data_dir,
+                    is_packaged: true,
                 });
             }
         }
@@ -280,6 +292,7 @@ fn resolve_python_runtime(app: &AppHandle) -> Result<PythonRuntime, String> {
         python_cmd,
         working_dir: project_root,
         data_dir,
+        is_packaged: false,
     })
 }
 
@@ -300,6 +313,7 @@ pub fn init_backend(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                     python_cmd: PathBuf::from("python"),
                     working_dir: PathBuf::new(),
                     data_dir: PathBuf::new(),
+                    is_packaged: false,
                 },
             });
             return Ok(()); // Don't fail startup, just skip backend auto-start
@@ -332,9 +346,18 @@ pub fn init_backend(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         } // Release lock
 
         // Wait for backend to become ready (up to 120 seconds, checking every 500ms).
-        // Cold start loads the embedding + reranker models before Uvicorn binds the
-        // port, which measured ~65s on a cold process — the old 15s budget gave up
-        // long before that, so the UI always reported "backend down" on first launch.
+        // The old 15s budget gave up before the process could ever bind the
+        // port, so the UI always reported "backend down" on first launch --
+        // NOT because of model loading (SentenceTransformer/CrossEncoder are
+        // already lazy, only loaded on the first real RAG query), but because
+        // backend/app.py used to import the whole ML stack (torch,
+        // sentence-transformers, chromadb, langchain) unconditionally at
+        // module load, before uvicorn.run() was ever reached. That's now
+        // fixed (those imports moved to lazy, function-local scope -- see
+        // src/retrieval/embeddings.py, reranker.py, vector_store.py, and
+        // src/core/ingest.py), so a generous budget here is now mostly
+        // insurance against slow disk/AV-scan cold starts on a fresh
+        // install, not the expected common case.
         log::info!("Waiting for backend to become ready...");
         if wait_for_backend_ready(backend_mutex.clone(), 8000, 240, 500) {
             log::info!("Backend is ready!");
