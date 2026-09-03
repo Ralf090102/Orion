@@ -4,7 +4,7 @@ Generation module for Orion RAG Assistant.
 This module handles answer generation using both RAG and Chat modes.
 """
 
-from src.generation.context_preparer import ContextPreparer, prepare_contexts
+from src.generation.context_preparer import ContextPreparer, PreparedContext
 from src.generation.generate import AnswerGenerator, GenerationResult, generate_answer
 from src.generation.prompt_builder import (
     ConversationMessage,
@@ -30,7 +30,7 @@ __all__ = [
     "ConversationMessage",
     # Context preparation
     "ContextPreparer",
-    "prepare_contexts",
+    "PreparedContext",
     # Query classification
     "QueryClassifier",
     "QueryClassification",

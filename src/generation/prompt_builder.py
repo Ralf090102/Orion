@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional
 
+from src.generation.context_preparer import PreparedContext
 from src.utilities.utils import ensure_config, log_debug, log_info, log_warning
 
 # Voice conversation mode instructions - prepended to system prompt when voice_mode=True
@@ -117,14 +118,15 @@ class PromptBuilder:
     # ========== RAG MODE ==========
 
     def build_rag_prompt(
-        self, query: str, contexts: list[dict], include_citations: Optional[bool] = None
+        self, query: str, contexts: list[PreparedContext], include_citations: Optional[bool] = None
     ) -> PromptComponents:
         """
         Build a stateless RAG prompt with citations.
 
         Args:
             query: User's question
-            contexts: Retrieved and prepared context dicts
+            contexts: Retrieved and prepared PreparedContext list (see
+                CONTEXT.md's "Sources" entry)
             include_citations: Override citation setting (uses config if None)
 
         Returns:
@@ -143,24 +145,18 @@ class PromptBuilder:
         citations = []
 
         for idx, result in enumerate(contexts, start=1):
-            # `contexts` here are already-prepared context dicts from
-            # ContextPreparer.prepare(return_full=True) -- a flat shape
-            # (source_file/title/citation_text/etc. live directly on the
-            # dict), never nested under a "metadata" key. Reading
-            # result.get("metadata", {}) always returned {} here, so every
-            # citation fell back to "Unknown" regardless of the real source.
             # citation_text is the best human-readable label available --
             # it's already formatted per source type (title, "title, p. N",
             # etc.) -- so prefer it over the raw filename.
             source = (
-                result.get("citation_text")
-                or result.get("title")
-                or result.get("normalized_source_file")
-                or result.get("source_file")
+                result.citation_text
+                or result.title
+                or result.normalized_source_file
+                or result.source_file
                 or "Unknown"
             )
-            content = result.get("content", result.get("text", ""))
-            score = result.get("final_score", result.get("score", 0.0))
+            content = result.text
+            score = result.final_score
 
             # Format citation
             if include_citations:
@@ -171,9 +167,9 @@ class PromptBuilder:
                 citations.append(
                     {
                         "index": idx,
-                        "source": result.get("normalized_source_file") or result.get("source_file") or "Unknown",
+                        "source": result.normalized_source_file or result.source_file or "Unknown",
                         "file_name": source,
-                        "file_type": result.get("source_type", "Unknown"),
+                        "file_type": result.source_type or "Unknown",
                         "score": score,
                     }
                 )
@@ -222,7 +218,7 @@ class PromptBuilder:
     def build_chat_prompt(
         self,
         query: str,
-        contexts: Optional[List[dict]] = None,
+        contexts: Optional[List[PreparedContext]] = None,
         force_rag: bool = False,
         voice_mode: bool = False,
     ) -> PromptComponents:
@@ -231,8 +227,8 @@ class PromptBuilder:
 
         Args:
             query: User's message
-            contexts: Optional prepared context dicts (from
-                ContextPreparer.prepare(return_full=True)), if RAG triggered
+            contexts: Optional PreparedContext list (from
+                ContextPreparer.prepare()), if RAG triggered
             force_rag: Force inclusion of RAG context even if contexts is None
             voice_mode: If True, prepend voice conversation instructions for brief, TTS-friendly responses
 
@@ -251,19 +247,14 @@ class PromptBuilder:
             context_parts = []
 
             for result in contexts:
-                # Same flat prepared-context shape as build_rag_prompt() above
-                # -- see the comment there. This used to read result["metadata"],
-                # which never exists here, so every chat turn told the LLM
-                # every source was "[From: document]" regardless of which
-                # file it actually came from.
                 source = (
-                    result.get("citation_text")
-                    or result.get("title")
-                    or result.get("normalized_source_file")
-                    or result.get("source_file")
+                    result.citation_text
+                    or result.title
+                    or result.normalized_source_file
+                    or result.source_file
                     or "document"
                 )
-                content = result.get("content", result.get("text", ""))
+                content = result.text
                 context_parts.append(f"[From: {source}]\n{content}")
 
             context_text = "\n\n".join(context_parts)

@@ -1,11 +1,36 @@
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
+from src.retrieval.search import SearchResult
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PreparedContext:
+    """
+    A Source (per CONTEXT.md): the deduplicated, cleaned form of a
+    retrieved SearchResult, actually handed to the LLM as grounding and
+    shown to the client. The one shape ContextPreparer.prepare() produces
+    -- see CONTEXT.md's "Search results" vs "Sources" entries.
+    """
+
+    text: str
+    final_score: float
+    length: int
+    source_file: str | None = None
+    page: int | None = None
+    title: str | None = None
+    date: str | None = None
+    url: str | None = None
+    source_type: str = "unknown"
+    citation_text: str | None = None
+    normalized_source_file: str = ""
 
 
 class ContextPreparer:
@@ -310,52 +335,57 @@ class ContextPreparer:
         text = re.sub(r"\s+([.,;:!?])", r"\1", text)
         return text.strip()
 
-    def _clean_context(self, context: str | dict[str, Any]) -> dict[str, Any]:
+    def _clean_context(self, result: SearchResult) -> PreparedContext:
         """
-        Clean and normalize a single context.
-        
-        Args:
-            context: Raw context (string or dict with metadata)
-            
-        Returns:
-            Cleaned context dict with text, score, metadata, and citation
-        """
-        if isinstance(context, str):
-            text = context
-            final_score = 0.0
-            metadata = {}
-        else:
-            text = context.get("content", context.get("text", ""))
-            # Accept both "final_score" (an already-prepared context) and
-            # "score" (SearchResult.to_dict()'s key) -- these used to only
-            # check "final_score", so every real context coming straight out
-            # of retrieval silently lost its score here.
-            final_score = context.get("final_score", context.get("score", 0.0))
+        Clean and normalize a single retrieved SearchResult into a
+        PreparedContext -- the one shape this class produces. See
+        CONTEXT.md's "Search results" vs "Sources" entries: past bugs came
+        from tolerating multiple input shapes here (SearchResult.to_dict()'s
+        nested metadata vs. an already-prepared flat dict) -- confirmed
+        2026-09-03 that only the SearchResult shape is ever real, so this
+        now takes the real object directly instead of an untyped dict.
 
-            # Metadata may already be flat on the context dict (an
-            # already-prepared context re-entering this function) or nested
-            # under "metadata" (SearchResult.to_dict()'s shape, e.g.
-            # {"metadata": {"source_file": ..., "page": ...}, "score": ...}).
-            # This used to only check the flat form, so source_file/page/
-            # title/date/url came back None for every real retrieval result
-            # -- citations were empty for every source, not just markdown.
-            nested_metadata = context.get("metadata") or {}
-            metadata = {
-                "source_file": context.get("source_file") or nested_metadata.get("source_file"),
-                "page": context.get("page") or nested_metadata.get("page"),
-                "title": context.get("title") or nested_metadata.get("title"),
-                "date": context.get("date") or nested_metadata.get("date"),
-                "url": context.get("url") or nested_metadata.get("url"),
-            }
+        Args:
+            result: A retrieved SearchResult
+
+        Returns:
+            A PreparedContext with cleaned text, score, metadata, and citation
+        """
+        metadata = result.metadata or {}
+        raw = {
+            "source_file": metadata.get("source_file"),
+            "page": metadata.get("page"),
+            "title": metadata.get("title"),
+            "date": metadata.get("date"),
+            "url": metadata.get("url"),
+        }
 
         # Apply text cleaning
-        text = self._normalize_whitespace(text)
+        text = self._normalize_whitespace(result.content)
         text = self._remove_repetitive_phrases(text)
 
-        # Generate citation
-        citation = self._format_citation({**metadata, "content": text})
+        # Generate citation -- _format_citation() still works with a plain
+        # dict internally; that's an implementation detail, not part of
+        # this method's interface.
+        citation = self._format_citation({**raw, "content": text})
 
-        return {"text": text, "final_score": final_score, "length": len(text), **metadata, **citation}
+        return PreparedContext(
+            text=text,
+            final_score=result.score,
+            length=len(text),
+            source_file=raw["source_file"],
+            page=raw["page"],
+            # Prefer the citation-derived value (e.g. a PDF title extracted
+            # from the filename) when _format_citation() found one; fall
+            # back to the raw metadata value otherwise -- same fallback
+            # order the old dict merge (`{**metadata, **citation}`) had.
+            title=citation.get("title", raw["title"]),
+            date=citation.get("date", raw["date"]),
+            url=citation.get("url", raw["url"]),
+            source_type=citation.get("source_type", "unknown"),
+            citation_text=citation.get("citation_text"),
+            normalized_source_file=citation.get("normalized_source_file", ""),
+        )
 
     def _are_similar(self, a: str, b: str) -> bool:
         """
@@ -387,7 +417,7 @@ class ContextPreparer:
 
         return False
 
-    def _deduplicate(self, contexts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _deduplicate(self, contexts: list[PreparedContext]) -> list[PreparedContext]:
         """
         Deduplicate a list of cleaned contexts.
 
@@ -397,27 +427,23 @@ class ContextPreparer:
             * If scores are equal, keep the longer text.
 
         Args:
-            contexts: List of dicts with "text" and "score".
+            contexts: List of PreparedContext
 
         Returns:
-            List of unique dicts.
+            List of unique PreparedContext
         """
-        unique = []
+        unique: list[PreparedContext] = []
 
         for ctx in contexts:
-            text = ctx["text"]
-            score = ctx.get("final_score", 0.0)
-            length = ctx.get("length", len(text))
             duplicate_found = False
 
-            for kept in unique:
-                if self._are_similar(text, kept["text"]):
+            for i, kept in enumerate(unique):
+                if self._are_similar(ctx.text, kept.text):
                     duplicate_found = True
-                    kept_score = kept.get("final_score", 0.0)
-                    kept_length = kept.get("length", len(kept["text"]))
-
-                    if (score > kept_score) or (score == kept_score and length > kept_length):
-                        kept.update(ctx)
+                    if (ctx.final_score > kept.final_score) or (
+                        ctx.final_score == kept.final_score and ctx.length > kept.length
+                    ):
+                        unique[i] = ctx
                     break
 
             if not duplicate_found:
@@ -425,80 +451,43 @@ class ContextPreparer:
 
         return unique
 
-    def _sort_contexts(self, contexts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _sort_contexts(self, contexts: list[PreparedContext]) -> list[PreparedContext]:
         """Sort contexts by score in descending order."""
-        return sorted(contexts, key=lambda x: x.get("final_score", 0.0), reverse=True)
+        return sorted(contexts, key=lambda x: x.final_score, reverse=True)
 
     def prepare(
         self,
-        contexts: list[dict[str, Any]],
-        return_full: bool = False,
-        include_citations: bool = True,
+        search_results: list[SearchResult],
         sort_by_score: bool = True,
-    ) -> list[str | dict[str, Any]]:
+    ) -> list[PreparedContext]:
         """
-        Prepare contexts for generation by cleaning, deduplicating, and sorting.
-        
+        Prepare retrieved SearchResults for generation: clean, deduplicate,
+        and sort into Sources (per CONTEXT.md).
+
         Args:
-            contexts: List of raw contexts
-            return_full: If True, return full context dicts; if False, return strings
-            include_citations: If True, append citation to each context string
+            search_results: List of retrieved SearchResults
             sort_by_score: If True, sort by relevance score
-            
+
         Returns:
-            List of prepared contexts (strings or dicts)
+            List of PreparedContext -- the one shape this class produces.
+            (Dropped `return_full`/`include_citations`'s string-output path
+            and the standalone prepare_contexts() function 2026-09-03:
+            confirmed via full-repo grep that no real caller, production or
+            test, ever used them -- see Architecture-Review.md.)
         """
-        # Clean all contexts
         cleaned = []
-        for c in contexts:
-            cleaned_ctx = self._clean_context(c)
-            if cleaned_ctx and cleaned_ctx["text"].strip():
-                cleaned.append(cleaned_ctx)
+        for result in search_results:
+            prepared = self._clean_context(result)
+            if prepared and prepared.text.strip():
+                cleaned.append(prepared)
 
         if not cleaned:
             logger.warning("No valid contexts after cleaning")
             return []
 
-        # Deduplicate
         deduplicated = self._deduplicate(cleaned)
 
-        # Sort by score if requested
         if sort_by_score:
             deduplicated = self._sort_contexts(deduplicated)
 
-        # Return full dicts if requested
-        if return_full:
-            return deduplicated
-
-        # Format as strings with optional citations
-        if include_citations:
-            results = []
-            for c in deduplicated:
-                text = c["text"]
-                citation_text = c.get("citation_text")
-                if citation_text:
-                    text = f"{text}\n[Source: {citation_text}]"
-                results.append(text)
-            return results
-
-        return [c["text"] for c in deduplicated]
-
-
-def prepare_contexts(
-    contexts: list[dict[str, Any]],
-    return_scores: bool = False,
-    include_citations: bool = True,
-    similarity_threshold: float = 0.7,
-) -> list[str | dict[str, Any]]:
-    """
-    Functional API: Clean and deduplicate contexts in one call.
-
-    Args:
-        contexts: List of dicts with "text" and optional "score".
-
-    Returns:
-        List of cleaned, deduplicated context strings.
-    """
-    preparer = ContextPreparer(similarity_threshold=similarity_threshold)
-
-    return preparer.prepare(contexts, return_full=return_scores, include_citations=include_citations)
+        return deduplicated

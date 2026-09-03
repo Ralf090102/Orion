@@ -7,6 +7,7 @@ Endpoints for Retrieval-Augmented Generation:
 - Streaming responses
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -325,7 +326,9 @@ async def ask_stream(
     - Metadata
     - Done signal
     
-    Uses the core RAG pipeline from run.py with streaming enabled.
+    Delegates to AnswerGenerator.generate_rag_response(stream=True, ...) --
+    the same pipeline /api/ask uses, non-streaming -- offloaded to a worker
+    thread so it doesn't block the event loop.
     Separate endpoint from /api/ask due to fundamentally different response type (SSE vs JSON).
     
     Args:
@@ -340,97 +343,92 @@ async def ask_stream(
         HTTPException: If streaming fails
     """
     async def event_generator():
-        """Generate SSE events for streaming response."""
+        """Generate SSE events for streaming response.
+
+        Streams through AnswerGenerator.generate_rag_response() -- the same
+        interface /api/ask uses -- instead of hand-rolling retrieve/prepare/
+        prompt/generate here. The LLM call is a blocking sync call, so it's
+        offloaded via asyncio.to_thread; on_token/on_sources run on that
+        worker thread and hop back onto the event loop via
+        call_soon_threadsafe, the same shape ChatWebSocketHandler's
+        queue_token() uses (see backend/websockets/chat.py) -- kept as a
+        separate, local implementation rather than a shared helper, since
+        that handler's queue is tied to a connection's lifecycle and this
+        one is a one-shot local queue for a single request.
+        """
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[tuple[str, Any] | None] = asyncio.Queue()
+        tokens_sent = 0
+
+        def _put_nowait(item: tuple[str, Any] | None):
+            """Actually enqueue; must run on the event-loop thread."""
+            try:
+                queue.put_nowait(item)
+            except asyncio.QueueFull:
+                logger.warning("Stream queue full, dropping event")
+
+        def on_sources(sources: list[dict]):
+            loop.call_soon_threadsafe(_put_nowait, ("sources", sources))
+
+        def on_token(token: str):
+            nonlocal tokens_sent
+            tokens_sent += 1
+            loop.call_soon_threadsafe(_put_nowait, ("token", token))
+
         try:
-            # ===== EXTRACT REQUIRED ARGUMENT =====
             query = request.query
-            
-            # ===== APPLY OPTIONAL SETTINGS =====
             k = request.k if request.k is not None else config.rag.retrieval.default_k
             include_sources = request.include_sources
-            
-            logger.info(f"Stream request: '{query}' (k={k}, sources={include_sources})")
-            start_time = time.time()
-            
-            # Retrieve context using retriever (matches run.py pattern)
-            results = generator.retriever.query(
-                query_text=query,
-                k=k,
-                formatted=False,
-            )
-
-            # Prepare and send sources first
-            if include_sources and results:
-                sources = [
-                    {
-                        "index": i + 1,
-                        "content": r.content[:500],  # Truncate for streaming
-                        "citation": r.metadata.get("source_file", "Unknown"),
-                        "score": r.score,
-                        "metadata": r.metadata,
-                    }
-                    for i, r in enumerate(results)
-                ]
-
-                chunk = StreamChunk(
-                    type="sources",
-                    content="",
-                    data={"sources": sources},
-                )
-                yield f"data: {chunk.model_dump_json()}\n\n"
-
-            # Convert to dicts before handing off to ContextPreparer -- same
-            # conversion generate_rag_response() does in src/generation/
-            # generate.py. SearchResult objects don't have the flat .get()
-            # shape ContextPreparer expects.
-            results_dicts = [r.to_dict() for r in results]
-
-            # Prepare context (same as run.py pipeline)
-            prepared_contexts = generator.context_preparer.prepare(
-                contexts=results_dicts,
-                return_full=True,
-                include_citations=False,
-                sort_by_score=True,
-            )
-
-            # Build prompt (same as run.py pipeline)
-            prompt_components = generator.prompt_builder.build_rag_prompt(
-                query=request.query,
-                contexts=prepared_contexts,
-            )
-
-            token_buffer = []
-
-            def stream_token(token: str):
-                """Collect tokens for streaming."""
-                token_buffer.append(token)
-
-            # Override generation settings if provided
             temperature = request.temperature if request.temperature is not None else config.rag.llm.temperature
             max_tokens = request.max_tokens
 
-            # Generate with streaming, via the same OllamaClient the
-            # non-streaming /api/ask path uses (generator.llm_client) --
-            # it takes a real messages list, not a raw prompt string.
-            generator.llm_client.generate(
-                messages=prompt_components.to_messages(),
-                model=config.rag.llm.model,
-                temperature=temperature,
-                top_p=config.rag.llm.top_p,
-                max_tokens=max_tokens,
-                stream=True,
-                on_token=stream_token,
-            )
-            
-            # Stream buffered tokens
-            for token in token_buffer:
-                chunk = StreamChunk(
-                    type="token",
-                    content=token,
-                    data={},
-                )
+            logger.info(f"Stream request: '{query}' (k={k}, sources={include_sources})")
+            start_time = time.time()
+
+            async def run_generation():
+                try:
+                    return await asyncio.to_thread(
+                        generator.generate_rag_response,
+                        query=query,
+                        k=k,
+                        include_sources=include_sources,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        stream=True,
+                        on_token=on_token,
+                        on_sources=on_sources if include_sources else None,
+                    )
+                finally:
+                    # Sentinel: tells the queue-draining loop below there's
+                    # nothing more coming, success or failure either way.
+                    loop.call_soon_threadsafe(_put_nowait, None)
+
+            gen_task = asyncio.create_task(run_generation())
+
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                kind, payload = item
+                if kind == "sources":
+                    chunk = StreamChunk(type="sources", content="", data={"sources": payload})
+                else:
+                    chunk = StreamChunk(type="token", content=payload, data={})
                 yield f"data: {chunk.model_dump_json()}\n\n"
-            
+
+            result = await gen_task
+
+            # generate_rag_response() catches retrieval/prompt/LLM failures
+            # internally and returns a normal GenerationResult with a
+            # friendly result.answer describing what went wrong, rather
+            # than raising -- so no tokens streamed via on_token above in
+            # that case. Forward it as a token now, the same way
+            # ChatWebSocketHandler does for its own generation failures,
+            # so the client sees an apologetic message instead of nothing.
+            if tokens_sent == 0 and result.answer:
+                token_chunk = StreamChunk(type="token", content=result.answer, data={})
+                yield f"data: {token_chunk.model_dump_json()}\n\n"
+
             # Send metadata
             processing_time = time.time() - start_time
             metadata_chunk = StreamChunk(
@@ -444,7 +442,7 @@ async def ask_stream(
                 },
             )
             yield f"data: {metadata_chunk.model_dump_json()}\n\n"
-            
+
             # Send done signal
             done_chunk = StreamChunk(
                 type="done",
@@ -452,9 +450,9 @@ async def ask_stream(
                 data={},
             )
             yield f"data: {done_chunk.model_dump_json()}\n\n"
-            
+
             logger.info(f"Stream completed in {processing_time:.3f}s")
-            
+
         except Exception as e:
             logger.error(f"Stream failed: {e}", exc_info=True)
             error_chunk = StreamChunk(

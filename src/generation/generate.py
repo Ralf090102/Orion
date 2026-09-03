@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.core.llm import OllamaClient
-from src.generation.context_preparer import ContextPreparer
+from src.generation.context_preparer import ContextPreparer, PreparedContext
 from src.generation.prompt_builder import PromptBuilder
 from src.generation.query_classifier import QueryClassifier
 from src.retrieval.retriever import OrionRetriever
@@ -71,6 +71,9 @@ class AnswerGenerator:
         include_sources: bool = True,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        stream: bool = False,
+        on_token: Any | None = None,
+        on_sources: Any | None = None,
     ) -> GenerationResult:
         """
         Generate a RAG response with citations.
@@ -86,6 +89,14 @@ class AnswerGenerator:
             include_sources: Include source information in response
             temperature: LLM temperature override (uses config default if None)
             max_tokens: LLM max_tokens override (uses config default if None)
+            stream: Enable streaming mode (mirrors generate_chat_response)
+            on_token: Optional callback for streaming tokens
+            on_sources: Optional callback fired once Sources are ready --
+                after context prep (dedup, citation formatting), before
+                generation starts. See CONTEXT.md's "Sources" entry: this
+                is deliberately the prepared, post-dedup contexts, not the
+                raw Search results -- callers get exactly what the LLM was
+                grounded on, not an earlier, possibly-different set.
 
         Returns:
             GenerationResult with answer and sources
@@ -146,15 +157,12 @@ class AnswerGenerator:
 
         logger.info(f"Retrieved {len(search_results)} documents")
 
-        # Convert SearchResult objects to dicts for context_preparer
-        search_results_dicts = [r.to_dict() for r in search_results]
-
-        # Prepare contexts (clean, deduplicate, format citations)
+        # Prepare contexts (clean, deduplicate, format citations) -- takes
+        # SearchResults directly now, not a hand-converted dict list; see
+        # ContextPreparer.prepare().
         prep_start = time.time()
         prepared_contexts = self.context_preparer.prepare(
-            contexts=search_results_dicts,
-            return_full=True,
-            include_citations=False,  # We'll handle citations in prompt builder
+            search_results,
             sort_by_score=True,
         )
         timing.context_preparation_time = time.time() - prep_start
@@ -163,6 +171,14 @@ class AnswerGenerator:
         max_chunks = self.generation_config.max_context_chunks
         prepared_contexts = prepared_contexts[:max_chunks]
         logger.debug(f"Using {len(prepared_contexts)} prepared contexts")
+
+        # Format and surface sources now, ahead of generation -- callers
+        # that stream (on_sources set) get them before the LLM call starts,
+        # already in the shape /api/ask returns, not the raw pre-dedup
+        # search_results a caller might otherwise reach for.
+        sources = self._format_sources(prepared_contexts) if include_sources else []
+        if on_sources is not None:
+            on_sources(sources)
 
         # Build RAG prompt with citations
         try:
@@ -176,7 +192,7 @@ class AnswerGenerator:
             timing.total_time = time.time() - overall_start
             return GenerationResult(
                 answer=f"I encountered an error while preparing the response: {str(e)}",
-                sources=[],
+                sources=sources if include_sources else [],
                 query_type=classification.query_type,
                 mode="rag",
                 metadata={"error": str(e), "prompt_building_failed": True},
@@ -197,6 +213,8 @@ class AnswerGenerator:
                 temperature=temperature if temperature is not None else self.config.rag.llm.temperature,
                 top_p=self.config.rag.llm.top_p,
                 max_tokens=max_tokens if max_tokens is not None else self.config.rag.llm.max_tokens,
+                stream=stream,
+                on_token=on_token,
             )
             timing.llm_generation_time = time.time() - llm_start
         except Exception as e:
@@ -205,7 +223,7 @@ class AnswerGenerator:
             timing.total_time = time.time() - overall_start
             return GenerationResult(
                 answer=f"I encountered an error while generating the response: {str(e)}",
-                sources=prepared_contexts if include_sources else [],
+                sources=sources if include_sources else [],
                 query_type=classification.query_type,
                 mode="rag",
                 metadata={"error": str(e), "llm_generation_failed": True},
@@ -218,10 +236,8 @@ class AnswerGenerator:
         # Post-process answer
         answer = self._post_process_answer(answer, prepared_contexts)
 
-        # Format sources
-        sources = []
-        if include_sources:
-            sources = self._format_sources(prepared_contexts)
+        # sources was already formatted and handed to on_sources, above,
+        # before generation started -- reused here, not recomputed.
 
         # Calculate total timing
         timing.total_time = time.time() - overall_start
@@ -330,12 +346,8 @@ class AnswerGenerator:
 
                 if search_results:
                     context_start = time.time()
-                    # Convert SearchResult objects to dicts
-                    search_results_dicts = [r.to_dict() for r in search_results]
                     prepared_contexts = self.context_preparer.prepare(
-                        contexts=search_results_dicts,
-                        return_full=True,
-                        include_citations=False,
+                        search_results,
                         sort_by_score=True,
                     )
                     timing.context_preparation_time = time.time() - context_start
@@ -617,40 +629,37 @@ class AnswerGenerator:
         return cleaned, invalid
     
     def _expand_citations(
-        self, answer: str, contexts: list[dict[str, Any]]
+        self, answer: str, contexts: list[PreparedContext]
     ) -> str:
         """
         Replace numeric citations with full citation text.
-        
+
         Converts [1] to (Source Title, p. 42) format.
-        
+
         Args:
             answer: Answer with numeric citations [1], [2]
-            contexts: List of context dicts with citation_text
-            
+            contexts: List of PreparedContext with citation_text
+
         Returns:
             Answer with expanded citations
         """
         import re
-        
+
         expanded = answer
-        
+
         # Process each context
         for idx, ctx in enumerate(contexts, 1):
-            citation_text = ctx.get('citation_text')
-            if not citation_text:
-                # Fallback to source file if no citation
-                citation_text = ctx.get('normalized_source_file') or ctx.get('source_file', 'Unknown')
-            
+            citation_text = ctx.citation_text or ctx.normalized_source_file or ctx.source_file or "Unknown"
+
             # Replace [N] with (citation text)
             pattern = rf'\[{idx}\]'
             replacement = f'({citation_text})'
             expanded = re.sub(pattern, replacement, expanded)
-        
+
         return expanded
-    
+
     def _post_process_answer(
-        self, answer: str, contexts: list[dict[str, Any]]
+        self, answer: str, contexts: list[PreparedContext]
     ) -> str:
         """
         Post-process the generated answer.
@@ -662,7 +671,7 @@ class AnswerGenerator:
 
         Args:
             answer: Raw LLM answer
-            contexts: List of context dicts used
+            contexts: List of PreparedContext used
 
         Returns:
             Cleaned answer
@@ -692,41 +701,40 @@ class AnswerGenerator:
 
         return answer
 
-    def _format_sources(self, contexts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _format_sources(self, contexts: list[PreparedContext]) -> list[dict[str, Any]]:
         """
-        Format sources for the response.
+        Format Sources for the response wire format.
 
         Args:
-            contexts: List of prepared context dicts
+            contexts: List of PreparedContext (see CONTEXT.md's "Sources" entry)
 
         Returns:
-            List of formatted source dicts
+            List of formatted source dicts (API/wire shape, not part of the
+            typed retrieval->generation contract)
         """
         sources = []
 
         for idx, ctx in enumerate(contexts, 1):
-            source = {
+            source: dict[str, Any] = {
                 "index": idx,
-                "text": ctx.get("text", "")[:200] + "...",  # Preview
-                "score": ctx.get("final_score", 0.0),
+                "text": ctx.text[:200] + "...",  # Preview
+                "score": ctx.final_score,
             }
 
-            # Add citation if available
-            if ctx.get("citation_text"):
-                source["citation"] = ctx["citation_text"]
+            if ctx.citation_text:
+                source["citation"] = ctx.citation_text
 
-            # Add source metadata
-            if ctx.get("source_file"):
-                source["source_file"] = ctx.get("normalized_source_file") or ctx["source_file"]
+            if ctx.source_file:
+                source["source_file"] = ctx.normalized_source_file or ctx.source_file
 
-            if ctx.get("page") is not None:
-                source["page"] = ctx["page"]
+            if ctx.page is not None:
+                source["page"] = ctx.page
 
-            if ctx.get("title"):
-                source["title"] = ctx["title"]
+            if ctx.title:
+                source["title"] = ctx.title
 
-            if ctx.get("url"):
-                source["url"] = ctx["url"]
+            if ctx.url:
+                source["url"] = ctx.url
 
             sources.append(source)
 

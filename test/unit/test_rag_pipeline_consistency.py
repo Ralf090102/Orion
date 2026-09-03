@@ -13,6 +13,13 @@ values, which is exactly why no test caught it the first time.
 These tests exercise the real objects (SearchResult, ContextPreparer,
 PromptBuilder) together rather than mocking the boundary between them --
 the whole point is verifying the boundary itself.
+
+Updated 2026-09-03: ContextPreparer.prepare() now takes SearchResult
+objects directly and returns PreparedContext (a real dataclass, not an
+untyped dict) -- confirmed via full-repo grep that no real caller ever
+used the old dual-shape (SearchResult.to_dict() vs. an "already-prepared
+flat dict") input tolerance, so there's no flat-dict-reentry case left to
+test; see Architecture-Review.md.
 """
 
 import pytest
@@ -47,42 +54,31 @@ def pdf_result():
 
 @pytest.fixture
 def prepared_contexts(markdown_result, pdf_result):
-    """The exact conversion generate.py performs before handing off to
-    ContextPreparer -- [r.to_dict() for r in search_results]."""
+    """The exact call generate.py makes: SearchResults straight into
+    ContextPreparer.prepare(), no manual dict conversion."""
     preparer = ContextPreparer()
-    raw = [markdown_result.to_dict(), pdf_result.to_dict()]
-    return preparer.prepare(contexts=raw, return_full=True, include_citations=False, sort_by_score=True)
+    return preparer.prepare([markdown_result, pdf_result], sort_by_score=True)
 
 
 @pytest.mark.unit
 class TestSearchResultToContextPreparerHandoff:
     def test_real_relevance_score_survives_as_final_score(self, prepared_contexts):
-        scores = {c["source_file"]: c["final_score"] for c in prepared_contexts}
+        scores = {c.source_file: c.final_score for c in prepared_contexts}
         assert scores["data/knowledge_base/machine_learning_basics.md"] == 0.87
         assert scores["data/knowledge_base/drylab.pdf"] == 0.91
 
-    def test_source_file_survives_from_nested_metadata(self, prepared_contexts):
-        source_files = {c["source_file"] for c in prepared_contexts}
+    def test_source_file_survives_from_metadata(self, prepared_contexts):
+        source_files = {c.source_file for c in prepared_contexts}
         assert "data/knowledge_base/machine_learning_basics.md" in source_files
         assert "data/knowledge_base/drylab.pdf" in source_files
 
     def test_non_pdf_source_gets_a_real_citation_text_not_none(self, prepared_contexts):
-        md_ctx = next(c for c in prepared_contexts if c["source_file"].endswith(".md"))
-        assert md_ctx["citation_text"] == "Machine Learning Basics"
+        md_ctx = next(c for c in prepared_contexts if c.source_file.endswith(".md"))
+        assert md_ctx.citation_text == "Machine Learning Basics"
 
     def test_pdf_source_gets_title_and_page_citation(self, prepared_contexts):
-        pdf_ctx = next(c for c in prepared_contexts if c["source_file"].endswith(".pdf"))
-        assert pdf_ctx["citation_text"] == "Drylab, p. 3"
-
-    def test_already_flat_context_dict_still_works(self):
-        """_clean_context() must keep handling a plain flat dict (e.g. a
-        hand-built context, or one that's already been through prepare()
-        once) alongside the nested SearchResult.to_dict() shape."""
-        preparer = ContextPreparer()
-        flat = {"text": "Some text.", "final_score": 0.5, "source_file": "notes.txt"}
-        result = preparer.prepare(contexts=[flat], return_full=True, include_citations=False)
-        assert result[0]["final_score"] == 0.5
-        assert result[0]["source_file"] == "notes.txt"
+        pdf_ctx = next(c for c in prepared_contexts if c.source_file.endswith(".pdf"))
+        assert pdf_ctx.citation_text == "Drylab, p. 3"
 
 
 @pytest.mark.unit
