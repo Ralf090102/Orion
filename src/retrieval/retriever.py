@@ -211,9 +211,11 @@ class OrionRetriever:
 
         return mmr_results
 
-    def _format_results(self, results: list[SearchResult]) -> str:
+    def format_results(self, results: list[SearchResult]) -> str:
         """
-        Format search results into a readable string.
+        Format search results into a readable string, for display (e.g. a
+        CLI). Not called from query() itself -- every real caller consumes
+        the raw SearchResult list directly, so this is opt-in.
 
         Args:
             results: Search results to format
@@ -261,11 +263,9 @@ class OrionRetriever:
         search_type: str = "hybrid",
         enable_reranking: bool = True,
         enable_mmr: bool = True,
-        formatted: bool = True,
-        return_timing: bool = False,
-    ) -> str | tuple[str | list[SearchResult], TimingBreakdown]:
+    ) -> tuple[list[SearchResult], TimingBreakdown]:
         """
-        Query the knowledge base and return formatted results.
+        Query the knowledge base.
 
         Args:
             query_text: The search query string
@@ -273,22 +273,21 @@ class OrionRetriever:
             search_type: Type of search - 'semantic' or 'hybrid' (default: 'hybrid')
             enable_reranking: Whether to apply reranking (default: True)
             enable_mmr: Whether to apply MMR diversity (default: True)
-            formatted: Whether to return formatted string or raw SearchResult objects
-            return_timing: Whether to return timing breakdown
 
         Returns:
-            Formatted string containing search results, or tuple of (results, timing)
+            Tuple of (results, timing). Call format_results(results) separately
+            if a human-readable string is wanted (e.g. for a CLI).
 
         Raises:
             ValueError: If knowledge base is empty or search type is invalid
             RuntimeError: If retrieval components fail to initialize
         """
         import time
-        
+
         # Initialize timing
         timing = TimingBreakdown()
         overall_start = time.time()
-        
+
         try:
             # Initialize components if needed
             self._initialize_components()
@@ -303,18 +302,15 @@ class OrionRetriever:
             search_start = time.time()
             results = self._perform_search(query_text, k=k, search_type=search_type)
             search_elapsed = time.time() - search_start
-            
+
             # Estimate embedding took ~30% of search time, search ~70%
             timing.embedding_time = search_elapsed * 0.3
             timing.search_time = search_elapsed * 0.7
 
             if not results:
                 log_warning(f"No initial results found for query: {query_text}", config=self.config)
-                result = "No results found for your query." if formatted else []
-                if return_timing:
-                    timing.total_time = time.time() - overall_start
-                    return result, timing
-                return result
+                timing.total_time = time.time() - overall_start
+                return [], timing
 
             log_info(f"Initial search returned {len(results)} results", config=self.config)
 
@@ -334,53 +330,24 @@ class OrionRetriever:
                 timing.mmr_time = time.time() - mmr_start
                 log_info(f"MMR returned {len(results)} diverse results", config=self.config)
 
-            # Format results if requested
-            if formatted:
-                result = self._format_results(results)
-            else:
-                result = results
-            
             log_info(f"Query completed successfully, returning {len(results)} results", config=self.config)
-            
-            # Calculate total time
+
             timing.total_time = time.time() - overall_start
-            
-            if return_timing:
-                return result, timing
-            return result
+            return results, timing
 
         except ValueError as e:
             # User-facing errors (empty knowledge base, invalid search type).
-            # formatted=False callers (every real caller in this codebase --
-            # run.py's CLI commands, the REST/streaming API endpoints,
-            # AnswerGenerator) want raw SearchResult objects and already
-            # wrap this call in their own try/except, matching this
-            # method's own documented "Raises: ValueError" contract. Only
-            # formatted=True (a plain human-readable string, no exception
-            # handling expected of the caller) gets the friendly string
-            # instead -- returning a string here unconditionally used to
-            # silently break every formatted=False caller, which would get
-            # a str back where a list was expected and crash later trying
-            # to treat its characters as SearchResult objects.
+            # Every real caller (run.py's CLI commands, the REST/streaming
+            # API endpoints, AnswerGenerator) wraps this call in its own
+            # try/except and expects the exception, matching this method's
+            # documented "Raises: ValueError" contract.
             log_warning(f"Query failed: {e}", config=self.config)
-            if not formatted:
-                raise
-            result = f"Error: {e}"
-            if return_timing:
-                timing.total_time = time.time() - overall_start
-                return result, timing
-            return result
+            raise
 
         except Exception as e:
             # System errors -- same reasoning as above.
             log_error(f"Unexpected error during query: {e}", config=self.config)
-            if not formatted:
-                raise
-            result = f"An error occurred while processing your query: {e}"
-            if return_timing:
-                timing.total_time = time.time() - overall_start
-                return result, timing
-            return result
+            raise
 
     def get_status(self) -> dict:
         """
@@ -421,4 +388,5 @@ def query_knowledge_base(query: str, **kwargs) -> str:
         Formatted search results string
     """
     retriever = OrionRetriever()
-    return retriever.query(query, **kwargs)
+    results, _timing = retriever.query(query, **kwargs)
+    return retriever.format_results(results)

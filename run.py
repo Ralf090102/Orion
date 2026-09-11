@@ -311,8 +311,8 @@ def query(
             # Initialize retriever
             retriever = OrionRetriever(config=config)
 
-            # Perform search (formatted=False to get list of SearchResult objects)
-            results = retriever.query(question, k=k, formatted=False)
+            # Perform search
+            results, _timing = retriever.query(question, k=k)
 
             elapsed = time.time() - start_time
 
@@ -1071,7 +1071,7 @@ def interactive(
             console.print()
             with console.status("[bold green]Searching..."):
                 start_time = time.time()
-                results = retriever.query(query_text, k=3, formatted=False)
+                results, _timing = retriever.query(query_text, k=3)
                 elapsed = time.time() - start_time
 
             if results:

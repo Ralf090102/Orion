@@ -31,6 +31,7 @@ from backend.models.rag import (
     StreamChunk,
     TimingBreakdown,
 )
+from backend.streaming_queue import ThreadSafeEventQueue
 from src.generation.generate import AnswerGenerator
 from src.retrieval.retriever import OrionRetriever
 from src.utilities.config import OrionConfig
@@ -100,11 +101,10 @@ async def query_knowledge_base(
         )
         
         # Perform retrieval (matches run.py pattern)
-        results = retriever.query(
+        results, _timing = retriever.query(
             query_text=query,
             k=k,
             enable_reranking=enable_reranking,
-            formatted=False,  # Get raw SearchResult objects
         )
         
         # Filter by similarity threshold
@@ -349,31 +349,24 @@ async def ask_stream(
         interface /api/ask uses -- instead of hand-rolling retrieve/prepare/
         prompt/generate here. The LLM call is a blocking sync call, so it's
         offloaded via asyncio.to_thread; on_token/on_sources run on that
-        worker thread and hop back onto the event loop via
-        call_soon_threadsafe, the same shape ChatWebSocketHandler's
-        queue_token() uses (see backend/websockets/chat.py) -- kept as a
-        separate, local implementation rather than a shared helper, since
-        that handler's queue is tied to a connection's lifecycle and this
-        one is a one-shot local queue for a single request.
+        worker thread and hop back onto the event loop via the same
+        ThreadSafeEventQueue ChatWebSocketHandler's queue_token() uses (see
+        backend/websockets/chat.py) -- this queue is one-shot and
+        request-scoped (a plain blocking drain below, no connection-liveness
+        polling), unlike that handler's connection-scoped one, but both
+        adapters share the same thread-hop plumbing now.
         """
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[tuple[str, Any] | None] = asyncio.Queue()
+        queue: ThreadSafeEventQueue[tuple[str, Any]] = ThreadSafeEventQueue()
+        queue.bind_loop(asyncio.get_running_loop())
         tokens_sent = 0
 
-        def _put_nowait(item: tuple[str, Any] | None):
-            """Actually enqueue; must run on the event-loop thread."""
-            try:
-                queue.put_nowait(item)
-            except asyncio.QueueFull:
-                logger.warning("Stream queue full, dropping event")
-
         def on_sources(sources: list[dict]):
-            loop.call_soon_threadsafe(_put_nowait, ("sources", sources))
+            queue.put_threadsafe(("sources", sources))
 
         def on_token(token: str):
             nonlocal tokens_sent
             tokens_sent += 1
-            loop.call_soon_threadsafe(_put_nowait, ("token", token))
+            queue.put_threadsafe(("token", token))
 
         try:
             query = request.query
@@ -401,7 +394,11 @@ async def ask_stream(
                 finally:
                     # Sentinel: tells the queue-draining loop below there's
                     # nothing more coming, success or failure either way.
-                    loop.call_soon_threadsafe(_put_nowait, None)
+                    # By the time `finally` runs, run_generation() has
+                    # already resumed on the event-loop thread (the awaited
+                    # asyncio.to_thread call above has returned), so no
+                    # thread hop is needed for this particular push.
+                    queue.close()
 
             gen_task = asyncio.create_task(run_generation())
 

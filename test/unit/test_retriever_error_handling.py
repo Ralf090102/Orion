@@ -1,16 +1,25 @@
 """Regression test for OrionRetriever.query()'s error-handling contract.
 
-Before this fix, query()'s except ValueError/except Exception blocks always
-returned a plain error *string*, ignoring the caller's formatted=False
+Before an earlier fix, query()'s except ValueError/except Exception blocks
+always returned a plain error *string*, ignoring the caller's formatted=False
 request -- even though the method's own docstring documents "Raises:
 ValueError: If knowledge base is empty...". Every real caller in the
 codebase (run.py's CLI commands, /api/query, /api/ask/stream,
-AnswerGenerator.generate_rag_response()/generate_chat_response()) calls
-with formatted=False and wraps the call in its own try/except, expecting
+AnswerGenerator.generate_rag_response()/generate_chat_response()) called
+with formatted=False and wrapped the call in its own try/except, expecting
 an exception -- so the swallowed exception silently handed back a string
 where a list of SearchResult was expected, and callers crashed later
 trying to treat the string's individual characters as SearchResult
 objects (e.g. AttributeError: 'str' object has no attribute 'score').
+
+query()'s formatted/return_timing flags were later removed entirely
+(architecture-review candidate #6, 2026-09-11): since every real caller
+already used formatted=False, the formatted=True string-swallowing path had
+zero live callers left, so query() now always returns
+(list[SearchResult], TimingBreakdown) on success and always raises on
+error -- the contract these tests already assumed for every real caller.
+Formatting for display (e.g. a CLI) is now a separate, explicitly-called
+OrionRetriever.format_results() method, not part of query()'s own contract.
 
 Found via live testing against an empty knowledge base (a fresh
 ORION_DATA_DIR with nothing ingested yet -- exactly what a first
@@ -37,28 +46,9 @@ def empty_kb_retriever():
 
 
 @pytest.mark.unit
-class TestQueryErrorHandlingRespectsFormattedFlag:
-    def test_formatted_false_raises_instead_of_returning_a_string(self, empty_kb_retriever):
+class TestQueryErrorHandlingAlwaysRaises:
+    def test_empty_knowledge_base_raises_value_error(self, empty_kb_retriever):
         """This is the shape every real caller (API, CLI, AnswerGenerator)
         already expects -- see the module docstring."""
         with pytest.raises(ValueError, match="No documents found"):
-            empty_kb_retriever.query("test", formatted=False)
-
-    def test_formatted_false_with_return_timing_also_raises(self, empty_kb_retriever):
-        """return_timing=True changes the *success* return shape to a tuple,
-        but must not change error behavior."""
-        with pytest.raises(ValueError, match="No documents found"):
-            empty_kb_retriever.query("test", formatted=False, return_timing=True)
-
-    def test_formatted_true_still_returns_a_friendly_string(self, empty_kb_retriever):
-        """The CLI's `formatted=True` display mode never wraps query() in
-        its own try/except -- it still needs the old swallow-and-stringify
-        behavior, unchanged."""
-        result = empty_kb_retriever.query("test", formatted=True)
-        assert isinstance(result, str)
-        assert "No documents found" in result
-
-    def test_formatted_true_with_return_timing_still_returns_string_and_timing(self, empty_kb_retriever):
-        result, timing = empty_kb_retriever.query("test", formatted=True, return_timing=True)
-        assert isinstance(result, str)
-        assert timing.total_time >= 0
+            empty_kb_retriever.query("test")

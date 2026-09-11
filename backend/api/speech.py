@@ -14,13 +14,21 @@ import logging
 import tempfile
 from dataclasses import is_dataclass, asdict
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import soundfile as sf
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
 
-from backend.dependencies import get_config_dependency, get_tts_manager, reset_tts_manager
+from backend.dependencies import (
+    get_config_dependency,
+    get_tts_manager,
+    require_qwen3,
+    reset_tts_manager,
+)
+
+if TYPE_CHECKING:
+    from src.utilities.tts.tts_manager import UnifiedTTSManager
 from backend.models.speech import (
     ActiveVoiceRequest,
     ActiveVoiceResponse,
@@ -1106,7 +1114,7 @@ async def clone_voice(
     voice_name: str = Form(..., description="Unique name for this voice"),
     ref_text: Optional[str] = Form(None, description="Reference text transcript (improves quality)"),
     audio: UploadFile = File(..., description="Reference audio file (3-15 seconds, WAV/MP3)"),
-    config: OrionConfig = Depends(get_config_dependency),
+    tts_manager: "UnifiedTTSManager" = Depends(require_qwen3),
 ) -> VoiceCloneResponse:
     """
     Create a cloned voice from audio sample.
@@ -1121,8 +1129,8 @@ async def clone_voice(
         voice_name: Unique identifier for this voice
         ref_text: Optional transcript of the audio
         audio: Audio file (WAV, MP3, etc.)
-        config: Configuration dependency (injected)
-    
+        tts_manager: Validated Qwen3-capable TTS manager (injected via require_qwen3)
+
     Returns:
         VoiceCloneResponse with created voice info
     
@@ -1132,30 +1140,6 @@ async def clone_voice(
         HTTPException 500: Voice cloning failed
     """
     try:
-        # Guard: Qwen3-only endpoint
-        if config.tts.default_engine != "qwen3":
-            raise HTTPException(
-                status_code=400,
-                detail=f"Voice cloning requires Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
-            )
-        
-        # Check if Qwen3 is enabled
-        if not config.qwen3.enabled:
-            raise HTTPException(
-                status_code=503,
-                detail="Qwen3-TTS voice cloning is not enabled. Enable in configuration."
-            )
-        
-        # Get TTS manager (should be UnifiedTTSManager)
-        tts_manager = get_tts_manager()
-        
-        # Check if manager has Qwen3 support
-        if not hasattr(tts_manager, 'qwen3_manager'):
-            raise HTTPException(
-                status_code=503,
-                detail="Voice cloning requires Qwen3-TTS. Please check configuration."
-            )
-        
         # Save uploaded audio to temp file
         # Note: extract_voice_embedding will copy it to permanent storage
         with tempfile.NamedTemporaryFile(suffix=Path(audio.filename or "audio.wav").suffix, delete=False) as tmp:
@@ -1165,16 +1149,10 @@ async def clone_voice(
             tmp.flush()
         
         try:
-            # Extract voice embedding using Qwen3Manager
+            # Extract voice embedding using Qwen3Manager. require_qwen3()
+            # already guarantees qwen3_manager is not None.
             qwen3_manager = tts_manager.qwen3_manager
-            
-            # Check if lazy-loading succeeded
-            if qwen3_manager is None:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Qwen3-TTS manager failed to initialize. Check logs for details. Ensure qwen-tts package is installed."
-                )
-            
+
             # This will copy the temp file to permanent storage. Offloaded
             # to a worker thread -- extracting a voice embedding runs real
             # model inference and would otherwise freeze the event loop for
@@ -1240,40 +1218,24 @@ async def clone_voice(
     description="Get list of all voices cloned with Qwen3-TTS (Qwen3 engine only)",
 )
 async def list_cloned_voices(
-    config: OrionConfig = Depends(get_config_dependency),
+    tts_manager: "UnifiedTTSManager" = Depends(require_qwen3),
 ) -> ClonedVoicesListResponse:
     """
     List all cloned voices available for Qwen3-TTS synthesis.
-    
+
     **Note**: This endpoint is only available when Qwen3 engine is active.
-    
+
     Args:
-        config: Configuration dependency (injected)
-    
+        tts_manager: Validated Qwen3-capable TTS manager (injected via require_qwen3)
+
     Returns:
         ClonedVoicesListResponse with voice list
-    
+
     Raises:
         HTTPException 400: Wrong engine active (use Qwen3)
-        HTTPException 503: Qwen3-TTS not available
+        HTTPException 503: Qwen3-TTS disabled or unavailable
     """
     try:
-        # Guard: Qwen3-only endpoint
-        if config.tts.default_engine != "qwen3":
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cloned voice listing requires Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
-            )
-        
-        tts_manager = get_tts_manager()
-        
-        if not hasattr(tts_manager, 'qwen3_manager'):
-            return ClonedVoicesListResponse(
-                status="success",
-                voices=[],
-                count=0,
-            )
-        
         qwen3_manager = tts_manager.qwen3_manager
         embeddings = qwen3_manager.list_cloned_voices()
         
@@ -1308,40 +1270,26 @@ async def list_cloned_voices(
 )
 async def delete_cloned_voice(
     voice_id: str,
-    config: OrionConfig = Depends(get_config_dependency),
+    tts_manager: "UnifiedTTSManager" = Depends(require_qwen3),
 ):
     """
     Delete a cloned voice.
-    
+
     **Note**: This endpoint is only available when Qwen3 engine is active.
-    
+
     Args:
         voice_id: Voice ID to delete
-        config: Configuration dependency (injected)
-    
+        tts_manager: Validated Qwen3-capable TTS manager (injected via require_qwen3)
+
     Returns:
         Success message
-    
+
     Raises:
         HTTPException 400: Wrong engine active (use Qwen3)
         HTTPException 404: Voice not found
-        HTTPException 503: Qwen3-TTS not available
+        HTTPException 503: Qwen3-TTS disabled or unavailable
     """
     try:
-        # Guard: Qwen3-only endpoint
-        if config.tts.default_engine != "qwen3":
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cloned voice deletion requires Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
-            )
-        tts_manager = get_tts_manager()
-        
-        if not hasattr(tts_manager, 'qwen3_manager'):
-            raise HTTPException(
-                status_code=503,
-                detail="Qwen3-TTS not available"
-            )
-        
         qwen3_manager = tts_manager.qwen3_manager
         success = qwen3_manager.delete_voice(voice_id)
         
@@ -1370,49 +1318,29 @@ async def delete_cloned_voice(
 )
 async def synthesize_qwen3(
     request: TTSAsyncRequest,
-    config: OrionConfig = Depends(get_config_dependency),
+    tts_manager: "UnifiedTTSManager" = Depends(require_qwen3),
 ) -> Response:
     """
     Synthesize speech using Qwen3-TTS with a cloned voice.
-    
+
     This endpoint performs synchronous synthesis (blocks until complete).
     For long text, consider using async synthesis endpoint instead.
-    
+
     **Note**: This endpoint is only available when Qwen3 engine is active.
-    
+
     Args:
         request: TTS request with text and cloned voice_id
-        config: Configuration dependency (injected)
-    
+        tts_manager: Validated Qwen3-capable TTS manager (injected via require_qwen3)
+
     Returns:
         Response with audio bytes (WAV format)
-    
+
     Raises:
         HTTPException 400: Invalid text, voice_id, or wrong engine
-        HTTPException 503: Qwen3-TTS not available
+        HTTPException 503: Qwen3-TTS disabled or unavailable
         HTTPException 500: Synthesis failed
     """
     try:
-        # Guard: Qwen3-only endpoint
-        if config.tts.default_engine != "qwen3":
-            raise HTTPException(
-                status_code=400,
-                detail=f"Qwen3 synthesis requires Qwen3-TTS engine. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
-            )
-        if not config.qwen3.enabled:
-            raise HTTPException(
-                status_code=503,
-                detail="Qwen3-TTS is not enabled"
-            )
-        
-        tts_manager = get_tts_manager()
-        
-        if not hasattr(tts_manager, 'qwen3_manager'):
-            raise HTTPException(
-                status_code=503,
-                detail="Qwen3-TTS not available"
-            )
-        
         # Synthesize using Qwen3. Offloaded to a worker thread -- see
         # synthesize_speech() above for why.
         qwen3_manager = tts_manager.qwen3_manager
@@ -1562,37 +1490,24 @@ async def update_qwen3_config(
     description="Get synthesis statistics and cache info for Qwen3-TTS (Qwen3 engine only)",
 )
 async def get_qwen3_stats(
-    config: OrionConfig = Depends(get_config_dependency),
+    tts_manager: "UnifiedTTSManager" = Depends(require_qwen3),
 ):
     """
     Get Qwen3-TTS performance statistics.
-    
+
     **Note**: This endpoint is only available when Qwen3 engine is active.
-    
+
     Args:
-        config: Configuration dependency (injected)
-    
+        tts_manager: Validated Qwen3-capable TTS manager (injected via require_qwen3)
+
     Returns:
         Statistics dictionary
-    
+
     Raises:
         HTTPException 400: Wrong engine active (use Qwen3)
+        HTTPException 503: Qwen3-TTS disabled or unavailable
     """
     try:
-        # Guard: Qwen3-only endpoint
-        if config.tts.default_engine != "qwen3":
-            raise HTTPException(
-                status_code=400,
-                detail=f"Qwen3 statistics require Qwen3-TTS engine. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
-            )
-        tts_manager = get_tts_manager()
-        
-        if not hasattr(tts_manager, 'qwen3_manager'):
-            return {
-                "status": "unavailable",
-                "message": "Qwen3-TTS not available",
-            }
-        
         qwen3_manager = tts_manager.qwen3_manager
         stats = qwen3_manager.get_stats()
         
@@ -1618,55 +1533,33 @@ async def get_qwen3_stats(
 )
 async def generate_voice(
     request: VoiceGenerateRequest,
-    config: OrionConfig = Depends(get_config_dependency),
+    tts_manager: "UnifiedTTSManager" = Depends(require_qwen3),
 ) -> VoiceGenerateResponse:
     """
     Generate speech with a voice designed from text description.
-    
+
     Uses the Qwen3-TTS VoiceDesign model to create speech with a voice
     that matches the given description. This creates the voice on-the-fly
     without needing a reference audio sample.
-    
+
     **Note**: For consistent voice across multiple calls, use `/design-and-save`
     to create a reusable voice, then use `/tts` with that voice_id.
-    
+
     **Note**: This endpoint is only available when Qwen3 engine is active.
-    
+
     Args:
         request: Voice generation request with text, description, and language
-        config: Configuration dependency (injected)
-    
+        tts_manager: Validated Qwen3-capable TTS manager (injected via require_qwen3)
+
     Returns:
         VoiceGenerateResponse with base64-encoded audio
-    
+
     Raises:
         HTTPException 400: Invalid request or wrong engine
-        HTTPException 503: Qwen3-TTS not available
+        HTTPException 503: Qwen3-TTS disabled or unavailable
         HTTPException 500: Generation failed
     """
     try:
-        # Guard: Qwen3-only endpoint
-        if config.tts.default_engine != "qwen3":
-            raise HTTPException(
-                status_code=400,
-                detail=f"Voice generation requires Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
-            )
-        
-        # Check if Qwen3 is enabled
-        if not config.qwen3.enabled:
-            raise HTTPException(
-                status_code=503,
-                detail="Qwen3-TTS is not enabled. Enable in configuration."
-            )
-        
-        tts_manager = get_tts_manager()
-        
-        if not hasattr(tts_manager, 'qwen3_manager') or tts_manager.qwen3_manager is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Qwen3-TTS manager not available. Check configuration and logs."
-            )
-        
         qwen3_manager = tts_manager.qwen3_manager
 
         # Generate speech with designed voice. Offloaded to a worker thread
@@ -1714,56 +1607,35 @@ async def generate_voice(
 )
 async def design_and_save_voice(
     request: DesignAndSaveRequest,
-    config: OrionConfig = Depends(get_config_dependency),
+    tts_manager: "UnifiedTTSManager" = Depends(require_qwen3),
 ) -> DesignAndSaveResponse:
     """
     Design a voice and save it as a cloneable voice for consistent reuse.
-    
+
     This endpoint uses the VoiceDesign model to generate sample audio from
     a text description, then saves it as a reusable voice. Future synthesis
     with this voice_id will use the Base model for faster, consistent results.
-    
+
     Workflow (Design-then-Clone):
     1. VoiceDesign model generates sample audio from description
     2. Sample is saved as reference audio for voice cloning
     3. Use `/tts` endpoint with the created voice_id for consistent voice
-    
+
     **Note**: This endpoint is only available when Qwen3 engine is active.
-    
+
     Args:
         request: Design and save request with voice_id, description, etc.
-        config: Configuration dependency (injected)
-    
+        tts_manager: Validated Qwen3-capable TTS manager (injected via require_qwen3)
+
     Returns:
         DesignAndSaveResponse with created voice info and preview audio
-    
+
     Raises:
         HTTPException 400: Voice ID exists or invalid request
-        HTTPException 503: Qwen3-TTS not available
+        HTTPException 503: Qwen3-TTS disabled or unavailable
         HTTPException 500: Operation failed
     """
     try:
-        # Guard: Qwen3-only endpoint
-        if config.tts.default_engine != "qwen3":
-            raise HTTPException(
-                status_code=400,
-                detail=f"Voice design requires Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
-            )
-        
-        if not config.qwen3.enabled:
-            raise HTTPException(
-                status_code=503,
-                detail="Qwen3-TTS is not enabled. Enable in configuration."
-            )
-        
-        tts_manager = get_tts_manager()
-        
-        if not hasattr(tts_manager, 'qwen3_manager') or tts_manager.qwen3_manager is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Qwen3-TTS manager not available. Check configuration and logs."
-            )
-        
         qwen3_manager = tts_manager.qwen3_manager
         
         # Design and save the voice. Offloaded to a worker thread -- see
@@ -1815,48 +1687,27 @@ async def design_and_save_voice(
     description="Get list of languages supported by Qwen3-TTS models (Qwen3 engine only)",
 )
 async def list_supported_languages(
-    config: OrionConfig = Depends(get_config_dependency),
+    tts_manager: "UnifiedTTSManager" = Depends(require_qwen3),
 ) -> SupportedLanguagesResponse:
     """
     List all languages supported by Qwen3-TTS.
-    
+
     Returns the list of languages that can be used with voice generation,
     voice cloning, and custom voice synthesis.
-    
+
     **Note**: This endpoint is only available when Qwen3 engine is active.
-    
+
     Args:
-        config: Configuration dependency (injected)
-    
+        tts_manager: Validated Qwen3-capable TTS manager (injected via require_qwen3)
+
     Returns:
         SupportedLanguagesResponse with list of language names
-    
+
     Raises:
         HTTPException 400: Wrong engine active
-        HTTPException 503: Qwen3-TTS not available
+        HTTPException 503: Qwen3-TTS disabled or unavailable
     """
     try:
-        # Guard: Qwen3-only endpoint
-        if config.tts.default_engine != "qwen3":
-            raise HTTPException(
-                status_code=400,
-                detail=f"This endpoint requires Qwen3-TTS. Current engine: {config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
-            )
-        
-        if not config.qwen3.enabled:
-            raise HTTPException(
-                status_code=503,
-                detail="Qwen3-TTS is not enabled. Enable in configuration."
-            )
-        
-        tts_manager = get_tts_manager()
-        
-        if not hasattr(tts_manager, 'qwen3_manager') or tts_manager.qwen3_manager is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Qwen3-TTS manager not available. Check configuration and logs."
-            )
-        
         qwen3_manager = tts_manager.qwen3_manager
         
         # Get supported languages

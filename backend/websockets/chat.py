@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect, status
 
 from backend.models.chat import WebSocketMessage
+from backend.streaming_queue import ThreadSafeEventQueue
 from src.generation.generate import AnswerGenerator
 from src.generation.session_manager import SessionManager
 from src.utilities.config import OrionConfig
@@ -50,13 +51,9 @@ class ChatWebSocketHandler:
         self.connected = False
 
         # Token streaming queue (fixes fire-and-forget issues)
-        self.token_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        self.token_queue: ThreadSafeEventQueue[str] = ThreadSafeEventQueue()
         self._queue_task: asyncio.Task | None = None
         self._is_processing = False
-        # Set from the event-loop thread before generation is offloaded to a
-        # worker thread (see handle_user_message); queue_token() needs this to
-        # safely hop back onto the loop via call_soon_threadsafe.
-        self._loop: asyncio.AbstractEventLoop | None = None
     
     async def _process_token_queue(self):
         """
@@ -71,20 +68,16 @@ class ChatWebSocketHandler:
             while self.connected or not self.token_queue.empty():
                 try:
                     # Get token with timeout to allow checking connected status
-                    token = await asyncio.wait_for(
-                        self.token_queue.get(),
-                        timeout=0.1
-                    )
-                    
+                    token = await self.token_queue.get(timeout=0.1)
+
                     # None is sentinel value for "done streaming"
                     if token is None:
                         logger.debug("Received end-of-stream signal")
                         break
-                    
+
                     # Send token to client
                     await self.send_message(message_type="token", content=token)
-                    self.token_queue.task_done()
-                    
+
                 except asyncio.TimeoutError:
                     # No token available, loop again to check connection status
                     continue
@@ -103,24 +96,13 @@ class ChatWebSocketHandler:
         Called from the sync Ollama streaming callback, which runs on a
         worker thread (see handle_user_message) — asyncio.Queue isn't safe
         to touch off the event-loop thread, so this hops back via
-        call_soon_threadsafe instead of calling put_nowait directly.
+        ThreadSafeEventQueue's call_soon_threadsafe wrapper instead of
+        calling put_nowait directly.
 
         Args:
             token: Token content to send
         """
-        if self._loop is None:
-            logger.error("Dropped token: no event loop registered")
-            return
-        self._loop.call_soon_threadsafe(self._put_token_nowait, token)
-
-    def _put_token_nowait(self, token: str):
-        """Actually enqueue the token; must run on the event-loop thread."""
-        try:
-            self.token_queue.put_nowait(token)
-        except asyncio.QueueFull:
-            logger.warning(f"Token queue full, dropping token: {token[:20]}...")
-        except Exception as e:
-            logger.error(f"Failed to queue token: {e}")
+        self.token_queue.put_threadsafe(token)
     
     async def start_token_streaming(self):
         """Start the token queue processor task."""
@@ -131,9 +113,11 @@ class ChatWebSocketHandler:
     
     async def stop_token_streaming(self):
         """Stop the token queue processor and signal end of stream."""
-        # Signal end of stream
-        await self.token_queue.put(None)
-        
+        # Signal end of stream. Called from the event-loop thread, so no
+        # thread hop is needed here.
+        self.token_queue.close()
+
+
         # Wait for queue to finish processing
         if self._queue_task and not self._queue_task.done():
             try:
@@ -398,7 +382,7 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
 
             # Needed so queue_token() (called from the worker thread below)
             # can safely hop back onto the event loop.
-            self._loop = asyncio.get_running_loop()
+            self.token_queue.bind_loop(asyncio.get_running_loop())
 
             # Tracks whether any token actually made it to the client, so we
             # can tell a real (if empty) response apart from a generation

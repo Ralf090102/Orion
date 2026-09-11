@@ -9,7 +9,7 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING, TypeVar
 
 from fastapi import Depends, HTTPException, status
 
@@ -19,6 +19,34 @@ from src.retrieval.retriever import OrionRetriever
 from src.utilities.config import OrionConfig, get_config
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+def _get_or_init(current: Optional[T], factory: Callable[[], T], error_message: str) -> T:
+    """
+    Return `current` if it's already been constructed, otherwise build it via
+    `factory` -- the "lazy singleton, 503 on init failure" skeleton shared by
+    several of the dependency getters below. `factory` errors are wrapped as
+    an HTTPException rather than left to propagate as a raw 500, so a failed
+    construction reads to API callers the same way an already-known-down
+    dependency does.
+
+    Doesn't hold the singleton itself -- callers still own and reassign their
+    own module-level `global` variable, so initialize_resources()/
+    cleanup_resources()/warm_up_retriever_background() (which read/write
+    those globals directly, outside any getter) need no changes.
+    """
+    if current is not None:
+        return current
+    try:
+        return factory()
+    except Exception as e:
+        logger.error(f"{error_message}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"{error_message}: {e}",
+        )
 
 
 def _session_storage_dir() -> Optional[Path]:
@@ -174,43 +202,39 @@ def cleanup_resources():
 def get_config_dependency() -> OrionConfig:
     """
     Dependency: Get configuration instance.
-    
+
     Returns:
         OrionConfig instance
-        
+
     Raises:
         HTTPException: If config not initialized
     """
     global _config
-    
-    if _config is None:
-        # Lazy initialization
-        _config = _build_config()
-
+    _config = _get_or_init(_config, _build_config, "Config service unavailable")
     return _config
 
 
 def get_session_manager_dependency() -> SessionManager:
     """
     Dependency: Get session manager instance.
-    
+
     Returns:
         SessionManager instance
-        
+
     Raises:
         HTTPException: If session manager not initialized
     """
     global _session_manager
-    
-    if _session_manager is None:
-        # Lazy initialization
-        _session_manager = get_session_manager(
+    _session_manager = _get_or_init(
+        _session_manager,
+        lambda: get_session_manager(
             persist_to_disk=True,
             storage_dir=_session_storage_dir(),
             session_expiry_days=7,
             auto_cleanup=True,
-        )
-    
+        ),
+        "Session manager service unavailable",
+    )
     return _session_manager
 
 
@@ -230,18 +254,9 @@ def get_retriever_dependency(
         HTTPException: If retriever initialization fails
     """
     global _retriever
-    
-    if _retriever is None:
-        try:
-            _retriever = OrionRetriever(config=config)
-            logger.info("Retriever lazy-loaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize retriever: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Retriever service unavailable: {str(e)}",
-            )
-    
+    _retriever = _get_or_init(
+        _retriever, lambda: OrionRetriever(config=config), "Retriever service unavailable"
+    )
     return _retriever
 
 
@@ -261,18 +276,9 @@ def get_generator_dependency(
         HTTPException: If generator initialization fails
     """
     global _generator
-    
-    if _generator is None:
-        try:
-            _generator = AnswerGenerator(config=config)
-            logger.info("Answer generator lazy-loaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize generator: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Generator service unavailable: {str(e)}",
-            )
-    
+    _generator = _get_or_init(
+        _generator, lambda: AnswerGenerator(config=config), "Generator service unavailable"
+    )
     return _generator
 
 
@@ -392,7 +398,7 @@ def get_tts_manager() -> "UnifiedTTSManager":
 def reset_tts_manager():
     """
     Reset TTS manager instance (useful for config changes).
-    
+
     Call this after updating TTS configuration to force re-initialization.
     """
     global _tts_manager
@@ -400,3 +406,46 @@ def reset_tts_manager():
         _tts_manager.unload()  # Unload current voice
     _tts_manager = None
     logger.info("TTS manager instance reset")
+
+
+def require_qwen3(
+    config: OrionConfig = Depends(get_config_dependency),
+    tts_manager: "UnifiedTTSManager" = Depends(get_tts_manager),
+) -> "UnifiedTTSManager":
+    """
+    Dependency: gate a Qwen3-only route.
+
+    Replaces the same three-step precondition (engine selected, Qwen3
+    enabled, Qwen3 manager actually available) that used to be re-derived by
+    hand in every Qwen3 route in backend/api/speech.py -- the re-derivations
+    had already drifted (some skipped the enabled check, two returned a soft
+    200 instead of a 503 when unavailable). Standardized here to always
+    raise, consistently, across all eight routes.
+
+    Returns the validated tts_manager so callers don't need a second
+    get_tts_manager() call -- accessing tts_manager.qwen3_manager is
+    guaranteed safe (non-None) after this dependency resolves.
+
+    Raises:
+        HTTPException: 400 if a different TTS engine is active, 503 if
+            Qwen3 is disabled in config or its manager isn't available.
+    """
+    if config.tts.default_engine != "qwen3":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"This endpoint requires Qwen3-TTS. Current engine: "
+                f"{config.tts.default_engine}. Switch engine with PATCH /api/speech/engine"
+            ),
+        )
+    if not config.qwen3.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Qwen3-TTS is not enabled. Enable in configuration.",
+        )
+    if not hasattr(tts_manager, "qwen3_manager") or tts_manager.qwen3_manager is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Qwen3-TTS manager not available. Check configuration and logs.",
+        )
+    return tts_manager

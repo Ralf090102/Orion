@@ -121,9 +121,7 @@ class AnswerGenerator:
         logger.debug(f"Retrieving top {k} documents")
 
         try:
-            search_results, retrieval_timing = self.retriever.query(
-                query_text=query, k=k, formatted=False, return_timing=True
-            )
+            search_results, retrieval_timing = self.retriever.query(query_text=query, k=k)
             # Merge retrieval timing
             timing.embedding_time = retrieval_timing.embedding_time
             timing.search_time = retrieval_timing.search_time
@@ -334,9 +332,7 @@ class AnswerGenerator:
             logger.debug("Triggering RAG retrieval in chat mode")
             try:
                 k = self.config.rag.retrieval.default_k
-                search_results, retrieval_timing = self.retriever.query(
-                    query_text=message, k=k, formatted=False, return_timing=True
-                )
+                search_results, retrieval_timing = self.retriever.query(query_text=message, k=k)
                 
                 # Copy retrieval timing
                 timing.embedding_time = retrieval_timing.embedding_time
