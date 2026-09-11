@@ -16,10 +16,14 @@ SearchResults without an embedding, and only reachable when a request
 disables reranking while leaving MMR enabled). Found via code investigation,
 reproduced directly against the pinned chromadb version.
 
-Fixed two places: SemanticSearcher.search() now normalizes the embedding to
-a plain list at the source, and MMRSearcher.search()'s filter uses an
-explicit `is not None and len(...) > 0` check instead of bare truthiness, so
-it's correct regardless of which type reaches it.
+Originally fixed in two places independently: SemanticSearcher.search()
+list-ifying the embedding, and MMRSearcher.search()'s filter switching to an
+explicit `is not None and len(...) > 0` check. Both were later collapsed
+into a single guarantee, normalized once in SearchResult.__init__ (see
+test_search_result_embedding_normalization.py) -- so MMRSearcher.search()'s
+filter is back to plain truthiness, safe now that embedding is always
+list[float] or None by the time it gets there, whatever type was passed in
+at construction.
 """
 
 from unittest.mock import MagicMock, patch

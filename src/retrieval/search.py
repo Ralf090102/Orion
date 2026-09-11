@@ -40,6 +40,20 @@ class SearchResult:
         self.metadata = metadata
         self.score = score
         self.search_type = search_type
+        # Normalize once, here, so every consumer can trust embedding is
+        # always list[float] or None. ChromaDB returns query embeddings as
+        # raw numpy.ndarray, not the plain list[float] that embeddings.py's
+        # own encode_single()/encode_batch() always normalize to -- without
+        # coercing at this single seam, a bare truthiness check on the
+        # ndarray downstream (e.g. MMRSearcher.search()) raises "The truth
+        # value of an array with more than one element is ambiguous".
+        # .tolist() also turns numpy scalar elements into native Python
+        # floats and an empty ndarray into [] (not None), matching what an
+        # empty list already means to callers: no embedding to use.
+        if isinstance(embedding, np.ndarray):
+            embedding = embedding.tolist()
+        elif embedding is not None and not isinstance(embedding, list):
+            embedding = list(embedding)
         self.embedding = embedding  # Cache embedding to avoid re-computation in MMR
 
     def to_dict(self) -> dict[str, Any]:
@@ -129,18 +143,13 @@ class SemanticSearcher:
 
                     # Apply threshold filter
                     if similarity_score >= similarity_threshold:
-                        # Get embedding if available from query results. ChromaDB
-                        # returns these as raw numpy.ndarray, not the plain
-                        # list[float] that embeddings.py's own encode_single()/
-                        # encode_batch() always normalize to before returning --
-                        # normalize here too so SearchResult.embedding has one
-                        # consistent type everywhere downstream. Without this, a
-                        # bare truthiness check on the ndarray later (e.g.
-                        # MMRSearcher.search()) raises "The truth value of an
-                        # array with more than one element is ambiguous".
+                        # Get embedding if available from query results.
+                        # SearchResult.__init__ normalizes whatever type comes
+                        # in (ChromaDB returns raw numpy.ndarray), so pass it
+                        # through as-is.
                         result_embedding = None
                         if results.get("embeddings") and results["embeddings"][0]:
-                            result_embedding = list(results["embeddings"][0][i])
+                            result_embedding = results["embeddings"][0][i]
 
                         search_result = SearchResult(
                             document_id=results["ids"][0][i],
@@ -763,17 +772,15 @@ class MMRSearcher:
                 else:
                     candidate_embeddings.append(None)
 
-            # Filter out candidates without embeddings. `embedding` can be a
-            # plain list[float] (from encode_batch above) or a numpy.ndarray
-            # (from SearchResult.embedding, if it came from a cached semantic
-            # search result) -- a bare `if embedding:` raises "The truth value
-            # of an array with more than one element is ambiguous" for the
-            # latter, so check presence/emptiness explicitly instead (works
-            # identically for both types).
+            # Filter out candidates without embeddings. `embedding` here is
+            # always list[float] or None -- encode_batch already returns
+            # plain lists, and SearchResult.__init__ normalizes cached
+            # embeddings to plain lists too -- so a bare truthiness check is
+            # safe (an empty list is falsy, same as None).
             valid_candidates = []
             valid_embeddings = []
             for result, embedding in zip(candidate_results, candidate_embeddings):
-                if embedding is not None and len(embedding) > 0:
+                if embedding:
                     valid_candidates.append(result)
                     valid_embeddings.append(embedding)
 
