@@ -58,6 +58,17 @@ def _session_storage_dir() -> Optional[Path]:
     wiped and re-extracted every time). Falls back to SessionManager's own
     "./data/chat-data" default when unset, e.g. running the backend directly
     for API dev or tests outside of Tauri.
+
+    On Windows this resolves to Tauri's app-data dir keyed by the app's
+    *identifier* -- %APPDATA%\\Roaming\\<identifier> (e.g.
+    C:\\Users\\<user>\\AppData\\Roaming\\com.orion.app\\), NOT the NSIS
+    install directory (C:\\Users\\<user>\\AppData\\Local\\Orion\\, where
+    app.exe/src/backend actually live). These two are easy to conflate --
+    confirmed live 2026-09-11, after an entire debugging session assumed the
+    install directory and manually ingested/inspected data there, while the
+    real running app had been reading/writing AppData\\Roaming\\com.orion.app\\
+    the whole time. When in doubt, don't assume either path -- read
+    os.environ["ORION_DATA_DIR"] from the actual running process.
     """
     data_dir = os.environ.get("ORION_DATA_DIR")
     return Path(data_dir) / "chat-data" if data_dir else None

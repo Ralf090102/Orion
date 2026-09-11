@@ -52,6 +52,10 @@ data/chroma-data
 *.db
 *.sqlite
 
+# Per-project Claude/Erudition continuity memory -- personal session
+# checkpoints, not meant to ship in the public repo
+Memory/
+
 # OS-specific
 Thumbs.db
 

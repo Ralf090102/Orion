@@ -70,13 +70,13 @@ class SessionManager:
         self.session_expiry_days = session_expiry_days
         self.sessions: dict[str, ChatSession] = {}
         self.db_path: Optional[Path] = None
-        
+
         if self.persist_to_disk:
             self.storage_dir.mkdir(parents=True, exist_ok=True)
             self.db_path = self.storage_dir / "sessions.db"
             self._init_database()
             self._load_sessions_from_db()
-            
+
             # Auto cleanup on startup
             if auto_cleanup:
                 cleaned = self.cleanup_old_sessions(max_age_days=session_expiry_days)
