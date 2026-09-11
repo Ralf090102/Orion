@@ -146,10 +146,18 @@ class SemanticSearcher:
                         # Get embedding if available from query results.
                         # SearchResult.__init__ normalizes whatever type comes
                         # in (ChromaDB returns raw numpy.ndarray), so pass it
-                        # through as-is.
+                        # through as-is once found -- but finding it means
+                        # checking presence/emptiness on the *raw* Chroma
+                        # response first, which is itself numpy.ndarray-typed
+                        # (not yet a SearchResult), so a bare truthiness check
+                        # here raises the same "truth value of an array is
+                        # ambiguous" error this exact guard used to raise
+                        # downstream, before SearchResult.__init__ existed to
+                        # normalize it.
                         result_embedding = None
-                        if results.get("embeddings") and results["embeddings"][0]:
-                            result_embedding = results["embeddings"][0][i]
+                        embeddings = results.get("embeddings")
+                        if embeddings is not None and len(embeddings) > 0 and len(embeddings[0]) > 0:
+                            result_embedding = embeddings[0][i]
 
                         search_result = SearchResult(
                             document_id=results["ids"][0][i],

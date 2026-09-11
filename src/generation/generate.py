@@ -326,6 +326,14 @@ class AnswerGenerator:
 
         prepared_contexts = []
         search_results = []
+        # Distinct from should_retrieve (whether retrieval was attempted) --
+        # this tracks whether an attempted retrieval actually failed, so the
+        # two are never conflated in metadata below: "RAG wasn't needed" and
+        # "RAG was needed but silently failed" used to look identical to any
+        # caller, which is exactly what made an empty/misconfigured
+        # knowledge base indistinguishable from working-as-intended chat.
+        rag_retrieval_failed = False
+        rag_retrieval_error: str | None = None
 
         # Retrieve documents if needed
         if should_retrieve:
@@ -333,7 +341,7 @@ class AnswerGenerator:
             try:
                 k = self.config.rag.retrieval.default_k
                 search_results, retrieval_timing = self.retriever.query(query_text=message, k=k)
-                
+
                 # Copy retrieval timing
                 timing.embedding_time = retrieval_timing.embedding_time
                 timing.search_time = retrieval_timing.search_time
@@ -351,7 +359,20 @@ class AnswerGenerator:
                     prepared_contexts = prepared_contexts[:max_chunks]
                     logger.info(f"Retrieved and prepared {len(prepared_contexts)} contexts for chat")
             except Exception as e:
-                logger.warning(f"RAG retrieval in chat mode failed: {e}")
+                # Chat mode keeps answering conversationally without context
+                # on a retrieval failure -- that's the correct degrade-
+                # gracefully design here (unlike explicit RAG mode, which
+                # returns a visible error/no-results answer instead, see
+                # generate_rag_response() above). But silently continuing
+                # used to leave zero trace anywhere that retrieval was even
+                # attempted, let alone that it failed -- e.g. an empty
+                # knowledge base (_check_knowledge_base()'s ValueError) was
+                # completely indistinguishable from RAG legitimately not
+                # being needed. Log loud and record it in metadata instead,
+                # so the failure is at least diagnosable.
+                logger.error(f"RAG retrieval in chat mode failed: {e}", exc_info=True)
+                rag_retrieval_failed = True
+                rag_retrieval_error = str(e)
                 # Continue without RAG context
 
         # Build chat prompt (with or without RAG context)
@@ -466,11 +487,14 @@ class AnswerGenerator:
         metadata = {
             "query_type": classification.query_type,
             "rag_retrieval_triggered": should_retrieve,
+            "rag_retrieval_failed": rag_retrieval_failed,
             "num_contexts_used": len(prepared_contexts),
             "conversation_turns": len(self.prompt_builder.conversation_history) // 2,
             "total_tokens": prompt_components.total_tokens,
             "llm_model": self.config.rag.llm.model,
         }
+        if rag_retrieval_failed:
+            metadata["rag_retrieval_error"] = rag_retrieval_error
 
         # Store messages in session if session_manager provided
         if session_manager and session_id:
