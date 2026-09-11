@@ -18,6 +18,7 @@ from backend.streaming_queue import ThreadSafeEventQueue
 from src.generation.generate import AnswerGenerator
 from src.generation.session_manager import SessionManager
 from src.utilities.config import OrionConfig
+from src.utilities.request_context import new_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -326,7 +327,15 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
         try:
             options = options or {}
             start_time = time.time()
-            
+
+            # Minted here (event-loop context), not inside
+            # generate_chat_response() -- asyncio.to_thread() below copies
+            # the current contextvars.Context into the worker thread, so
+            # this must be set before that call for log-line tagging to
+            # reach the offloaded generation work too. See
+            # src/utilities/request_context.py.
+            request_id = new_request_id()
+
             # Extract voice mode settings
             voice_mode = options.get("voice_mode", False)
             disable_rag = options.get("disable_rag", False)
@@ -417,6 +426,7 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
                 include_sources=include_sources,
                 on_token=stream_token,
                 voice_mode=voice_mode,
+                request_id=request_id,
                 **generation_kwargs,
             )
 
@@ -463,6 +473,7 @@ Reply with ONLY the title, nothing else. No quotes, no explanations."""
             await self.send_message(
                 message_type="metadata",
                 data={
+                    "request_id": request_id,
                     "rag_triggered": result.rag_triggered,
                     "query_type": getattr(result, "query_type", "conversational"),
                     "model": self.config.rag.llm.model,

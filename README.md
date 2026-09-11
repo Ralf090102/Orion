@@ -256,6 +256,47 @@ Tests use FastAPI's `dependency_overrides` to fake out the ML stack (retriever, 
 
 ---
 
+## Logs & Diagnostics
+
+Orion writes two persistent log files to a `logs/` folder inside its app-data
+directory (the same stable, per-user directory `ORION_DATA_DIR` resolves to
+-- survives reinstalls/updates):
+
+- `orion-shell.log` — the Tauri/Rust shell's own lifecycle logging, plus the
+  Python backend's relayed stdout/stderr.
+- `orion-backend.log` — the Python backend's own structured logging.
+
+Open this folder from **Settings → Application → Open Logs Folder** (wraps
+the existing `open_folder` command — there's no in-app log viewer by
+design; this is deliberately the entire feature).
+
+Every chat request is tagged with a correlation ID (a UUID, logged as
+`[request_id]` on every line for that request in both files, and returned
+to the client as `metadata.request_id` on the chat response/stream/WS
+payload) so one query's lines can be grepped out of either file. Each chat
+turn also gets a structured **retrieval trace** — which documents were
+retrieved by which retriever, what survived fusion/reranking/MMR, and what
+actually made it into the prompt — persisted in the `query_traces` table of
+the same `sessions.db` used for chat history, keyed by that same
+`request_id`. There's no UI for the trace yet; inspect it directly with
+`sqlite3`:
+
+```bash
+sqlite3 "%APPDATA%\com.orion.app\chat-data\sessions.db" \
+  "select trace_json from query_traces where request_id = '<id>'"
+```
+
+**Retention & redaction**: both log files rotate (bounded to roughly 20MB
+and 60MB respectively) but are never redacted, and `query_traces` rows are
+never pruned. This is a deliberate choice, not an oversight: Orion is a
+single-user, single-machine, fully local tool with no cloud sync or
+telemetry, and the whole point of the trace is to show exactly what
+retrieved chunk and prompt content the LLM actually saw -- the only reader
+already owns the source documents. If Orion ever adds multi-user access,
+cloud sync, or crash-report upload, this decision needs revisiting first.
+
+---
+
 ## Acknowledgments
 
 - [HuggingFace Chat-UI](https://github.com/huggingface/chat-ui) - Frontend design inspiration

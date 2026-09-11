@@ -97,6 +97,26 @@ export async function openFolder(path: string): Promise<void> {
 }
 
 /**
+ * Get the directory where Orion writes its log files (Rust shell's
+ * orion-shell.log and Python backend's orion-backend.log, both in one
+ * folder). Pair with openFolder() to let the user inspect logs directly --
+ * deliberately no in-app log viewer, see Eru's Orion-Roadmap.md.
+ */
+export async function getLogsDir(): Promise<string | null> {
+	if (!isTauri()) {
+		console.warn('Logs dir not available in browser mode');
+		return null;
+	}
+
+	try {
+		return await invoke<string>('get_logs_dir');
+	} catch (error) {
+		console.error('Failed to get logs dir:', error);
+		return null;
+	}
+}
+
+/**
  * Poll backend status periodically
  * @param callback - Function to call with the status
  * @param intervalMs - Polling interval in milliseconds (default: 5000)

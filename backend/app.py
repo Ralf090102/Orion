@@ -30,11 +30,16 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+# Configure logging (console + persistent rotating file under
+# ${ORION_DATA_DIR}/logs/, request-id-tagged). Was logging.basicConfig()
+# with a bare stderr handler and no file persistence -- release builds of
+# the Tauri shell wrote no log files at all, which measurably slowed down
+# diagnosing a live RAG-groundedness bug 2026-09-11. See Eru's
+# Orion-Roadmap.md for the full decision record and backend/logging_setup.py
+# for what this now configures.
+from backend.logging_setup import configure_logging
+
+configure_logging()
 logger = logging.getLogger(__name__)
 
 

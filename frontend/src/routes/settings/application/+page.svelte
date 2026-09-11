@@ -11,8 +11,9 @@
 	import CarbonStopFilled from "~icons/carbon/stop-filled";
 	import CarbonPlay from "~icons/carbon/play";
 	import CarbonReset from "~icons/carbon/reset";
+	import CarbonFolderOpen from "~icons/carbon/folder-open";
 
-	import { isTauri, pollBackendStatus, startBackend, stopBackend, restartBackend } from '$lib/tauri';
+	import { isTauri, pollBackendStatus, startBackend, stopBackend, restartBackend, getLogsDir, openFolder } from '$lib/tauri';
 
 	let backendStatus: string = 'checking';
 	let isDesktopMode = false;
@@ -69,6 +70,16 @@
 			console.error('Failed to restart backend:', error);
 		} finally {
 			isProcessing = false;
+		}
+	}
+
+	// Deliberately no in-app log viewer -- this just reveals the folder
+	// (orion-shell.log + orion-backend.log) in the OS file explorer. See
+	// Eru's Orion-Roadmap.md for why a custom viewer was explicitly rejected.
+	async function handleOpenLogs() {
+		const logsDir = await getLogsDir();
+		if (logsDir) {
+			await openFolder(logsDir);
 		}
 	}
 
@@ -194,6 +205,13 @@
 							Start
 						</button>
 					{/if}
+						<button
+							on:click={handleOpenLogs}
+							class="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+						>
+							<CarbonFolderOpen class="size-4" />
+							Open Logs Folder
+						</button>
 				</div>
 			</div>
 		</div>

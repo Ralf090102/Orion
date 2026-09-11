@@ -35,6 +35,7 @@ from backend.models.chat import (
 from src.generation.generate import AnswerGenerator
 from src.generation.session_manager import SessionManager
 from src.utilities.config import OrionConfig
+from src.utilities.request_context import new_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -502,14 +503,19 @@ async def send_message(
     """
     try:
         start_time = time.time()
-        
+
+        # Minted here, not inside generate_chat_response(), so it's known
+        # before generation even starts -- this whole request (log lines
+        # included) is tagged with it. See src/utilities/request_context.py.
+        request_id = new_request_id()
+
         # ===== EXTRACT REQUIRED ARGUMENT =====
         message = request.message
-        
+
         # ===== APPLY OPTIONAL SETTINGS =====
         rag_mode = request.rag_mode or config.rag.generation.rag_trigger_mode
         include_sources = request.include_sources
-        
+
         logger.info(
             f"Chat message in session {session_id}: '{message}' "
             f"(rag_mode={rag_mode}, sources={include_sources})"
@@ -535,6 +541,7 @@ async def send_message(
             session_manager=session_manager,
             rag_mode=rag_mode,
             include_sources=include_sources,
+            request_id=request_id,
             **generation_kwargs,
         )
         
@@ -556,8 +563,11 @@ async def send_message(
                 for i, src in enumerate(result.sources)
             ]
         
-        # Build metadata
+        # Build metadata. request_id lets the user match this turn back to
+        # its lines in orion-backend.log / orion-shell.log and its row in
+        # the query_traces table -- see Eru's Orion-Roadmap.md.
         metadata = {
+            "request_id": request_id,
             "rag_retrieval_triggered": result.rag_triggered,
             "query_type": getattr(result, "query_type", "conversational"),
             "model": config.rag.llm.model,
@@ -628,13 +638,16 @@ async def send_message_stream(
     async def event_generator():
         """Generate SSE events for streaming chat response."""
         try:
+            # See send_message()'s comment above on minting early.
+            request_id = new_request_id()
+
             # ===== EXTRACT REQUIRED ARGUMENT =====
             message = request.message
-            
+
             # ===== APPLY OPTIONAL SETTINGS =====
             rag_mode = request.rag_mode or config.rag.generation.rag_trigger_mode
             include_sources = request.include_sources
-            
+
             logger.info(
                 f"Streaming chat in session {session_id}: '{message}' "
                 f"(rag_mode={rag_mode})"
@@ -673,6 +686,7 @@ async def send_message_stream(
                 rag_mode=rag_mode,
                 include_sources=include_sources,
                 on_token=stream_token,
+                request_id=request_id,
                 **generation_kwargs,
             )
             
@@ -713,6 +727,7 @@ async def send_message_stream(
                 type="metadata",
                 content="",
                 data={
+                    "request_id": request_id,
                     "rag_triggered": result.rag_triggered,
                     "query_type": getattr(result, "query_type", "conversational"),
                     "model": config.rag.llm.model,

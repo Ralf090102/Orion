@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from src.retrieval.embeddings import EmbeddingManager
     from src.retrieval.vector_store import ChromaVectorStore
     from src.utilities.config import OrionConfig
+    from src.generation.trace import QueryTrace
 
 
 class SearchResult:
@@ -471,6 +472,7 @@ class HybridSearcher:
         keyword_weight: float | None = None,
         metadata_filter: dict[str, Any] | None = None,
         fusion_method: str = "rrf",  # "rrf" or "weighted"
+        trace: Optional["QueryTrace"] = None,
     ) -> list[SearchResult]:
         """
         Perform hybrid search combining semantic and keyword approaches.
@@ -482,6 +484,9 @@ class HybridSearcher:
             keyword_weight: Weight for keyword scores (0.0-1.0, used for weighted fusion)
             metadata_filter: Optional metadata filter
             fusion_method: "rrf" (Reciprocal Rank Fusion, recommended) or "weighted" (score combination)
+            trace: Optional QueryTrace to record pre-fusion and post-fusion
+                candidates into (see src/generation/trace.py). Pure recording
+                -- never affects search behavior.
 
         Returns:
             List of SearchResult objects sorted by combined score (highest first)
@@ -511,6 +516,16 @@ class HybridSearcher:
 
             keyword_results = self.keyword_searcher.search(query=query, k=fetch_k, metadata_filter=metadata_filter)
 
+            if trace is not None:
+                trace.retrieved.extend(
+                    {"retriever": "semantic", "document_id": r.document_id, "score": r.score, "rank": i}
+                    for i, r in enumerate(semantic_results)
+                )
+                trace.retrieved.extend(
+                    {"retriever": "keyword", "document_id": r.document_id, "score": r.score, "rank": i}
+                    for i, r in enumerate(keyword_results)
+                )
+
             # Choose fusion method
             if fusion_method == "rrf":
                 combined_results = self._reciprocal_rank_fusion(
@@ -528,6 +543,12 @@ class HybridSearcher:
                 )
 
             final_results = combined_results[:k]
+
+            if trace is not None:
+                trace.fused.extend(
+                    {"document_id": r.document_id, "score": r.score, "search_type": r.search_type}
+                    for r in final_results
+                )
 
             log_debug(
                 f"Hybrid search ({fusion_method}) combined {len(semantic_results)} semantic + {len(keyword_results)} keyword results",

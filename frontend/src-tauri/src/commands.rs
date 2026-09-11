@@ -76,6 +76,11 @@ pub async fn start_backend(
 }
 
 #[tauri::command]
+pub fn get_logs_dir(state: State<'_, BackendState>) -> Result<String, String> {
+    Ok(state.runtime.data_dir.join("logs").to_string_lossy().to_string())
+}
+
+#[tauri::command]
 pub fn open_folder(path: String) -> Result<(), String> {
     log::info!("Opening folder: {}", path);
     

@@ -12,9 +12,12 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.generation.prompt_builder import ConversationMessage
+
+if TYPE_CHECKING:
+    from src.generation.trace import QueryTrace
 
 logger = logging.getLogger(__name__)
 
@@ -145,9 +148,25 @@ class SessionManager:
             )
         """)
         
+        # Structured per-query retrieval trace, keyed by the request's
+        # correlation ID (see src/generation/trace.py, src/utilities/
+        # request_context.py). A sibling table in this same DB rather than
+        # a new top-level data path, reusing this class's existing storage
+        # resolution. request_id doubles as the assistant message's own
+        # `messages.id` (see add_message's message_id param), so the two
+        # tables can be joined on request_id with no extra bookkeeping.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS query_traces (
+                request_id TEXT PRIMARY KEY,
+                session_id TEXT,
+                created_at TEXT NOT NULL,
+                trace_json TEXT NOT NULL
+            )
+        """)
+
         # Create indexes for performance
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_messages_session 
+            CREATE INDEX IF NOT EXISTS idx_messages_session
             ON messages(session_id, timestamp)
         """)
         
@@ -418,6 +437,7 @@ class SessionManager:
         metadata: Optional[dict[str, Any]] = None,
         parent_id: Optional[str] = None,
         sources: Optional[list[dict[str, Any]]] = None,
+        message_id: Optional[str] = None,
     ) -> Optional[str]:
         """
         Add a message to session history with optional metadata.
@@ -433,6 +453,12 @@ class SessionManager:
             metadata: Additional metadata dictionary (optional)
             parent_id: Parent message ID for branching (optional)
             sources: List of source dictionaries for RAG citations (optional)
+            message_id: Explicit id to use instead of auto-generating one.
+                generate_chat_response() passes its request_id here for the
+                assistant message, so messages.id and query_traces.request_id
+                agree for the same chat turn without extra bookkeeping. Must
+                be unique (messages.id is a PRIMARY KEY) -- the user message
+                in the same turn keeps its own auto-generated id.
 
         Returns:
             Message ID if added, None if session not found
@@ -442,8 +468,7 @@ class SessionManager:
             logger.warning(f"Session not found: {session_id}")
             return None
 
-        # Generate UUID for message
-        message_id = str(uuid.uuid4())
+        message_id = message_id or str(uuid.uuid4())
 
         # Callers (generate_chat_response()) pass AnswerGenerator's
         # _format_sources() output, which previews source text under "text",
@@ -489,6 +514,39 @@ class SessionManager:
 
         logger.debug(f"Added {role} message {message_id} to session {session_id}")
         return message_id
+
+    def save_query_trace(self, trace: "QueryTrace") -> None:
+        """
+        Persist a structured per-query retrieval trace (see
+        src/generation/trace.py), keyed by its request_id. No-op if
+        persistence is disabled, mirroring add_message()'s persist_to_disk
+        gate -- an in-memory-only session has nowhere durable to put this
+        either. Failures are logged and swallowed rather than raised: a
+        trace write failing should never take down the chat response it
+        describes.
+        """
+        if not self.persist_to_disk:
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO query_traces (request_id, session_id, created_at, trace_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    trace.request_id,
+                    trace.session_id,
+                    datetime.now().isoformat(),
+                    json.dumps(trace.to_json_dict()),
+                ),
+            )
+            conn.commit()
+            conn.close()
+            logger.debug(f"Saved query trace {trace.request_id}")
+        except Exception as e:
+            logger.warning(f"Failed to persist query trace {trace.request_id}: {e}")
 
     def get_messages(self, session_id: str) -> list[ConversationMessage]:
         """

@@ -1,14 +1,16 @@
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from src.core.llm import OllamaClient
 from src.generation.context_preparer import ContextPreparer, PreparedContext
 from src.generation.prompt_builder import PromptBuilder
 from src.generation.query_classifier import QueryClassifier
+from src.generation.trace import QueryTrace
 from src.retrieval.retriever import OrionRetriever
 from src.utilities.config import OrionConfig, TimingBreakdown
+from src.utilities.request_context import new_request_id, request_id_var
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +278,7 @@ class AnswerGenerator:
         stream: bool = False,
         temperature: float | None = None,
         voice_mode: bool = False,
+        request_id: str | None = None,
     ) -> GenerationResult:
         """
         Generate a conversational chat response.
@@ -293,11 +296,21 @@ class AnswerGenerator:
             stream: Enable streaming mode
             temperature: LLM temperature override
             voice_mode: If True, use brief response mode for voice conversation
+            request_id: Correlation ID for this request, normally minted by
+                the caller (backend/api/chat.py, backend/websockets/chat.py)
+                via new_request_id() before this is called. Auto-minted here
+                if omitted (e.g. direct/test callers), so this is never None
+                downstream. Reused as the persisted assistant message's id
+                (see SessionManager.add_message's message_id param) and as
+                the key of the QueryTrace this call assembles and persists.
 
         Returns:
             GenerationResult with answer and optional sources
         """
         logger.info(f"Generating chat response for message: {message[:100]}..." + (" [voice_mode]" if voice_mode else ""))
+        request_id = request_id or new_request_id()
+        request_id_var.set(request_id)  # idempotent safety net if caller didn't already set it
+        trace = QueryTrace(request_id=request_id, session_id=session_id, query_text=message)
         overall_start = time.time()
         timing = TimingBreakdown()
 
@@ -340,7 +353,9 @@ class AnswerGenerator:
             logger.debug("Triggering RAG retrieval in chat mode")
             try:
                 k = self.config.rag.retrieval.default_k
-                search_results, retrieval_timing = self.retriever.query(query_text=message, k=k)
+                search_results, retrieval_timing = self.retriever.query(
+                    query_text=message, k=k, request_id=request_id, trace=trace
+                )
 
                 # Copy retrieval timing
                 timing.embedding_time = retrieval_timing.embedding_time
@@ -357,6 +372,15 @@ class AnswerGenerator:
                     timing.context_preparation_time = time.time() - context_start
                     max_chunks = self.generation_config.max_context_chunks
                     prepared_contexts = prepared_contexts[:max_chunks]
+                    trace.context_chunks.extend(
+                        {
+                            "source_file": c.source_file,
+                            "citation_text": c.citation_text,
+                            "final_score": c.final_score,
+                            "length": c.length,
+                        }
+                        for c in prepared_contexts
+                    )
                     logger.info(f"Retrieved and prepared {len(prepared_contexts)} contexts for chat")
             except Exception as e:
                 # Chat mode keeps answering conversationally without context
@@ -373,6 +397,8 @@ class AnswerGenerator:
                 logger.error(f"RAG retrieval in chat mode failed: {e}", exc_info=True)
                 rag_retrieval_failed = True
                 rag_retrieval_error = str(e)
+                trace.rag_retrieval_failed = True
+                trace.rag_retrieval_error = rag_retrieval_error
                 # Continue without RAG context
 
         # Build chat prompt (with or without RAG context)
@@ -455,16 +481,24 @@ class AnswerGenerator:
                     model=self.config.rag.llm.model,
                     rag_triggered=False,
                     processing_time_ms=int(timing.total_time * 1000),
-                    metadata={"error": str(e), "llm_generation_failed": True},
+                    metadata={"error": str(e), "llm_generation_failed": True, "request_id": request_id},
+                    message_id=request_id,
                 )
                 logger.debug(f"Stored failed-generation messages in session {session_id}")
+
+                # Retrieval (if it ran) already succeeded by this point -- the
+                # LLM call is what failed -- so the trace still has real
+                # retrieval/context data worth persisting for diagnosis.
+                trace.model = self.config.rag.llm.model
+                trace.timing = asdict(timing)
+                session_manager.save_query_trace(trace)
 
             return GenerationResult(
                 answer=error_answer,
                 sources=[],
                 query_type=classification.query_type,
                 mode="chat",
-                metadata={"error": str(e), "llm_generation_failed": True},
+                metadata={"error": str(e), "llm_generation_failed": True, "request_id": request_id},
                 rag_triggered=False,
                 timing=timing,
             )
@@ -485,6 +519,7 @@ class AnswerGenerator:
 
         # Build metadata (before storing to session)
         metadata = {
+            "request_id": request_id,
             "query_type": classification.query_type,
             "rag_retrieval_triggered": should_retrieve,
             "rag_retrieval_failed": rag_retrieval_failed,
@@ -496,6 +531,14 @@ class AnswerGenerator:
         if rag_retrieval_failed:
             metadata["rag_retrieval_error"] = rag_retrieval_error
 
+        # Finalize the trace alongside metadata -- same information, two
+        # destinations: metadata is the small per-message summary already
+        # exposed to callers/clients; the trace is the full stage-by-stage
+        # record kept only in query_traces (see src/generation/trace.py).
+        trace.rag_retrieval_triggered = should_retrieve
+        trace.model = self.config.rag.llm.model
+        trace.timing = asdict(timing)
+
         # Store messages in session if session_manager provided
         if session_manager and session_id:
             # Store user message
@@ -505,10 +548,14 @@ class AnswerGenerator:
                 content=message,
                 tokens=user_tokens,
             )
-            
-            # Store assistant message with metadata
+
+            # Store assistant message with metadata. Reuses request_id as
+            # this message's id (see SessionManager.add_message) -- one
+            # request = one chat turn = exactly one assistant message row,
+            # so messages and query_traces can be joined on the same id
+            # with no extra bookkeeping.
             processing_time_ms = int(timing.total_time * 1000) if timing else None
-            
+
             session_manager.add_message(
                 session_id=session_id,
                 role="assistant",
@@ -519,8 +566,10 @@ class AnswerGenerator:
                 processing_time_ms=processing_time_ms,
                 metadata=metadata,
                 sources=sources if should_retrieve and sources else None,
+                message_id=request_id,
             )
             logger.debug(f"Stored messages in session {session_id}")
+            session_manager.save_query_trace(trace)
         else:
             # Fallback to prompt builder history (old behavior)
             self.prompt_builder.add_to_history(role="user", content=message)

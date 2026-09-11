@@ -14,7 +14,7 @@ Usage:
 
 import logging
 import threading
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from src.retrieval.embeddings import EmbeddingManager
 from src.retrieval.reranker import Document, RerankerManager
@@ -22,6 +22,9 @@ from src.retrieval.search import HybridSearcher, KeywordSearcher, MMRSearcher, S
 from src.retrieval.vector_store import ChromaVectorStore
 from src.utilities.config import OrionConfig, TimingBreakdown
 from src.utilities.utils import ensure_config, log_error, log_info, log_warning
+
+if TYPE_CHECKING:
+    from src.generation.trace import QueryTrace
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -109,7 +112,9 @@ class OrionRetriever:
         log_info(f"Found {doc_count} documents in knowledge base", config=self.config)
         return doc_count
 
-    def _perform_search(self, query: str, k: int, search_type: str) -> list[SearchResult]:
+    def _perform_search(
+        self, query: str, k: int, search_type: str, trace: Optional["QueryTrace"] = None
+    ) -> list[SearchResult]:
         """
         Perform the initial search (semantic or hybrid).
 
@@ -117,6 +122,9 @@ class OrionRetriever:
             query: Search query
             k: Number of results to retrieve
             search_type: Type of search ('semantic' or 'hybrid')
+            trace: Optional QueryTrace, forwarded to HybridSearcher.search()
+                for the "hybrid" branch (pure recording, see
+                src/generation/trace.py).
 
         Returns:
             List of search results
@@ -128,15 +136,15 @@ class OrionRetriever:
         elif search_type == "hybrid":
             # Create semantic and keyword searchers
             semantic_searcher = SemanticSearcher(self._embedding_manager, self._vector_store, self.config)
-            
+
             # Keyword searcher with auto-sync
             keyword_searcher = KeywordSearcher(self._vector_store, self.config)
-            
+
             # Create hybrid searcher with RRF fusion (default)
             hybrid_searcher = HybridSearcher(semantic_searcher, keyword_searcher, self.config)
-            
+
             # Use RRF fusion by default (more robust than weighted)
-            return hybrid_searcher.search(query, k=k, fusion_method="rrf")
+            return hybrid_searcher.search(query, k=k, fusion_method="rrf", trace=trace)
 
         else:
             raise ValueError(f"Unsupported search type: {search_type}. Use 'semantic' or 'hybrid'.")
@@ -263,6 +271,8 @@ class OrionRetriever:
         search_type: str = "hybrid",
         enable_reranking: bool = True,
         enable_mmr: bool = True,
+        request_id: str | None = None,
+        trace: Optional["QueryTrace"] = None,
     ) -> tuple[list[SearchResult], TimingBreakdown]:
         """
         Query the knowledge base.
@@ -273,6 +283,12 @@ class OrionRetriever:
             search_type: Type of search - 'semantic' or 'hybrid' (default: 'hybrid')
             enable_reranking: Whether to apply reranking (default: True)
             enable_mmr: Whether to apply MMR diversity (default: True)
+            request_id: Optional correlation ID for this query, purely for
+                log context (see src/utilities/request_context.py) -- not
+                otherwise used inside this method.
+            trace: Optional QueryTrace to record each stage's survivors into
+                (see src/generation/trace.py). Pure recording -- never
+                affects retrieval behavior.
 
         Returns:
             Tuple of (results, timing). Call format_results(results) separately
@@ -300,7 +316,7 @@ class OrionRetriever:
 
             # Perform initial search (includes embedding and search time)
             search_start = time.time()
-            results = self._perform_search(query_text, k=k, search_type=search_type)
+            results = self._perform_search(query_text, k=k, search_type=search_type, trace=trace)
             search_elapsed = time.time() - search_start
 
             # Estimate embedding took ~30% of search time, search ~70%
@@ -321,6 +337,10 @@ class OrionRetriever:
                 results = self._apply_reranking(query_text, results, k=k)
                 timing.reranking_time = time.time() - rerank_start
                 log_info(f"Reranking returned {len(results)} results", config=self.config)
+                if trace is not None:
+                    trace.reranked.extend(
+                        {"document_id": r.document_id, "score": r.score} for r in results
+                    )
 
             # Apply MMR diversity if enabled
             if enable_mmr and results and len(results) > 1:
@@ -329,6 +349,10 @@ class OrionRetriever:
                 results = self._apply_mmr(query_text, results, k=k)
                 timing.mmr_time = time.time() - mmr_start
                 log_info(f"MMR returned {len(results)} diverse results", config=self.config)
+                if trace is not None:
+                    trace.mmr.extend(
+                        {"document_id": r.document_id, "score": r.score} for r in results
+                    )
 
             log_info(f"Query completed successfully, returning {len(results)} results", config=self.config)
 

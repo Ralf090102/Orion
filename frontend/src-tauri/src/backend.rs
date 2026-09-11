@@ -273,6 +273,22 @@ fn wait_for_backend_ready(
     false
 }
 
+/// Resolve the stable, per-user app-data directory (Tauri's `app_data_dir`)
+/// and ensure it exists. Both `resolve_python_runtime()` (for `data_dir`)
+/// and `lib.rs`'s `.setup()` (for the log directory, which must be known
+/// before the Python runtime is otherwise resolved) call this, so both
+/// agree on exactly one directory rather than risking two independently
+/// -resolved paths drifting apart.
+pub fn resolve_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|e| format!("Failed to create app data dir {:?}: {}", data_dir, e))?;
+    Ok(data_dir)
+}
+
 /// Locate the Python interpreter to run and the directory to run it from.
 ///
 /// Production installs bundle a portable Python runtime alongside the
@@ -286,12 +302,7 @@ fn resolve_python_runtime(app: &AppHandle) -> Result<PythonRuntime, String> {
     // Resolved the same way in dev and production, so both modes persist
     // user data (sessions, vector store) to the same stable OS-appropriate
     // location instead of a path that happens to differ by run mode.
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
-    std::fs::create_dir_all(&data_dir)
-        .map_err(|e| format!("Failed to create app data dir {:?}: {}", data_dir, e))?;
+    let data_dir = resolve_data_dir(app)?;
     log::info!("App data dir: {:?}", data_dir);
 
     match app.path().resource_dir() {
