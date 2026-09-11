@@ -186,15 +186,20 @@ class PromptBuilder:
                 "IMPORTANT INSTRUCTIONS:\n"
                 "1. Use the provided context to answer the question accurately\n"
                 "2. Cite sources using the citation markers (e.g., [1], [2])\n"
-                "3. If the context doesn't contain enough information, say so clearly\n"
-                "4. Be concise but comprehensive\n"
-                "5. Always include citations for factual claims"
+                "3. Never invent citations, references, sources, books, papers, or "
+                "authors that aren't in the numbered context above -- if you don't "
+                "have a real citation marker for a claim, don't attribute one\n"
+                "4. If the context doesn't contain enough information, say so clearly\n"
+                "5. Be concise but comprehensive\n"
+                "6. Always include citations for factual claims"
             )
         else:
             system_prompt = (
                 f"{self.llm_config.system_prompt}\n\n"
                 "IMPORTANT: Use the provided context to answer the question accurately. "
-                "If the context doesn't contain the answer, acknowledge this clearly."
+                "If the context doesn't contain the answer, acknowledge this clearly. "
+                "Never invent citations, references, or sources that aren't in the "
+                "provided context."
             )
 
         # Format final context section
@@ -275,7 +280,17 @@ class PromptBuilder:
                 "CHAT MODE INSTRUCTIONS:\n"
                 "• You're having a casual, friendly conversation with the user\n"
                 "• Use the conversation history to remember what you've discussed\n"
-                "• When you have information from the knowledge base, weave it naturally into your responses\n"
+                "• Ground your answer in the knowledge base information below -- "
+                "don't rely on your own general knowledge for facts it covers\n"
+                "• When you reference it, mention the source naturally using only "
+                "the [From: ...] labels actually given below\n"
+                "• Never invent citations, references, or sources (book titles, "
+                "journal articles, authors, years) that aren't in the information "
+                "below -- if you don't have a real source for a claim, don't "
+                "attribute one\n"
+                "• If the knowledge base information doesn't cover the question, "
+                "say so plainly instead of filling the gap with your own knowledge "
+                "presented as fact\n"
                 "• Be conversational, warm, and approachable - like talking to a friend\n"
                 "• Use contractions (it's, you're, that's) and casual language\n"
                 "• Keep responses concise unless the user asks for details\n"
