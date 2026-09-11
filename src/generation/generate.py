@@ -444,7 +444,14 @@ class AnswerGenerator:
                 # Retrieval (if it ran) already succeeded by this point -- the
                 # trace still has real retrieval/context data worth
                 # persisting for diagnosis, same reasoning as the
-                # LLM-failure branch below.
+                # LLM-failure branch below. rag_retrieval_triggered must be
+                # set explicitly here too (not just on the success path) --
+                # found live: without it, a real successful retrieval
+                # followed by a downstream failure still showed
+                # rag_retrieval_triggered=false in the persisted trace,
+                # despite retrieved/fused/reranked/mmr/context_chunks all
+                # being genuinely populated.
+                trace.rag_retrieval_triggered = should_retrieve
                 trace.model = self.config.rag.llm.model
                 trace.timing = asdict(timing)
                 session_manager.save_query_trace(trace)
@@ -525,6 +532,13 @@ class AnswerGenerator:
                 # Retrieval (if it ran) already succeeded by this point -- the
                 # LLM call is what failed -- so the trace still has real
                 # retrieval/context data worth persisting for diagnosis.
+                # rag_retrieval_triggered must be set explicitly here too --
+                # found live: a real successful retrieval followed by a
+                # downstream LLM failure still showed
+                # rag_retrieval_triggered=false in the persisted trace
+                # otherwise, despite retrieved/fused/reranked/mmr/
+                # context_chunks all being genuinely populated.
+                trace.rag_retrieval_triggered = should_retrieve
                 trace.model = self.config.rag.llm.model
                 trace.timing = asdict(timing)
                 session_manager.save_query_trace(trace)

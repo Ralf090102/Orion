@@ -153,3 +153,35 @@ class TestPromptBuildingFailureIsPersisted:
         session_manager.save_query_trace.assert_called_once()
         (trace,), _ = session_manager.save_query_trace.call_args
         assert trace.request_id == "req-fail"
+        # Found live (smoke-testing the actual running app): retrieval had
+        # already genuinely succeeded (this fixture's retriever.query()
+        # returns real results) before prompt building failed, but the
+        # persisted trace's rag_retrieval_triggered stayed at its dataclass
+        # default (False) unless this failure branch set it explicitly too.
+        assert trace.rag_retrieval_triggered is True
+
+
+@pytest.mark.unit
+class TestLlmGenerationFailureTraceIsAccurate:
+    """Same bug, same fix, sibling branch: an LLM-generation failure (e.g.
+    Ollama unreachable) that happens *after* a real, successful retrieval
+    must not persist a trace claiming retrieval never triggered."""
+
+    def test_trace_reflects_a_real_retrieval_despite_the_downstream_llm_failure(self, generator):
+        generator.llm_client.generate.side_effect = RuntimeError("Failed to connect to Ollama")
+        session_manager = MagicMock()
+        session_manager.get_messages.return_value = []
+        session_manager.add_message.return_value = "msg-id"
+
+        result = generator.generate_chat_response(
+            message="What is X?",
+            session_id="s1",
+            session_manager=session_manager,
+            request_id="req-llm-fail",
+        )
+
+        assert result.metadata["llm_generation_failed"] is True
+
+        (trace,), _ = session_manager.save_query_trace.call_args
+        assert trace.rag_retrieval_triggered is True
+        assert len(trace.context_chunks) > 0
