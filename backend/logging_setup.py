@@ -52,20 +52,32 @@ def _log_dir() -> Path:
     return (Path(data_dir) if data_dir else Path("./data")) / "logs"
 
 
+_INSTALLED_MARKER = "_orion_logging_setup"
+
+
 def configure_logging(level: int = logging.INFO) -> None:
     """Configure the root logger with a console handler and a rotating
     file handler under ${ORION_DATA_DIR}/logs/orion-backend.log. Idempotent
-    -- safe to call more than once (e.g. from tests), since it clears any
-    handlers it previously installed before adding new ones."""
+    -- safe to call more than once (e.g. from tests) -- but only removes
+    handlers this function previously installed itself (marked via
+    _INSTALLED_MARKER), not a blanket root.handlers.clear(). The old
+    logging.basicConfig() this replaced was a no-op if the root logger
+    already had any handler; unconditionally clearing everything here would
+    be a real regression from that -- e.g. pytest's own logging plugin
+    attaches a handler to support the `caplog` fixture, and a blanket clear
+    would silently break that for any test using it, or `--log-cli-level`,
+    for the rest of the process."""
     root = logging.getLogger()
     root.setLevel(level)
-    root.handlers.clear()
+    for h in [h for h in root.handlers if getattr(h, _INSTALLED_MARKER, False)]:
+        root.removeHandler(h)
 
     rid_filter = _RequestIdFilter()
 
     console = logging.StreamHandler()
     console.setFormatter(logging.Formatter(_FMT))
     console.addFilter(rid_filter)
+    setattr(console, _INSTALLED_MARKER, True)
     root.addHandler(console)
 
     log_dir = _log_dir()
@@ -79,6 +91,7 @@ def configure_logging(level: int = logging.INFO) -> None:
         )
         file_handler.setFormatter(logging.Formatter(_FMT))
         file_handler.addFilter(rid_filter)
+        setattr(file_handler, _INSTALLED_MARKER, True)
         root.addHandler(file_handler)
     except OSError as e:
         # Don't crash startup over a logging directory problem -- console

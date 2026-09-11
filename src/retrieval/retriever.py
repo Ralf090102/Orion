@@ -131,7 +131,25 @@ class OrionRetriever:
         """
         if search_type == "semantic":
             searcher = SemanticSearcher(self._embedding_manager, self._vector_store, self.config)
-            return searcher.search(query, k=k)
+            results = searcher.search(query, k=k)
+            if trace is not None:
+                # No fusion step for a single retriever -- retrieved and
+                # fused are the same set, recorded the same way
+                # HybridSearcher.search() records its own (see
+                # src/generation/trace.py). Without this, a semantic-only
+                # query left trace.retrieved/fused empty while
+                # trace.reranked/mmr (populated downstream in query(),
+                # regardless of search_type) were not -- an internally
+                # inconsistent trace.
+                trace.retrieved.extend(
+                    {"retriever": "semantic", "document_id": r.document_id, "score": r.score, "rank": i}
+                    for i, r in enumerate(results)
+                )
+                trace.fused.extend(
+                    {"document_id": r.document_id, "score": r.score, "search_type": r.search_type}
+                    for r in results
+                )
+            return results
 
         elif search_type == "hybrid":
             # Create semantic and keyword searchers

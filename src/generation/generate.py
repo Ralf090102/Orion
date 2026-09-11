@@ -413,12 +413,48 @@ class AnswerGenerator:
         except Exception as e:
             logger.error(f"Chat prompt building failed: {e}")
             timing.total_time = time.time() - overall_start
+            error_answer = f"I encountered an error while preparing the response: {str(e)}"
+
+            # Mirrors the LLM-generation-failure branch below: an early
+            # return here used to skip message/trace persistence entirely,
+            # so a prompt-building failure (e.g. a template or context-
+            # length error) left no record anywhere -- not the user's
+            # message, not even that anything was attempted. See that
+            # branch's comment for the full history of this bug class.
+            if session_manager and session_id:
+                session_manager.add_message(
+                    session_id=session_id,
+                    role="user",
+                    content=message,
+                    tokens=len(message) // 4,
+                )
+                session_manager.add_message(
+                    session_id=session_id,
+                    role="assistant",
+                    content=error_answer,
+                    tokens=len(error_answer) // 4,
+                    model=self.config.rag.llm.model,
+                    rag_triggered=False,
+                    processing_time_ms=int(timing.total_time * 1000),
+                    metadata={"error": str(e), "prompt_building_failed": True, "request_id": request_id},
+                    message_id=request_id,
+                )
+                logger.debug(f"Stored failed-generation messages in session {session_id}")
+
+                # Retrieval (if it ran) already succeeded by this point -- the
+                # trace still has real retrieval/context data worth
+                # persisting for diagnosis, same reasoning as the
+                # LLM-failure branch below.
+                trace.model = self.config.rag.llm.model
+                trace.timing = asdict(timing)
+                session_manager.save_query_trace(trace)
+
             return GenerationResult(
-                answer=f"I encountered an error while preparing the response: {str(e)}",
+                answer=error_answer,
                 sources=[],
                 query_type=classification.query_type,
                 mode="chat",
-                metadata={"error": str(e), "prompt_building_failed": True},
+                metadata={"error": str(e), "prompt_building_failed": True, "request_id": request_id},
                 rag_triggered=False,
                 timing=timing,
             )

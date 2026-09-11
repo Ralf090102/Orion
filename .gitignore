@@ -24,6 +24,9 @@ python-runtime/
 
 # Logs & temp files
 *.log
+# RotatingFileHandler's numbered backups (orion-backend.log.1, .2, ...) --
+# *.log alone doesn't match these, since they don't end in ".log".
+*.log.*
 *.tmp
 *.temp
 *.swp

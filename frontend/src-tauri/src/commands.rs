@@ -77,6 +77,17 @@ pub async fn start_backend(
 
 #[tauri::command]
 pub fn get_logs_dir(state: State<'_, BackendState>) -> Result<String, String> {
+    // runtime.data_dir is an empty PathBuf when init_backend() couldn't
+    // resolve the Python runtime (see resolve_python_runtime()'s error
+    // path in backend.rs) -- joining "logs" onto that would silently
+    // return the bare relative path "logs" instead of an absolute one,
+    // which open_folder() would then resolve against whatever the
+    // process's CWD happens to be: the wrong location, or nonexistent.
+    // Surface a real error instead so the frontend can tell the user
+    // rather than silently opening the wrong folder.
+    if state.runtime.data_dir.as_os_str().is_empty() {
+        return Err("App data directory not available (Python runtime failed to resolve at startup).".to_string());
+    }
     Ok(state.runtime.data_dir.join("logs").to_string_lossy().to_string())
 }
 

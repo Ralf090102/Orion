@@ -119,3 +119,37 @@ class TestQueryTracePersistence:
         ]
         assert len(assistant_call) == 1
         assert assistant_call[0].kwargs.get("message_id") == "req-789"
+
+
+@pytest.mark.unit
+class TestPromptBuildingFailureIsPersisted:
+    """Regression test found by a bug sweep on the request_id/trace diff
+    itself: the prompt-building-failure early return mirrored the LLM-
+    failure branch's *behavior* (a friendly answer) but not its *fix* --
+    it skipped message persistence, trace persistence, and request_id in
+    metadata entirely, reintroducing exactly the "vanishes from session
+    history" bug class the LLM-failure branch was fixed for earlier in
+    this same diff."""
+
+    def test_failure_still_persists_both_messages_and_a_trace(self, generator):
+        generator.prompt_builder.build_chat_prompt = MagicMock(side_effect=RuntimeError("boom"))
+        session_manager = MagicMock()
+        session_manager.get_messages.return_value = []
+        session_manager.add_message.return_value = "msg-id"
+
+        result = generator.generate_chat_response(
+            message="What is X?",
+            session_id="s1",
+            session_manager=session_manager,
+            request_id="req-fail",
+        )
+
+        assert result.metadata["request_id"] == "req-fail"
+        assert result.metadata["prompt_building_failed"] is True
+
+        roles = [call.kwargs.get("role") for call in session_manager.add_message.call_args_list]
+        assert roles == ["user", "assistant"]
+
+        session_manager.save_query_trace.assert_called_once()
+        (trace,), _ = session_manager.save_query_trace.call_args
+        assert trace.request_id == "req-fail"
